@@ -1,5 +1,28 @@
+Download  and preprocess data by following https://github.com/zou-longkun/GAST in ./data/
+
+
+Env setting
+```
+conda create -n [new_env_name] python=3.8
+pip install torch==1.10.1+cu111 torchvision==0.11.2+cu111 -f https://download.pytorch.org/whl/cu111/torch_stable.html
+pip install wandb
+pip install h5py
+pip install tqdm
+pip install pandas
+pip install sklearn
+```
 Install PyTorchEMD by
 ```
 cd PyTorchEMD
 python setup.py install
 cp build/**/emd_cuda.cpython-36m-x86_64-linux-gnu.so .
+```
+
+### Trouble Shooting
+if 'RuntimeError: Ninja is required to load C++ extensions' occurs...
+```
+wget https://github.com/ninja-build/ninja/releases/download/v1.8.2/ninja-linux.zip
+sudo unzip ninja-linux.zip -d /usr/local/bin/
+sudo update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 --force
+``` 
+

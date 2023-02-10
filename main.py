@@ -383,6 +383,8 @@ def main():
     best_nll_val = 1e8
     best_nll_test = 1e8
     for epoch in range(args.start_epoch, args.n_epochs):
+        if args.lr_gamma < 1:
+            print("LR: ", lr_scheduler.get_last_lr())
         start_epoch = time.time()
         train_epoch(args=args, loader=train_loader,
                     epoch=epoch, model=model, model_dp=model_dp,

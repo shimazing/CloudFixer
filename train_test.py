@@ -116,7 +116,7 @@ def check_mask_correct(variables, node_mask):
             assert_correctly_masked(variable, node_mask)
 
 
-def test(args, loader, epoch, eval_model, device, dtype, property_norms, partition='Test'):
+def test(args, loader, epoch, eval_model, device, dtype, partition='Test'):
     eval_model.eval()
     with torch.no_grad():
         nll_epoch = 0

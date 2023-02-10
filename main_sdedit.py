@@ -9,7 +9,6 @@ import utils
 import random
 import argparse
 import wandb
-from configs.datasets_config import get_dataset_info
 from os.path import join
 from build_model import get_optim, get_model
 from equivariant_diffusion import en_diffusion
@@ -354,24 +353,9 @@ kwargs = {'entity': args.wandb_usr, 'name': args.exp_name + '_vis', 'project':
 wandb.init(**kwargs)
 wandb.save('*.txt')
 
-
-
-property_norms = None
-
-
-
 # Create EGNN flow
-dataset_info = None
-model, nodes_dist, prop_dist = get_model(args, device, dataset_info, None) #dataloaders['train'])
-if prop_dist is not None:
-    prop_dist.set_normalizer(property_norms)
+model = get_model(args, device)
 model = model.to(device)
-#optim = get_optim(args, model)
-# print(model)
-
-gradnorm_queue = utils.Queue()
-gradnorm_queue.add(3000)  # Add large value that will be flushed.
-
 
 
 ori_args_model = args.model
@@ -382,12 +366,7 @@ classifier = DGCNN(args).to(device).eval()
 
 classifier.load_state_dict(
 torch.load(
-    args.classifier
-    #"../GAST/experiments/GAST_balanced_unit_std/model.ptdgcnn"
-    #"../GAST/experiments/GAST_SPST/model.ptdgcnn"
-    #"../GAST/experiments/GAST_DMAug1/model.ptdgcnn"
-    #"../GAST/experiments/GAST_DMAug4_from_scratch/model.ptdgcnn"
-, map_location='cpu'),
+    args.classifier, map_location='cpu'),
 strict=False
 )
 
@@ -401,7 +380,6 @@ if args.egsde:
     domain_cls = DGCNN(args).to(device).eval()
     domain_cls_state_dict = torch.load(
         args.domain_cls,
-        #    'outputs/domain_classifier_DGCNN_shape_model_timecondGN.pt'
         map_location='cpu')
     keys = list(domain_cls_state_dict.keys())
     for key in keys:
@@ -409,7 +387,6 @@ if args.egsde:
             domain_cls_state_dict.pop(key)
     domain_cls.load_state_dict(
         domain_cls_state_dict, strict=False
-        #torch.load('outputs/domain_classifier_DGCNN_shape_scan.pt',map_location='cpu')
         )
 if args.entropy_guided:
     from chamfer_distance import ChamferDistance as chamfer_dist
@@ -422,7 +399,6 @@ def check_mask_correct(variables, node_mask):
             assert_correctly_masked(variable, node_mask)
 
 def softmax(x):
-
     max = np.max(x,axis=-1,keepdims=True) #returns max of each row and keeps same dims
     e_x = np.exp(x - max) #subtracts each row with its max value
     sum = np.sum(e_x,axis=-1,keepdims=True) #returns sum of each row and keeps same dims
@@ -465,16 +441,7 @@ def get_color(coords, corners=np.array([
 def main():
     if args.resume is not None:
         model.load_state_dict(torch.load(args.resume))
-        #model_ema = copy.deepcopy(model)
-        #model_ema.load_state_dict(torch.load(args.resume[:-8] +
-        #    'ema_last.npy'))
-        #flow_state_dict = torch.load(join(args.resume, 'flow.npy'))
-        #optim_state_dict = torch.load(join(args.resume, 'optim.npy'))
-        #model.load_state_dict(flow_state_dict)
-        #optim.load_state_dict(optim_state_dict)
-
     model.eval()
-    #model_ema.eval()
     K = args.K
 
     random_seed = args.random_seed
@@ -495,6 +462,9 @@ def main():
         correct_count_vote = 0
         correct_count_vote_soft = 0
         correct_count_vote_soft_ensemble = 0
+        correct_count_vote_y = 0
+        correct_count_vote_soft_y = 0
+        correct_count_vote_soft_ensemble_y = 0
         pred_change = np.zeros((10, 10, 10, args.K))
         x_edited_batch_list = []
         label_batch_list = []
@@ -507,9 +477,6 @@ def main():
                 pointnet2_utils.furthest_point_sample(x,
                         getattr(args, 'n_subsample', 64))
             furthest_point_idx = furthest_point_idx.long()
-            #print(furthest_point_idx)
-            #input()
-            # x : batch_size x N x 3
             sub_x = \
                 x[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
 
@@ -519,8 +486,6 @@ def main():
             gamma_t = model.inflate_batch_array(model.gamma(t), x)
             alpha_t = model.alpha(gamma_t, x)
             sigma_t = model.sigma(gamma_t, x)
-
-
 
             @torch.enable_grad()
             def cond_fn_entropy(yt, t, phi, model_kwargs):
@@ -536,25 +501,20 @@ def main():
                 if args.lambda_s > 0:
                     eps = phi(yt, t, **model_kwargs)
                     y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-
                     y0_est_norm = scale_to_unit_cube_torch(y0_est)
-
                     cls_output = classifier(y0_est_norm.permute(0,2,1))
                     cls_logits = cls_output['cls']
-
                     entropy = - (F.log_softmax(cls_logits, dim=-1) * F.softmax(cls_logits,
                         dim=-1)).sum(dim=-1).mean()
                 else:
                     entropy = 0
-
                 # Si (faithful expert)
-
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
                     node_mask=node_mask,
                     )
                 if args.lambda_i > 0:
-                    if False:
+                    if False: # loss_i in latent space
                         xt = x * alpha_t + noise * sigma_t
                         xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
@@ -564,7 +524,7 @@ def main():
                         dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
                         #print(dist1.shape)
                         subdist_loss = dist1.mean()
-                    else:
+                    else: # after model run
                         eps = phi(yt, t, **model_kwargs)
                         x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
                                     furthest_point_idx]
@@ -580,10 +540,6 @@ def main():
                 grad = torch.autograd.grad(
                     (args.lambda_s * entropy + args.lambda_i * subdist_loss),
                     yt, allow_unused=True)[0]
-                #print(grad)
-                #print(grad[grad.nonzero(as_tuple=True)])
-                #print("!!!!!!!!!!!", len(grad.nonzero(as_tuple=True)[0]),
-                #"!!!!!!!!")
                 if args.model == 'pvd':
                     model.eval()
                 return grad
@@ -622,10 +578,9 @@ def main():
                     domain_loss = F.cosine_similarity(feat_x, feat_y, dim=-1).mean()
 
                 # Si (faithful expert)
-
                 if args.lambda_i > 0:
                     if args.voxelization:
-                        if False:
+                        if False: # in the sample space
                             eps = phi(yt, t, **model_kwargs)
                             x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
                                         furthest_point_idx]
@@ -634,22 +589,20 @@ def main():
                                     x.permute(0,2,1))
                             vox_y = voxelization(y0_est.permute(0,2,1),
                                     y0_est.permute(0,2,1), norm=norm)[0]
-                        else:
+                        else: # in the latent space
                             vox_x, _, norm = voxelization(xt.permute(0,2,1),
                                     xt.permute(0,2,1))
                             vox_y = voxelization(yt.permute(0,2,1),
                                     yt.permute(0,2,1), norm=norm)[0]
                         subdist_loss = F.mse_loss(vox_y, vox_x)
-                    elif False:
+                    elif False: # chamfer dist in the latent space
                         xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
                         yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
                         subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
                         dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
-                        #print(dist1.shape)
-                        #subdist_loss = dist1.mean()
-                    else:
+                    else: # chamfer dist in the sample space
                         eps = phi(yt, t, **model_kwargs)
                         x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
                                     furthest_point_idx]
@@ -661,9 +614,6 @@ def main():
                 grad = torch.autograd.grad(
                     (args.lambda_s * domain_loss + args.lambda_i * subdist_loss),
                     yt, allow_unused=True)[0]
-                #print(grad.min(), grad.max(), grad.abs().mean()) #[grad.nonzero(as_tuple=True)])
-                #print("!!!!!!!!!!!", len(grad.nonzero(as_tuple=True)[0]),
-                #        grad.shape)
                 if args.model == 'pvd':
                     model.eval()
                 return grad
@@ -735,7 +685,7 @@ def main():
                         t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
                         s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
                         z = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                t_tensor, z, node_mask, None, None)
+                                t_tensor, z, node_mask, edge_mask=None, cond_fn=None)
                 else:
                     z = alpha_t * x + sigma_t * eps # diffusion
 
@@ -748,25 +698,26 @@ def main():
                         t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
                         s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
                         z = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                t_tensor, z, node_mask, None, None,
+                                t_tensor, z, node_mask, None, #None,
                                 cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
                                 if args.guidance_scale > 0 else None)), #noise=noise,
                                 )
                         if args.egsde or args.entropy_guided:
                             y = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                    t_tensor, y, node_mask, None, None,
+                                    t_tensor, y, node_mask, None, #None,
                                     )
                 else:
                     for _ in tqdm(range(int(args.t * args.diffusion_steps))):
                         z, noise = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, z,
-                            node_mask, None, None, fix_noise=False,
+                            node_mask, edge_mask=None, fix_noise=False,
                             cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
-                            if args.guidance_scale > 0 else None)), #noise=noise,
+                            if args.guidance_scale > 0 else None)),
                             return_noise=True)
                         if args.egsde or args.entropy_guided:
                             y = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, y,
-                                node_mask, None, None, fix_noise=False,
-                                cond_fn=None, noise=noise) #return_noise=True)
+                                node_mask, edge_mask=None, fix_noise=False,
+                                cond_fn=None, noise=noise) # w/o guidance for comparison
+
 
                         # constraint (like ilvr)
                         if args.keep_sub:
@@ -788,13 +739,13 @@ def main():
                             ###################################
                         t = t - 1. / args.diffusion_steps
 
-                    assert torch.all(t.abs() < 1e-5) #torch.allclose(t, torch.zeros_like(t))
+                    assert torch.all(t.abs() < 1e-5)
 
                 if args.egsde or args.entropy_guided:
-                    x_edit_y = model.sample_p_x_given_z0(y, node_mask, None, None,
+                    x_edit_y = model.sample_p_x_given_z0(y, node_mask, None,
                             fix_noise=False, ddim=args.ddim)
                     x_edit_list_y.append(x_edit_y)
-                x_edit = model.sample_p_x_given_z0(z, node_mask, None, None,
+                x_edit = model.sample_p_x_given_z0(z, node_mask, None,
                         fix_noise=False, ddim=args.ddim)
                 if args.accum_edit:
                     x = x_edit
@@ -813,7 +764,9 @@ def main():
                 x_edit_list_y = [scale_to_unit_cube_torch(x.clone().detach())
                         for x in x_edit_list_y] # undo scaling
             preds4vote = [] # hard
+            preds4vote_y = [] # hard
             preds4vote_soft = []
+            preds4vote_soft_y = []
             for k, x_edit in enumerate(x_edit_list): #, x_edit_list_y)):
                 logits = classifier(x_edit.permute(0, 2, 1), activate_DefRec=False)
                 if args.egsde or args.entropy_guided:
@@ -826,19 +779,18 @@ def main():
                     ori_preds = preds
                     ori_probs = logits["cls"].softmax(dim=-1)
                 else:
-                    if args.voting == 'hard':
-                        preds4vote.append(preds)
-                        preds4vote_soft.append(torch.softmax(logits['cls'], dim=-1))
-                    else: # soft
-                        preds4vote.append(torch.softmax(logits['cls'], dim=-1))
-
+                    preds4vote.append(preds)
+                    preds4vote_soft.append(torch.softmax(logits['cls'], dim=-1))
+                    if args.egsde or args.entropy_guided:
+                        preds4vote_y.append(preds_y)
+                        preds4vote_soft_y.append(torch.softmax(logits_y['cls'],
+                            dim=-1))
                     for ind in range(len(labels)):
                         pred_change[labels[ind].cpu(), ori_preds[ind].cpu(), preds[ind].cpu(), k-1] += 1
 
                     #for label, ori, pred in zip(labels, ori_preds, preds):
                     #    pred_change[int(label)][int(ori), int(pred), k-1] += 1
                 correct_count[k] += (preds == labels).long().sum().item()
-
                 if k>0:
                     correct_count_self_ensemble[k-1] += \
                         ((logits['cls'].softmax(dim=-1) +
@@ -856,12 +808,9 @@ def main():
                             max(count,1)*100)
 
             if args.K > 1:
-                if args.voting == 'hard':
-                    preds_vote = torch.stack(preds4vote, dim=1).mode(dim=1).values
-                    probs_vote_soft =  torch.stack(preds4vote_soft,dim=1).mean(dim=1)
-                    preds_vote_soft = torch.stack(preds4vote_soft, dim=1).mean(dim=1).max(dim=1)[1]
-                else: # soft
-                    preds_vote = torch.stack(preds4vote, dim=1).mean(dim=1).max(dim=1)[1]
+                preds_vote = torch.stack(preds4vote, dim=1).mode(dim=1).values
+                probs_vote_soft =  torch.stack(preds4vote_soft,dim=1).mean(dim=1)
+                preds_vote_soft = torch.stack(preds4vote_soft, dim=1).mean(dim=1).max(dim=1)[1]
                 correct_count_vote += (preds_vote == labels).long().sum().item()
                 correct_count_vote_soft += (preds_vote_soft == labels).long().sum().item()
                 correct_count_vote_soft_ensemble += ((probs_vote_soft + ori_probs).max(dim=1)[1] ==
@@ -870,11 +819,23 @@ def main():
                 print('vote soft', correct_count_vote_soft / max(count, 1)*100)
                 print('vote soft ensemble', correct_count_vote_soft_ensemble / max(count, 1)*100)
 
+                if args.egsde or args.entropy_guided:
+                    preds_vote_y = torch.stack(preds4vote_y, dim=1).mode(dim=1).values
+                    probs_vote_soft_y =  torch.stack(preds4vote_soft_y,dim=1).mean(dim=1)
+                    preds_vote_soft_y = torch.stack(preds4vote_soft_y, dim=1).mean(dim=1).max(dim=1)[1]
+                    correct_count_vote_y += (preds_vote_y == labels).long().sum().item()
+                    correct_count_vote_soft_y += (preds_vote_soft_y == labels).long().sum().item()
+                    correct_count_vote_soft_ensemble_y += ((probs_vote_soft_y + ori_probs).max(dim=1)[1] ==
+                            labels).long().sum().item()
+                    print('vote (ori)', correct_count_vote_y / max(count, 1)*100)
+                    print('vote soft (ori)', correct_count_vote_soft_y / max(count, 1)*100)
+                    print('vote soft ensemble (ori)',
+                            correct_count_vote_soft_ensemble_y / max(count, 1)*100)
+
 
         if args.K:
             x_edited_whole = torch.cat(x_edited_batch_list, dim=0)
             label_whole = torch.cat(label_batch_list, dim=0)
-
             #torch.save({'x': x_edited_whole, 'label':label_whole},
             #            f'data/shapenet_dm_aug_{args.t}.pt')
             #print('Save!', f'data/shapenet_dm_aug_{args.t}.pt')

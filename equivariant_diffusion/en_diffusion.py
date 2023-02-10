@@ -477,7 +477,7 @@ class DiffusionModel(torch.nn.Module):
         if ddim:
             return mu_x
         x = self.sample_normal(mu=mu_x, sigma=sigma_x, node_mask=node_mask,
-                fix_noise=fix_noise)[:self.n_dims]
+                fix_noise=fix_noise)[:,:,:self.n_dims]
         return x
 
     def sample_normal(self, mu, sigma, node_mask, fix_noise=False,

@@ -80,9 +80,11 @@ class ScanNet(Dataset):
 
         # split train to train part and validation part
         if partition == "train":
-            self.train_ind = np.asarray([i for i in range(self.num_examples) if i % 10 < 8]).astype(np.int)
+            self.train_ind = np.asarray([i for i in range(self.num_examples) if
+                i % 10 < 8]).astype(int)
             np.random.shuffle(self.train_ind)
-            self.val_ind = np.asarray([i for i in range(self.num_examples) if i % 10 >= 8]).astype(np.int)
+            self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+                % 10 >= 8]).astype(int)
             np.random.shuffle(self.val_ind)
 
         io.cprint("number of " + partition + " examples in scannet" + ": " + str(self.data.shape[0]))
@@ -216,9 +218,11 @@ class ModelNet(Dataset):
 
         # split train to train part and validation part
         if partition == "train":
-            self.train_ind = np.asarray([i for i in range(self.num_examples) if i % 10 < 8]).astype(np.int)
+            self.train_ind = np.asarray([i for i in range(self.num_examples) if
+                i % 10 < 8]).astype(int)
             np.random.shuffle(self.train_ind)
-            self.val_ind = np.asarray([i for i in range(self.num_examples) if i % 10 >= 8]).astype(np.int)
+            self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+                % 10 >= 8]).astype(int)
             np.random.shuffle(self.val_ind)
         try:
             io.cprint("number of " + partition + " examples in modelnet : " + str(len(self.pc_list)))
@@ -311,9 +315,11 @@ class ShapeNet(Dataset):
 
         # split train to train part and validation part
         if partition == "train":
-            self.train_ind = np.asarray([i for i in range(self.num_examples) if i % 10 < 8]).astype(np.int)
+            self.train_ind = np.asarray([i for i in range(self.num_examples) if
+                i % 10 < 8]).astype(int)
             np.random.shuffle(self.train_ind)
-            self.val_ind = np.asarray([i for i in range(self.num_examples) if i % 10 >= 8]).astype(np.int)
+            self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+                % 10 >= 8]).astype(int)
             np.random.shuffle(self.val_ind)
         if io is not None:
             io.cprint("number of " + partition + " examples in shapenet: " + str(len(self.pc_list)))

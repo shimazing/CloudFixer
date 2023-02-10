@@ -4,10 +4,12 @@ from torch.distributions.categorical import Categorical
 import numpy as np
 
 from equivariant_diffusion.en_diffusion import DiffusionModel
-from pointnet2.models.pointnet2_with_pcld_condition import PointNet2CloudCondition
-from pointnet2.models.pointnet2_ssg_sem import PointNet2SemSegSSG
+try:
+    from pointnet2.models.pointnet2_with_pcld_condition import PointNet2CloudCondition
+    from pointnet2.json_reader import replace_list_with_string_in_a_dict, restore_string_to_list_in_a_dict
+except ImportError:
+    print("pointnet unavalable")
 import json
-from pointnet2.json_reader import replace_list_with_string_in_a_dict, restore_string_to_list_in_a_dict
 from config_transformer import MODEL_CONFIGS, model_from_config
 from model.pvcnn_generation import PVCNN2Base
 

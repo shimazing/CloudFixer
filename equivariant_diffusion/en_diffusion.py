@@ -4,10 +4,7 @@ import math
 import torch
 from torch.nn import functional as F
 from equivariant_diffusion import utils as diffusion_utils
-try:
-    from model.pvcnn_generation import PVCNN2Base
-except:
-    pass
+from model.pvcnn_generation import PVCNN2Base
 
 from transformer import PointDiffusionTransformer
 
@@ -329,14 +326,10 @@ class DiffusionModel(torch.nn.Module):
             if self.zero_mean:
                 net_out = net_out - net_out.mean(dim=1, keepdim=True)
         else:
-            try:
-                if isinstance(self.dynamics, PVCNN2Base):
-                    t = (t * self.T).long().flatten()
-                    net_out = self.dynamics(x, t, zero_mean=self.zero_mean)
-                else:
-                    t = (t * self.T).long().flatten()
-                    net_out = self.dynamics(x, x, t, zero_mean=self.zero_mean)
-            except:
+            if isinstance(self.dynamics, PVCNN2Base):
+                t = (t * self.T).long().flatten()
+                net_out = self.dynamics(x, t, zero_mean=self.zero_mean)
+            else: # pointnet
                 t = (t * self.T).long().flatten()
                 net_out = self.dynamics(x, x, t, zero_mean=self.zero_mean)
 

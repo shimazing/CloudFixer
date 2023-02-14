@@ -9,7 +9,7 @@ pip install wandb
 pip install h5py
 pip install tqdm
 pip install pandas
-pip install sklearn
+pip install scikit-learn
 ```
 
 (Not necessary) Only for quantitative evaluation of DM) Install PyTorchEMD by 

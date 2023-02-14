@@ -10,6 +10,8 @@ pip install h5py
 pip install tqdm
 pip install pandas
 pip install scikit-learn
+pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+pip install git+'https://github.com/otaheri/chamfer_distance'
 ```
 
 (Not necessary) Only for quantitative evaluation of DM) Install PyTorchEMD by 

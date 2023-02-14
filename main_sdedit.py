@@ -28,8 +28,8 @@ from torch.utils.data import DataLoader
 import numpy as np
 from tqdm import tqdm
 from Models_Norm import PointNet, DGCNN
-from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch
-from pointnet2_ops import pointnet2_utils
+from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, farthest_point_sample
+#from pointnet2_ops import pointnet2_utils
 import torch.nn.functional as F
 from voxelization_guide import Voxelization
 
@@ -202,8 +202,9 @@ parser.add_argument('--output_pts', type=int, default=512)
 parser.add_argument('--guidance_scale', type=float, default=0)
 parser.add_argument('--mode', nargs='+', type=str, default=['eval'])
 parser.add_argument('--dataset', type=str, default='shapenet')
-parser.add_argument('--keep_sub', action='store_true', help='Disable wandb') # TODO
-parser.add_argument('--n_subsample', type=int, default=64)
+parser.add_argument('--keep_sub', action='store_true') # TODO
+parser.add_argument('--no_zero_mean', action='store_true') # TODO
+parser.add_argument('--n_subsample', type=int, default=128)
 parser.add_argument('--classifier', type=str,
     default='../GAST/experiments/GAST_balanced_unitnorm_randomscale0.2/model.ptdgcnn')
 parser.add_argument('--self_ensemble', action='store_true')
@@ -213,15 +214,21 @@ parser.add_argument('--entropy_guided', action='store_true')
 parser.add_argument('--lambda_s', default=100, type=float)
 parser.add_argument('--lambda_i', default=1, type=float)
 parser.add_argument('--random_seed', default=0, type=int)
-
 parser.add_argument('--ddim', action='store_true')
+parser.add_argument('--preprocess', action='store_true')
 parser.add_argument('--n_inversion_steps', type=int, default=50) #action='store_true')
 parser.add_argument('--n_reverse_steps', type=int, default=50) #action='store_true')
 parser.add_argument('--voxel_resolution', type=int, default=32)
 parser.add_argument('--voxelization', action='store_true')
+parser.add_argument('--preprocess_model', type=str,
+    default='outputs/stat_pred_only_lr1e-4_nregions4_rng3.5_droprate0.5/model.ptdgcnn')
+parser.add_argument('--nregions', type=int, default=4)
 
 args = parser.parse_args()
-
+zero_mean = not args.no_zero_mean
+args.cuda = not args.no_cuda and torch.cuda.is_available()
+#dtype = torch.float32
+device = torch.device("cuda" if args.cuda else "cpu")
 
 io = log.IOStream(args)
 voxelization = Voxelization(resolution=args.voxel_resolution)
@@ -253,26 +260,37 @@ if args.n_nodes == 1024:
     dataset_ = ShapeNet(io, './data', 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
-            random_rotation=True)
+            random_rotation=True, zero_mean=zero_mean)
     if args.dataset == 'scannet':
         test_dataset = ScanNet(io, './data', 'test', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
-            random_rotation=False) # for classification
+            random_rotation=False, zero_mean=zero_mean) # for classification
+        # for preprocessing
+        if args.preprocess:
+            ori_model = args.model
+            args.model = 'dgcnn'
+            args.pred_stat = True
+            args.time_cond = False
+            preprocess_model = DGCNN(args).to(device)
+            preprocess_model.load_state_dict(torch.load(args.preprocess_model,
+                map_location='cpu'))
+            preprocess_model.eval()
+            args.model = ori_model
+            args.pred_stat = False
     elif args.dataset == 'modelnet':
         test_dataset = ModelNet(io, './data', 'test', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
-            random_rotation=False) # for classification
+            random_rotation=False, zero_mean=zero_mean) # for classification
     elif args.dataset == 'shapenet':
         test_dataset = ShapeNet(io, './data', 'test', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
-            random_rotation=False) # for classification
+            random_rotation=False, zero_mean=zero_mean) # for classification
     # TODO jitter??!!
     train_dataset_sampler, val_dataset_sampler = split_set(dataset_,
         domain='shapenet')
-
     train_loader = DataLoader(dataset_, batch_size=args.batch_size,
             sampler=train_dataset_sampler,
             drop_last=False)
@@ -283,7 +301,6 @@ if args.n_nodes == 1024:
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size,
             shuffle=False, drop_last=False,
             sampler=ImbalancedDatasetSampler(test_dataset))
-
 else: # 2048
     train_dset = ShapeNetCore(
         path='data/shapenet.hdf5', #args.dataset_path,
@@ -305,9 +322,6 @@ else: # 2048
 
 args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
 
-args.cuda = not args.no_cuda and torch.cuda.is_available()
-device = torch.device("cuda" if args.cuda else "cpu")
-dtype = torch.float32
 
 if args.ddim:
     # deterministic
@@ -362,8 +376,8 @@ ori_args_model = args.model
 
 args.model = 'dgcnn'
 args.time_cond = False
+args.nregions = 3
 classifier = DGCNN(args).to(device).eval()
-
 classifier.load_state_dict(
 torch.load(
     args.classifier, map_location='cpu'),
@@ -388,6 +402,7 @@ if args.egsde:
     domain_cls.load_state_dict(
         domain_cls_state_dict, strict=False
         )
+    args.time_cond = False
 if args.entropy_guided:
     from chamfer_distance import ChamferDistance as chamfer_dist
     chamfer_dist_fn = chamfer_dist()
@@ -437,6 +452,31 @@ def get_color(coords, corners=np.array([
     rgb = (weight * colors).sum(2).astype(int) # NUM_POINTS x 3
     return rgb
 
+def preprocess(data):
+    print("preprocess")
+    pc = data[4].to(device)
+    batch_size = len(pc)
+    num_points = data[3]
+    mask = torch.zeros((len(data[0]), 1024, 1)).to(device)
+    mask[num_points.view(-1, 1) > torch.arange(1024)] = 1
+    logits = preprocess_model(pc.permute(0,2,1).float(), activate_DefRec=False,
+            mask=mask.view(batch_size, -1).bool())
+    pred_stat = logits['stat']
+    pc = data[0].to(device)
+    data_moved = (pc*pred_stat[:, 3:].unsqueeze(1).exp() + pred_stat[:,
+        :3].unsqueeze(1))  #* mask
+    new_pc = data_moved
+    mask = new_pc.new_ones(new_pc.shape[:-1]).bool() # obsolete
+    #new_noise_pc = np.random.normal(-pred_stat[:, :3].view(-1, 1, 3).cpu().numpy(), scale=pred_stat[:,
+    #    3:].exp().view(-1, 1, 1).cpu().numpy(), size=(batch_size, 1024, 3))
+    #new_noise_pc = torch.tensor(new_noise_pc).to(device)
+    #n_new = torch.maximum(1024 - num_points, torch.ones_like(num_points)*200)
+    #new_noise_pc[torch.arange(1024) > n_new.view(-1, 1)] = 0
+    #new_pc = torch.cat((pc, new_noise_pc), dim=1).float()
+    #chosen = farthest_point_sample(new_pc.permute(0,2,1), npoint=1024)[0]
+    #new_pc = new_pc[torch.arange(batch_size).view(-1, 1), chosen]
+    return new_pc, mask #chosen < 1024
+
 
 def main():
     if args.resume is not None:
@@ -471,15 +511,27 @@ def main():
         for iter_idx, data in tqdm(enumerate(test_loader)):
             labels = data[1].to(device)
             print(labels)
-            x = data[0].to(device)
-
-            furthest_point_idx = \
-                pointnet2_utils.furthest_point_sample(x,
-                        getattr(args, 'n_subsample', 64))
+            if args.dataset == 'scannet' and args.preprocess:
+                x, is_ori = preprocess(data)
+                furthest_point_idx = \
+                        farthest_point_sample((x*is_ori[:, :,
+                            None].float()).permute(0,2,1), getattr(args,
+                                'n_subsample', 64))[0]
+                        #pointnet2_utils.furthest_point_sample(x * is_ori[:, :,
+                        #    None].float(),
+                        #    getattr(args, 'n_subsample', 64))
+            else:
+                # is_ori : batch_size x 1024
+                x = data[0].to(device)
+                furthest_point_idx = \
+                    farthest_point_sample(x.permute(0,2,1), getattr(args,
+                            'n_subsample', 64))[0]
+                #furthest_point_idx = \
+                #    pointnet2_utils.furthest_point_sample(x,
+                #            getattr(args, 'n_subsample', 64))
             furthest_point_idx = furthest_point_idx.long()
             sub_x = \
                 x[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
-
             count += len(x)
             t = args.t * x.new_ones((x.shape[0], 1), device=x.device)
             node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
@@ -854,10 +906,12 @@ def main():
             print([idx_to_label[int(d)] for d in data[1]])
             x = data[0].to(device)
             rgbs = get_color(x.cpu().numpy())
-
             furthest_point_idx = \
-                pointnet2_utils.furthest_point_sample(x,
-                        getattr(args, 'n_subsample', 64))
+                farthest_point_sample(x.permute(0,2,1), getattr(args,
+                        'n_subsample', 64))[0]
+            #furthest_point_idx = \
+            #    pointnet2_utils.furthest_point_sample(x,
+            #            getattr(args, 'n_subsample', 64))
             furthest_point_idx = furthest_point_idx.long()
             #print(furthest_point_idx)
             #input()

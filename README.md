@@ -28,3 +28,8 @@ sudo unzip ninja-linux.zip -d /usr/local/bin/
 sudo update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 --force
 ``` 
 
+ninja: build stopped: subcommand failed
+```
+sudo apt install gcc-8 g++-8
+sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 80 --slave /usr/bin/g++ g++ /usr/bin/g++-8 --slave /usr/bin/gcov gcov /usr/bin/gcov-8
+```

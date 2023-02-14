@@ -24,6 +24,7 @@ import random
 
 parser = argparse.ArgumentParser(description='Diffusion for PC')
 parser.add_argument('--exp_name', type=str, default='debug_10')
+parser.add_argument('--dataset', type=str, default='shapenet')
 parser.add_argument('--model', type=str, default='pointnet',
         choices=['pointnet', 'pvd', 'transformer'])
 parser.add_argument('--probabilistic_model', type=str, default='diffusion',
@@ -195,15 +196,28 @@ def split_set(dataset, domain='scannet', set_type="source"):
 
 if args.n_nodes == 1024:
     if args.mode == 'train':
-        dataset_ = ShapeNet(io, './data', 'train', jitter=args.jitter,
-                scale=args.scale, scale_mode=args.scale_mode,
-                random_scale=args.random_scale, zero_mean=zero_mean)
-        dataset_val = ShapeNet(io, './data', 'val', jitter=args.jitter,
-                scale=args.scale, scale_mode=args.scale_mode,
-                zero_mean=zero_mean)
-
+        if args.dataset == 'shapenet':
+            dataset_ = ShapeNet(io, './data', 'train', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    random_scale=args.random_scale, zero_mean=zero_mean)
+            dataset_val = ShapeNet(io, './data', 'val', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    zero_mean=zero_mean)
+        elif args.dataset == 'modelnet':
+            dataset_ = ModelNet(io, './data', 'train', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    random_scale=args.random_scale, zero_mean=zero_mean)
+            dataset_val = ModelNet(io, './data', 'val', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    zero_mean=zero_mean)
+        elif args.dataset == 'scannet':
+            dataset_ = ScanNet(io, './data', 'train', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    random_scale=args.random_scale, zero_mean=zero_mean)
+            dataset_val = ScanNet(io, './data', 'val', jitter=args.jitter,
+                    scale=args.scale, scale_mode=args.scale_mode,
+                    zero_mean=zero_mean)
         train_dataset_sampler, val_dataset_sampler = None, None #split_set(dataset_)
-
         train_loader = DataLoader(dataset_, batch_size=args.batch_size,
                 sampler=ImbalancedDatasetSampler(dataset_), #train_dataset_sampler,
                 drop_last=True)
@@ -392,7 +406,11 @@ def main():
                     gradnorm_queue=gradnorm_queue, optim=optim)
         print(f"Epoch took {time.time() - start_epoch:.1f} seconds.")
         if args.lr_gamma < 1:
-            lr_scheduler.step()
+            if args.dataset == 'modelnet':
+                if (epoch + 1) % (args.n_epochs // 10000) == 0:
+                    lr_scheduler.step()
+            else:
+                lr_scheduler.step()
 
         if hasattr(model.dynamics, 'report_neighbor_stats'):
             pass

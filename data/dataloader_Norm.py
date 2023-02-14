@@ -76,7 +76,7 @@ class ScanNet(Dataset):
         # read data
         self.data, self.label = load_data_h5py_scannet10(partition, dataroot)
         self.num_examples = self.data.shape[0]
-        self.zero_mean = True
+        self.zero_mean = zero_mean
 
         # split train to train part and validation part
         if partition == "train":

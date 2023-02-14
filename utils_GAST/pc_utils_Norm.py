@@ -164,7 +164,7 @@ def farthest_point_sample(xyz, npoint, device='cuda:0'):
     return centroids, centroids_vals
 
 
-def farthest_point_sample_np(xyz, norm_curv, npoint):
+def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
     """
     Input:
         xyz: pointcloud data, [B, C, N]

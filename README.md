@@ -5,11 +5,7 @@ Env setting
 ```
 conda create -n [new_env_name] python=3.8
 pip install torch==1.10.1+cu111 torchvision==0.11.2+cu111 -f https://download.pytorch.org/whl/cu111/torch_stable.html
-pip install wandb
-pip install h5py
-pip install tqdm
-pip install pandas
-pip install scikit-learn
+pip install wandb h5py tqdm pandas scikit-learn
 pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
 pip install git+'https://github.com/otaheri/chamfer_distance'
 ```
@@ -32,6 +28,8 @@ sudo update-alternatives --install /usr/bin/ninja ninja /usr/local/bin/ninja 1 -
 
 ninja: build stopped: subcommand failed
 ```
+sudo add-apt-repository ppa:ubuntu-toolchain-r/test
+sudo apt-get update
 sudo apt install gcc-8 g++-8
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 80 --slave /usr/bin/g++ g++ /usr/bin/g++-8 --slave /usr/bin/gcov gcov /usr/bin/gcov-8
 ```

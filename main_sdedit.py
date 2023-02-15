@@ -22,7 +22,7 @@ from train_test import train_epoch, test
 from data.dataloader_Norm import ScanNet, ModelNet, ShapeNet, label_to_idx, NUM_POINTS
 from data.dataloader_Norm import ShapeNetCore
 from data.dataloader_Norm import idx_to_label
-from utils_GAST import pc_utils_Norm, log
+from utils_GAST import pc_utils_Norm #, log
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data import DataLoader
 import numpy as np
@@ -32,6 +32,8 @@ from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, farthest_point_sa
 #from pointnet2_ops import pointnet2_utils
 import torch.nn.functional as F
 from voxelization_guide import Voxelization
+import log
+
 
 class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
     """Samples elements randomly from a given list of indices for imbalanced dataset
@@ -216,13 +218,14 @@ parser.add_argument('--lambda_i', default=1, type=float)
 parser.add_argument('--random_seed', default=0, type=int)
 parser.add_argument('--ddim', action='store_true')
 parser.add_argument('--preprocess', action='store_true')
+parser.add_argument('--latent_subdist', action='store_true')
 parser.add_argument('--n_inversion_steps', type=int, default=50) #action='store_true')
 parser.add_argument('--n_reverse_steps', type=int, default=50) #action='store_true')
 parser.add_argument('--voxel_resolution', type=int, default=32)
 parser.add_argument('--voxelization', action='store_true')
 parser.add_argument('--preprocess_model', type=str,
-    default='outputs/stat_pred_only_lr1e-4_nregions4_rng3.5_droprate0.5/model.ptdgcnn')
-parser.add_argument('--nregions', type=int, default=4)
+    default='outputs/stat_pred_only_lr1e-4_nregions5_rng3.5_droprate0.7/model.ptdgcnn')
+parser.add_argument('--nregions', type=int, default=5)
 
 args = parser.parse_args()
 zero_mean = not args.no_zero_mean
@@ -291,13 +294,13 @@ if args.n_nodes == 1024:
     # TODO jitter??!!
     train_dataset_sampler, val_dataset_sampler = split_set(dataset_,
         domain='shapenet')
-    train_loader = DataLoader(dataset_, batch_size=args.batch_size,
-            sampler=train_dataset_sampler,
-            drop_last=False)
-    val_loader = DataLoader(dataset_, batch_size=args.batch_size,
-            sampler=val_dataset_sampler) #, drop_last=True)
+    #train_loader = DataLoader(dataset_, batch_size=args.batch_size,
+    #        sampler=train_dataset_sampler,
+    #        drop_last=False)
+    #val_loader = DataLoader(dataset_, batch_size=args.batch_size,
+    #        sampler=val_dataset_sampler) #, drop_last=True)
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size,
-            shuffle=False, drop_last=False)
+            shuffle=False, drop_last=False, num_workers=args.num_workers)
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size,
             shuffle=False, drop_last=False,
             sampler=ImbalancedDatasetSampler(test_dataset))
@@ -350,7 +353,7 @@ if args.resume is not None:
         args.normalization_factor = normalization_factor
     if not hasattr(args, 'aggregation_method'):
         args.aggregation_method = aggregation_method
-    print(args)
+    io.cprint(args)
 
 utils.create_folders(args)
 # print(args)
@@ -464,7 +467,7 @@ def preprocess(data):
     pred_stat = logits['stat']
     pc = data[0].to(device)
     data_moved = (pc*pred_stat[:, 3:].unsqueeze(1).exp() + pred_stat[:,
-        :3].unsqueeze(1))  #* mask
+        :3].unsqueeze(1)) #* mask
     new_pc = data_moved
     mask = new_pc.new_ones(new_pc.shape[:-1]).bool() # obsolete
     #new_noise_pc = np.random.normal(-pred_stat[:, :3].view(-1, 1, 3).cpu().numpy(), scale=pred_stat[:,
@@ -475,7 +478,7 @@ def preprocess(data):
     #new_pc = torch.cat((pc, new_noise_pc), dim=1).float()
     #chosen = farthest_point_sample(new_pc.permute(0,2,1), npoint=1024)[0]
     #new_pc = new_pc[torch.arange(batch_size).view(-1, 1), chosen]
-    return new_pc, mask #chosen < 1024
+    return pc, new_pc, mask #chosen < 1024
 
 
 def main():
@@ -512,7 +515,7 @@ def main():
             labels = data[1].to(device)
             print(labels)
             if args.dataset == 'scannet' and args.preprocess:
-                x, is_ori = preprocess(data)
+                old_x, x, is_ori = preprocess(data)
                 furthest_point_idx = \
                         farthest_point_sample((x*is_ori[:, :,
                             None].float()).permute(0,2,1), getattr(args,
@@ -566,7 +569,7 @@ def main():
                     node_mask=node_mask,
                     )
                 if args.lambda_i > 0:
-                    if False: # loss_i in latent space
+                    if args.latent_subdist: # loss_i in latent space
                         xt = x * alpha_t + noise * sigma_t
                         xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
@@ -586,7 +589,6 @@ def main():
                         subdist_loss = (x_sub - y0_est_sub).pow(2).sum(-1).mean()
                         dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
                         subdist_loss = dist1_.mean()
-                    print(subdist_loss)
                 else:
                     subdist_loss = 0
                 grad = torch.autograd.grad(
@@ -632,7 +634,7 @@ def main():
                 # Si (faithful expert)
                 if args.lambda_i > 0:
                     if args.voxelization:
-                        if False: # in the sample space
+                        if not args.latent_subdist: # in the sample space
                             eps = phi(yt, t, **model_kwargs)
                             x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
                                         furthest_point_idx]
@@ -647,13 +649,14 @@ def main():
                             vox_y = voxelization(yt.permute(0,2,1),
                                     yt.permute(0,2,1), norm=norm)[0]
                         subdist_loss = F.mse_loss(vox_y, vox_x)
-                    elif False: # chamfer dist in the latent space
+                    elif args.latent_subdist: # chamfer dist in the latent space
                         xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
                         yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
                                 furthest_point_idx]
-                        subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
+                        #subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
                         dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
+                        subdist_loss = dist1.mean()
                     else: # chamfer dist in the sample space
                         eps = phi(yt, t, **model_kwargs)
                         x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
@@ -850,14 +853,13 @@ def main():
                                 labels).long().sum().item()
 
 
-            print("ACC")
+            io.cprint("ACC")
             for ck, cc in enumerate(correct_count):
-                print(ck, cc/max(count, 1)*100)
+                io.cprint(f'{ck} {cc/max(count, 1)*100}')
                 if ck > 0:
                     if args.egsde or args.entropy_guided:
-                        print(ck, correct_count_y[ck]/max(count, 1)*100)
-                    print('self ensemble', correct_count_self_ensemble[ck-1] /
-                            max(count,1)*100)
+                        io.cprint(f'{ck} {correct_count_y[ck]/max(count,1)*100}')
+                    io.cprint(f'self ensemble {correct_count_self_ensemble[ck-1] / max(count,1)*100}')
 
             if args.K > 1:
                 preds_vote = torch.stack(preds4vote, dim=1).mode(dim=1).values
@@ -867,9 +869,9 @@ def main():
                 correct_count_vote_soft += (preds_vote_soft == labels).long().sum().item()
                 correct_count_vote_soft_ensemble += ((probs_vote_soft + ori_probs).max(dim=1)[1] ==
                         labels).long().sum().item()
-                print('vote', correct_count_vote / max(count, 1)*100)
-                print('vote soft', correct_count_vote_soft / max(count, 1)*100)
-                print('vote soft ensemble', correct_count_vote_soft_ensemble / max(count, 1)*100)
+                io.cprint(f'vote {correct_count_vote / max(count, 1)*100}')
+                io.cprint(f'vote soft {correct_count_vote_soft / max(count, 1)*100}')
+                io.cprint(f'vote soft ensemble {correct_count_vote_soft_ensemble / max(count, 1)*100}')
 
                 if args.egsde or args.entropy_guided:
                     preds_vote_y = torch.stack(preds4vote_y, dim=1).mode(dim=1).values
@@ -879,10 +881,9 @@ def main():
                     correct_count_vote_soft_y += (preds_vote_soft_y == labels).long().sum().item()
                     correct_count_vote_soft_ensemble_y += ((probs_vote_soft_y + ori_probs).max(dim=1)[1] ==
                             labels).long().sum().item()
-                    print('vote (ori)', correct_count_vote_y / max(count, 1)*100)
-                    print('vote soft (ori)', correct_count_vote_soft_y / max(count, 1)*100)
-                    print('vote soft ensemble (ori)',
-                            correct_count_vote_soft_ensemble_y / max(count, 1)*100)
+                    io.cprint(f'vote (ori) {correct_count_vote_y / max(count, 1)*100}')
+                    io.cprint(f'vote soft (ori) {correct_count_vote_soft_y / max(count, 1)*100}')
+                    io.cprint(f'vote soft ensemble (ori) {correct_count_vote_soft_ensemble_y / max(count, 1)*100}')
 
 
         if args.K:
@@ -896,7 +897,7 @@ def main():
             print(label)
             print(np.transpose(change, (2, 0, 1)))
 
-        print(args)
+        io.cprint(args)
 
     if 'vis' in args.mode:
       with torch.no_grad():

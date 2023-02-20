@@ -624,17 +624,22 @@ class DiffusionModel(torch.nn.Module):
                       'error': error.squeeze()}
 
     def forward(self, x, h=None, node_mask=None, edge_mask=None,
-            sample_p_zs_given_zt=False, sample_p_x_given_z0=False, phi=False, s=None, t=None,
-            cond_fn=None):
+            sample_p_zs_given_zt=False, sample_p_x_given_z0=False,
+            sample_p_zs_given_zt_ddim=False, phi=False, s=None, t=None,
+            cond_fn=None, return_noise=False, x_ori=None, noise=None, ddim=False):
         """
         Computes the loss (type l2 or NLL) if training. And if eval then always computes NLL.
         """
         if sample_p_zs_given_zt:
             return self.sample_p_zs_given_zt(s, t, x, node_mask, edge_mask,
-                    fix_noise=False, cond_fn=cond_fn)
+                    fix_noise=False, cond_fn=cond_fn, x=x_ori,
+                    return_noise=return_noise, noise=noise)
+        if sample_p_zs_given_zt_ddim:
+            return self.sample_p_zs_given_zt_ddim(s, t, x, node_mask, edge_mask,
+                    fix_noise=False, cond_fn=cond_fn, x=x_ori)
         if sample_p_x_given_z0:
             return self.sample_p_x_given_z0(x, node_mask, edge_mask,
-                    fix_noise=False)
+                    fix_noise=False, ddim=ddim)
         if phi:
             return self.phi(x, t, node_mask, edge_mask)
         if True: #self.training:
@@ -651,7 +656,7 @@ class DiffusionModel(torch.nn.Module):
 
 
     def sample_p_zs_given_zt_ddim(self, s, t, zt, node_mask, edge_mask,
-            fix_noise=False, cond_fn=None): #, return_noise=False, noise=None):
+            fix_noise=False, cond_fn=None, x=None): #, return_noise=False, noise=None):
         """Samples from zs ~ p(zs | zt). Only used during sampling."""
         gamma_s = self.gamma(s)
         gamma_t = self.gamma(t)
@@ -665,9 +670,14 @@ class DiffusionModel(torch.nn.Module):
         # Neural net prediction.
         eps_t = self.phi(zt, t, node_mask, edge_mask)
         if cond_fn is not None:
-            grad = cond_fn(zt, t, self.phi, # model
-                    {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
-                    )
+            if hasattr(self, 'domain_cls'):
+                grad = cond_fn(zt, t, self.phi, x, self.domain_cls, # model
+                        {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                        )
+            else:
+                grad = cond_fn(zt, t, self.phi, x, # model
+                        {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                        )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
             eps_t = eps_t + sigma_t * grad
@@ -682,7 +692,7 @@ class DiffusionModel(torch.nn.Module):
 
 
     def sample_p_zs_given_zt(self, s, t, zt, node_mask, edge_mask,
-            fix_noise=False, cond_fn=None, return_noise=False, noise=None):
+            fix_noise=False, cond_fn=None, x=None, return_noise=False, noise=None):
         """Samples from zs ~ p(zs | zt). Only used during sampling."""
         gamma_s = self.gamma(s)
         gamma_t = self.gamma(t)
@@ -696,9 +706,14 @@ class DiffusionModel(torch.nn.Module):
         # Neural net prediction.
         eps_t = self.phi(zt, t, node_mask, edge_mask)
         if cond_fn is not None:
-            grad = cond_fn(zt, t, self.phi, # model
-                    {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
-                    )
+            if hasattr(self, 'domain_cls'):
+                grad = cond_fn(zt, t, self.phi, x, self.domain_cls,# model
+                        {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                        )
+            else:
+                grad = cond_fn(zt, t, self.phi, x, # model
+                        {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                        )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
             eps_t = eps_t + sigma_t * grad

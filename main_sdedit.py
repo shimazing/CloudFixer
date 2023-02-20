@@ -1,8 +1,3 @@
-# Rdkit import should be first, do not move it
-try:
-    from rdkit import Chem
-except ModuleNotFoundError:
-    pass
 import pandas as pd
 import copy
 import utils
@@ -373,6 +368,8 @@ wandb.save('*.txt')
 # Create EGNN flow
 model = get_model(args, device)
 model = model.to(device)
+if args.resume is not None:
+    model.load_state_dict(torch.load(args.resume))
 
 
 ori_args_model = args.model
@@ -386,6 +383,7 @@ torch.load(
     args.classifier, map_location='cpu'),
 strict=False
 )
+classifier = torch.nn.DataParallel(classifier)
 
 args.model = ori_args_model
 
@@ -406,6 +404,7 @@ if args.egsde:
         domain_cls_state_dict, strict=False
         )
     args.time_cond = False
+    model.domain_cls = domain_cls
 if args.entropy_guided:
     from chamfer_distance import ChamferDistance as chamfer_dist
     chamfer_dist_fn = chamfer_dist()
@@ -482,9 +481,8 @@ def preprocess(data):
 
 
 def main():
-    if args.resume is not None:
-        model.load_state_dict(torch.load(args.resume))
     model.eval()
+    model_dp = torch.nn.DataParallel(model)
     K = args.K
 
     random_seed = args.random_seed
@@ -543,7 +541,7 @@ def main():
             sigma_t = model.sigma(gamma_t, x)
 
             @torch.enable_grad()
-            def cond_fn_entropy(yt, t, phi, model_kwargs):
+            def cond_fn_entropy(yt, t, phi, x, model_kwargs):
                 # Ss (realistic expert)
                 classifier.requires_grad_(True)
                 yt.requires_grad_(True)
@@ -566,7 +564,7 @@ def main():
                 # Si (faithful expert)
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
+                    node_mask=model_kwargs['node_mask'],
                     )
                 if args.lambda_i > 0:
                     if args.latent_subdist: # loss_i in latent space
@@ -599,19 +597,19 @@ def main():
                 return grad
 
             @torch.enable_grad()
-            def cond_fn_egsde(yt, t, phi, model_kwargs):
+            def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
                 if args.model == 'pvd':
                     model.train()
                 yt.requires_grad_(True)
                 # Ss (realistic expert)
                 gamma_t = \
                     model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
+                alpha_t = model.alpha(gamma_t, x).to(x)
+                sigma_t = model.sigma(gamma_t, x).to(x)
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
-                    )
+                    node_mask=model_kwargs['node_mask'],
+                    ).to(x)
                 xt = x * alpha_t + noise * sigma_t
                 t_int = (t * model.T).long().float().flatten()
 
@@ -674,14 +672,14 @@ def main():
                 return grad
 
             @torch.enable_grad()
-            def cond_fn_sub_naive(yt, t, phi, model_kwargs):
+            def cond_fn_sub_naive(yt, t, phi, x, model_kwargs):
                 gamma_t = \
                     model.inflate_batch_array(model.gamma(t), x)
                 alpha_t = model.alpha(gamma_t, x)
                 sigma_t = model.sigma(gamma_t, x)
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
+                    node_mask=model_kwargs['node_mask'],
                     )
                 xt = x * alpha_t + noise * sigma_t
                 xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
@@ -693,7 +691,7 @@ def main():
 
 
             @torch.enable_grad()
-            def cond_fn_sub(xt, t, phi, model_kwargs):
+            def cond_fn_sub(xt, t, phi, x, model_kwargs):
                 model.dynamics.requires_grad_(True)
 
                 #sub_x = \
@@ -739,8 +737,8 @@ def main():
                         inversion_steps[1:]), total=len(inversion_steps)-1):
                         t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
                         s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
-                        z = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                t_tensor, z, node_mask, edge_mask=None, cond_fn=None)
+                        z = model_dp(z, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                t=t_tensor, node_mask=node_mask, edge_mask=None, cond_fn=None)
                 else:
                     z = alpha_t * x + sigma_t * eps # diffusion
 
@@ -752,25 +750,29 @@ def main():
                             total=len(reverse_steps)-1):
                         t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
                         s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
-                        z = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                t_tensor, z, node_mask, None, #None,
+                        z = model_dp(z, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
                                 cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
                                 if args.guidance_scale > 0 else None)), #noise=noise,
+                                x_ori=x,
                                 )
                         if args.egsde or args.entropy_guided:
-                            y = model.sample_p_zs_given_zt_ddim(s_tensor,
-                                    t_tensor, y, node_mask, None, #None,
+                            y = model_dp(y, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                    t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
                                     )
                 else:
                     for _ in tqdm(range(int(args.t * args.diffusion_steps))):
-                        z, noise = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, z,
-                            node_mask, edge_mask=None, fix_noise=False,
+                        z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
+                                1./args.diffusion_steps, t=t,
+                            node_mask=node_mask, edge_mask=None, #fix_noise=False,
                             cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
                             if args.guidance_scale > 0 else None)),
+                            x_ori=x,
                             return_noise=True)
                         if args.egsde or args.entropy_guided:
-                            y = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, y,
-                                node_mask, edge_mask=None, fix_noise=False,
+                            y = model_dp(y, sample_p_zs_given_zt=True, s=t -
+                                    1./args.diffusion_steps, t=t,
+                                node_mask=node_mask, edge_mask=None, #fix_noise=False,
                                 cond_fn=None, noise=noise) # w/o guidance for comparison
 
 
@@ -790,18 +792,23 @@ def main():
                                     torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
                                     furthest_point_idx]
                             ###################################
-                            z = z - z.mean(dim=1, keepdim=True)
+                            if zero_mean:
+                                z = z - z.mean(dim=1, keepdim=True)
                             ###################################
                         t = t - 1. / args.diffusion_steps
 
                     assert torch.all(t.abs() < 1e-5)
 
                 if args.egsde or args.entropy_guided:
-                    x_edit_y = model.sample_p_x_given_z0(y, node_mask, None,
-                            fix_noise=False, ddim=args.ddim)
+                    x_edit_y = model_dp(y, sample_p_x_given_z0=True,
+                            node_mask=node_mask, edge_mask=None,
+                            #fix_noise=False,
+                            ddim=args.ddim)
                     x_edit_list_y.append(x_edit_y)
-                x_edit = model.sample_p_x_given_z0(z, node_mask, None,
-                        fix_noise=False, ddim=args.ddim)
+                x_edit = model_dp(z, sample_p_x_given_z0=True,
+                        node_mask=node_mask, edge_mask=None,
+                        #fix_noise=False,
+                        ddim=args.ddim)
                 if args.accum_edit:
                     x = x_edit
                 x_edit_list.append(x_edit)
@@ -940,7 +947,7 @@ def main():
 
 
             @torch.enable_grad()
-            def cond_fn_entropy(yt, t, phi, model_kwargs):
+            def cond_fn_entropy(yt, t, phi, x, model_kwargs):
                 # Ss (realistic expert)
                 classifier.requires_grad_(True)
                 yt.requires_grad_(True)
@@ -966,7 +973,7 @@ def main():
 
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
+                    node_mask=model_kwargs['node_mask'],
                     )
                 if args.lambda_i > 0:
                     if False:
@@ -1002,7 +1009,7 @@ def main():
                 return grad
 
             @torch.enable_grad()
-            def cond_fn_egsde(yt, t, phi, model_kwargs):
+            def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
                 if args.model == 'pvd':
                     model.train()
                 yt.requires_grad_(True)
@@ -1013,7 +1020,7 @@ def main():
                 sigma_t = model.sigma(gamma_t, x)
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
+                    node_mask=model_kwargs['node_mask'],
                     )
                 xt = x * alpha_t + noise * sigma_t
                 t_int = (t * model.T).long().float().flatten()
@@ -1158,14 +1165,14 @@ def main():
             #    return grad
 
             @torch.enable_grad()
-            def cond_fn_sub_naive(yt, t, phi, model_kwargs):
+            def cond_fn_sub_naive(yt, t, phi, x, model_kwargs):
                 gamma_t = \
                     model.inflate_batch_array(model.gamma(t), x)
                 alpha_t = model.alpha(gamma_t, x)
                 sigma_t = model.sigma(gamma_t, x)
                 noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
-                    node_mask=node_mask,
+                    node_mask=model_kwargs['node_mask'],
                     )
                 xt = x * alpha_t + noise * sigma_t
                 xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
@@ -1177,7 +1184,7 @@ def main():
 
 
             @torch.enable_grad()
-            def cond_fn_sub(xt, t, phi, model_kwargs):
+            def cond_fn_sub(xt, t, phi, x, model_kwargs):
                 model.dynamics.requires_grad_(True)
 
                 #sub_x = \
@@ -1219,25 +1226,33 @@ def main():
                 z_t_list.append(z)
                 y = z.detach().clone()
                 for _ in tqdm(range(int(args.t * args.diffusion_steps))):
-                    z, noise = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, z,
-                        node_mask, None, None, fix_noise=False,
+                    z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
+                            1./args.diffusion_steps, t=t,
+                        node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
                         cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
                         if args.guidance_scale > 0 else None)), #noise=noise,
+                        x_ori=x,
                         return_noise=True)
                     if args.egsde or args.entropy_guided:
-                        y = model.sample_p_zs_given_zt(t - 1./args.diffusion_steps, t, y,
-                            node_mask, None, None, fix_noise=False,
+                        y = model_dp(y, sample_p_zs_given_zt=True, s=t -
+                                1./args.diffusion_steps, t=t,
+                            node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
                             cond_fn=None, noise=noise) #return_noise=True)
                     t = t - 1. / args.diffusion_steps
                     print('diff', (z-y).abs().max(), (z-y).abs().mean())
                 assert torch.all(t.abs() < 1e-5) #torch.allclose(t, torch.zeros_like(t))
-                x_edit = model.sample_p_x_given_z0(z, node_mask, None, None,
-                        fix_noise=False)
+                x_edit = model_dp(z, sample_p_x_given_z0=True,
+                        node_mask=node_mask, edge_mask=None, #None,
+                        #fix_noise=False
+                        )
                 x = x_edit
 
                 if args.egsde or args.entropy_guided:
-                    x_edit_y = model.sample_p_x_given_z0(y, node_mask, None, None,
-                            fix_noise=False)
+                    x_edit_y = model_dp(y, sample_p_x_given_z0=True,
+                            node_mask=node_mask, edge_mask=None,
+                            #None,
+                            #fix_noise=False
+                            )
                     y = x_edit_y
 
                 logits = \

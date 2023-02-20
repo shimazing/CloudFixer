@@ -3,6 +3,105 @@ import getpass
 import os
 import torch
 
+def random_rotate_one_axis_torch(X, axis='z'):
+    """
+    Apply random rotation about one axis
+    Input:
+        x: pointcloud data, [B, C, N]
+        axis: axis to do rotation about
+    Return:
+        A rotated shape
+    """
+    #rotation_angle = np.random.uniform() * 2 * np.pi
+    rotation_angle = torch.rand(len(X)).to(X.device) * 2 * np.pi
+    cosval = torch.cos(rotation_angle) # (batch_size,)
+    sinval = torch.sin(rotation_angle) # (batch_size,)
+    ones = torch.ones_like(cosval)
+    zeros = torch.zeros_like(cosval)
+    if axis == 'x':
+        R_x = torch.stack([
+            torch.stack([ones, zeros, zeros], dim=-1), # batch_size x 3
+            torch.stack([zeros, cosval, -sinval], dim=-1),
+            torch.stack([zeros, sinval, cosval], dim=-1)], dim=1)
+        #R_x = [[1, 0, 0], [0, cosval, -sinval], [0, sinval, cosval]]
+        X = torch.matmul(X, R_x)
+    elif axis == 'y':
+        R_y = torch.stack([
+            torch.stack([cosval, zeros, sinval], dim=-1), # batch_size x 3
+            torch.stack([zeros, ones, zeros], dim=-1),
+            torch.stack([-sinval, zeros, cosval], dim=-1)], dim=1)
+        #R_y = [[cosval, 0, sinval], [0, 1, 0], [-sinval, 0, cosval]]
+        X = torch.matmul(X, R_y)
+    else:
+        R_z = torch.stack([
+            torch.stack([cosval, -sinval, zeros], dim=-1), # batch_size x 3
+            torch.stack([sinval, cosval, zeros], dim=-1),
+            torch.stack([zeros, zeros, ones], dim=-1)], dim=1)
+        #R_z = [[cosval, -sinval, 0], [sinval, cosval, 0], [0, 0, 1]]
+        X = torch.matmul(X, R_z)
+    return X.float() #astype('float32')
+
+
+def random_rotate_one_axis(X, axis):
+    """
+    Apply random rotation about one axis
+    Input:
+        x: pointcloud data, [B, C, N]
+        axis: axis to do rotation about
+    Return:
+        A rotated shape
+    """
+    rotation_angle = np.random.uniform() * 2 * np.pi
+    cosval = np.cos(rotation_angle)
+    sinval = np.sin(rotation_angle)
+    if axis == 'x':
+        R_x = [[1, 0, 0], [0, cosval, -sinval], [0, sinval, cosval]]
+        X = np.matmul(X, R_x)
+    elif axis == 'y':
+        R_y = [[cosval, 0, sinval], [0, 1, 0], [-sinval, 0, cosval]]
+        X = np.matmul(X, R_y)
+    else:
+        R_z = [[cosval, -sinval, 0], [sinval, cosval, 0], [0, 0, 1]]
+        X = np.matmul(X, R_z)
+    return X.astype('float32')
+
+
+def uniform_2_sphere(num: int = None):
+    """Uniform sampling on a 2-sphere
+    Source: https://gist.github.com/andrewbolster/10274979
+    Args:
+        num: Number of vectors to sample (or None if single)
+    Returns:
+        Random Vector (np.ndarray) of size (num, 3) with norm 1.
+        If num is None returned value will have size (3,)
+    """
+    if num is not None:
+        phi = np.random.uniform(0.0, 2 * np.pi, num)
+        cos_theta = np.random.uniform(-1.0, 1.0, num)
+    else:
+        phi = np.random.uniform(0.0, 2 * np.pi)
+        cos_theta = np.random.uniform(-1.0, 1.0)
+
+    theta = np.arccos(cos_theta)
+    x = np.sin(theta) * np.cos(phi)
+    y = np.sin(theta) * np.sin(phi)
+    z = np.cos(theta)
+
+    return np.stack((x, y, z), axis=-1)
+
+def remove(points, p_keep=0.7):
+    rand_xyz = uniform_2_sphere()
+    centroid = np.mean(points[:, :3], axis=0)
+    points_centered = points[:, :3] - centroid
+
+    dist_from_plane = np.dot(points_centered, rand_xyz)
+    if p_keep == 0.5:
+        mask = dist_from_plane > 0
+    else:
+        mask = dist_from_plane > np.percentile(dist_from_plane, (1.0 - p_keep) * 100)
+
+    return points[mask, :]
+
 def region_mean(num_regions=3, rng=4):
     """
     Input:

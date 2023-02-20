@@ -4,7 +4,11 @@ import math
 import torch
 from torch.nn import functional as F
 from equivariant_diffusion import utils as diffusion_utils
-from model.pvcnn_generation import PVCNN2Base
+try:
+    from model.pvcnn_generation import PVCNN2Base
+except:
+    print("PVD unavailable")
+    pass
 
 from transformer import PointDiffusionTransformer
 
@@ -619,10 +623,20 @@ class DiffusionModel(torch.nn.Module):
         return loss, {'t': t_int.squeeze(), 'loss_t': loss.squeeze(),
                       'error': error.squeeze()}
 
-    def forward(self, x, h, node_mask=None, edge_mask=None):
+    def forward(self, x, h=None, node_mask=None, edge_mask=None,
+            sample_p_zs_given_zt=False, sample_p_x_given_z0=False, phi=False, s=None, t=None,
+            cond_fn=None):
         """
         Computes the loss (type l2 or NLL) if training. And if eval then always computes NLL.
         """
+        if sample_p_zs_given_zt:
+            return self.sample_p_zs_given_zt(s, t, x, node_mask, edge_mask,
+                    fix_noise=False, cond_fn=cond_fn)
+        if sample_p_x_given_z0:
+            return self.sample_p_x_given_z0(x, node_mask, edge_mask,
+                    fix_noise=False)
+        if phi:
+            return self.phi(x, t, node_mask, edge_mask)
         if True: #self.training:
             # Only 1 forward pass when t0_always is False.
             loss, loss_dict = self.compute_loss(x, h, node_mask, edge_mask, t0_always=False)

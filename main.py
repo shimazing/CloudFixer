@@ -220,11 +220,13 @@ if args.n_nodes == 1024:
         train_dataset_sampler, val_dataset_sampler = None, None #split_set(dataset_)
         train_loader = DataLoader(dataset_, batch_size=args.batch_size,
                 sampler=ImbalancedDatasetSampler(dataset_), #train_dataset_sampler,
-                drop_last=True)
+                drop_last=True,
+                num_workers=args.num_workers)
         val_loader = DataLoader(dataset_val, batch_size=args.batch_size,
                 shuffle=False,
                 drop_last=False,
-                sampler=val_dataset_sampler)
+                sampler=val_dataset_sampler,
+                num_workers=args.num_workers)
     else:
         dataset_test = ShapeNet(io, './data', 'test', jitter=False, #args.jitter,
                 scale=args.scale, scale_mode=args.scale_mode,

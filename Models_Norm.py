@@ -228,8 +228,10 @@ class conv_2d_time_cond(nn.Module):
 
 
 class fc_layer(nn.Module):
-    def __init__(self, in_ch, out_ch, bn=False, activation='relu', bias=True):
+    def __init__(self, in_ch, out_ch, bn=False, activation='relu', bias=True,
+            norm=True):
         super(fc_layer, self).__init__()
+        self.norm = norm
         if activation == 'relu':
             self.ac = nn.ReLU(inplace=True)
         elif activation == 'leakyrelu':
@@ -248,7 +250,8 @@ class fc_layer(nn.Module):
             )
 
     def forward(self, x):
-        x = l2_norm(x, 1)
+        if self.norm:
+            x = l2_norm(x, 1)
         x = self.fc(x)
         return x
 
@@ -268,8 +271,13 @@ class transform_net(nn.Module):
         self.conv2d1 = conv_2d(in_ch, 64, kernel=1, activation=activation, bias=bias)
         self.conv2d2 = conv_2d(64, 128, kernel=1, activation=activation, bias=bias)
         self.conv2d3 = conv_2d(128, 1024, kernel=1, activation=activation, bias=bias)
-        self.fc1 = fc_layer(1024, 512, activation=activation, bias=bias, bn=True)
-        self.fc2 = fc_layer(512, 256, activation=activation, bn=True)
+        self.fc1 = fc_layer(1024, 512, activation=activation, bias=bias,
+                bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
+        self.fc2 = fc_layer(512, 256, activation=activation, bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
         self.fc3 = nn.Linear(256, out * out)
 
     def forward(self, x):
@@ -405,9 +413,11 @@ class DGCNN(nn.Module):
         self.rotcls_C1 = linear_classifier(1024, 4)
         self.rotcls_C2 = linear_classifier(1024, 4)
         self.defcls_C = linear_classifier(1024, getattr(args, 'nregions', 3)**3)
-        #self.defcls_C = ssl_classifier(args, 1024, getattr(args, 'nregions', 3)**3)
         if getattr(args, 'pred_stat', False):
-            self.stat_C = linear_classifier(1024, 3+1)
+            self.stat_C = linear_classifier(1024, getattr(args, 'nregions',
+                3)*3 + 1)
+        if getattr(args, 'cl', False):
+            self.cl_head = ssl_classifier(args, 1024, args.cl_dim)
         # self.normreg_C = nn.Conv1d(1024, 4, kernel_size=1, bias=False)
         # self.curvconfreg_C = linear_classifier(1)
         self.DecoderFC = DecoderFC(args, 1024)
@@ -429,10 +439,11 @@ class DGCNN(nn.Module):
 
         # returns a tensor of (batch_size, 6, #points, #neighboors)
         # interpretation: each point is represented by 20 NN, each of size 6
-        # x0 = get_graph_feature(x, self.args, k=self.k)  # x0: [b, 6, 1024, 20]
-        # align to a canonical space (e.g., apply rotation such that all inputs will have the same rotation)
-        # transformd_x0 = self.input_transform_net(x0)  # transformd_x0: [3, 3]
-        # x = torch.matmul(transformd_x0, x)
+        if getattr(self.args, 'input_transform', False):
+            x0, _ = get_graph_feature(x, self.args, k=self.k, mask=mask)  # x0: [b, 6, 1024, 20]
+            # align to a canonical space (e.g., apply rotation such that all inputs will have the same rotation)
+            transformd_x0 = self.input_transform_net(x0)  # transformd_x0: [3, 3]
+            x = torch.matmul(transformd_x0, x)
 
         # returns a tensor of (batch_size, 6, #points, #neighboors)
         # interpretation: each point is represented by 20 NN, each of size 6
@@ -516,6 +527,10 @@ class DGCNN(nn.Module):
             reverse_x = ReverseLayerF.apply(x, alpha)
         else:
             reverse_x = x
+        if hasattr(self, 'cl_head'):
+            cls_logits['cl_feat'] = self.cl_head(x)
+        else:
+            cls_logits['cl_feat'] = l2_norm(x, 1) # without head
         cls_logits["domain_cls"] = self.domain_C(reverse_x)
         cls_logits["rot_cls1"] = self.rotcls_C1(x)
         cls_logits["rot_cls2"] = self.rotcls_C2(x)
@@ -540,9 +555,12 @@ class class_classifier(nn.Module):
         activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
         bias = True if args.model == 'dgcnn' else False
 
-        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate, bn=True)
+        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
+                bn=True, norm=getattr(args, 'fc_norm', True))
         self.dp1 = nn.Dropout(p=args.dropout)
-        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True)
+        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True
+            , norm=getattr(args, 'fc_norm', True)
+                )
         self.dp2 = nn.Dropout(p=args.dropout)
         self.mlp3 = nn.Linear(256, num_class)
 
@@ -556,14 +574,19 @@ class class_classifier(nn.Module):
 class ssl_classifier(nn.Module):
     def __init__(self, args, input_dim, num_class):
         super(ssl_classifier, self).__init__()
-        self.mlp1 = fc_layer(input_dim, 256)
+        activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
+        self.mlp1 = fc_layer(input_dim, 256,
+            activation=activate,
+            norm=getattr(args, 'fc_norm', True)
+                )
         self.dp1 = nn.Dropout(p=args.dropout)
         self.mlp2 = nn.Linear(256, num_class)
 
     def forward(self, x):
         x = self.dp1(self.mlp1(x))
-        logits = self.mlp2(x)
-        return logits
+        feats = self.mlp2(x)
+        feats = l2_norm(feats, 1)
+        return feats
 
 
 class linear_classifier(nn.Module):
@@ -583,8 +606,13 @@ class domain_classifier(nn.Module):
         activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
         bias = True if args.model == 'dgcnn' else False
 
-        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate, bn=True)
-        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True)
+        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
+                bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
+        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
         self.mlp3 = nn.Linear(256, num_class)
 
     def forward(self, x):
@@ -600,8 +628,13 @@ class DecoderFC(nn.Module):
         activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
         bias = True if args.model == 'dgcnn' else False
 
-        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate, bn=True)
-        self.mlp2 = fc_layer(512, 512, bias=True, activation=activate, bn=True)
+        self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
+                bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
+        self.mlp2 = fc_layer(512, 512, bias=True, activation=activate, bn=True,
+            norm=getattr(args, 'fc_norm', True)
+                )
         self.mlp3 = nn.Linear(512, args.output_pts * 3)
 
     def forward(self, x):

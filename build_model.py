@@ -11,74 +11,76 @@ except ImportError:
     print("pointnet unavalable")
 import json
 from config_transformer import MODEL_CONFIGS, model_from_config
-from model.pvcnn_generation import PVCNN2Base
+try:
+    from model.pvcnn_generation import PVCNN2Base
+    class PVCNN2LargerBall(PVCNN2Base):
+        sa_blocks = [
+            ((32, 2, 32), (1024, 0.15, 32, (32, 64))),
+            ((64, 3, 16), (256, 0.3, 32, (64, 128))),
+            ((128, 3, 8), (64, 0.6, 32, (128, 256))),
+            (None, (16, 1.2, 32, (256, 256, 512))),
+        ]
+        fp_blocks = [
+            ((256, 256), (256, 3, 8)),
+            ((256, 256), (256, 3, 8)),
+            ((256, 128), (128, 2, 16)),
+            ((128, 128, 64), (64, 2, 32)),
+        ]
 
-class PVCNN2LargerBall(PVCNN2Base):
-    sa_blocks = [
-        ((32, 2, 32), (1024, 0.15, 32, (32, 64))),
-        ((64, 3, 16), (256, 0.3, 32, (64, 128))),
-        ((128, 3, 8), (64, 0.6, 32, (128, 256))),
-        (None, (16, 1.2, 32, (256, 256, 512))),
-    ]
-    fp_blocks = [
-        ((256, 256), (256, 3, 8)),
-        ((256, 256), (256, 3, 8)),
-        ((256, 128), (128, 2, 16)),
-        ((128, 128, 64), (64, 2, 32)),
-    ]
+        def __init__(self, num_classes=3, embed_dim=64, use_att=True, dropout=0.1,
+                extra_feature_channels=0, width_multiplier=1,
+                     voxel_resolution_multiplier=1):
+            super().__init__(
+                num_classes=num_classes, embed_dim=embed_dim, use_att=use_att,
+                dropout=dropout, extra_feature_channels=extra_feature_channels,
+                width_multiplier=width_multiplier, voxel_resolution_multiplier=voxel_resolution_multiplier
+            )
 
-    def __init__(self, num_classes=3, embed_dim=64, use_att=True, dropout=0.1,
-            extra_feature_channels=0, width_multiplier=1,
-                 voxel_resolution_multiplier=1):
-        super().__init__(
-            num_classes=num_classes, embed_dim=embed_dim, use_att=use_att,
-            dropout=dropout, extra_feature_channels=extra_feature_channels,
-            width_multiplier=width_multiplier, voxel_resolution_multiplier=voxel_resolution_multiplier
-        )
-
-    def forward(self, inputs, t, zero_mean=True):
-        # inputs: (B,N,D)
-        # coord: (B,N,D)
-        inputs = inputs.permute(0,2,1)
-        coord = super().forward(inputs, t)
-        coord = coord.permute(0,2,1)
-        if zero_mean:
-            coord = coord - coord.mean(dim=1, keepdim=True)
-        return coord
+        def forward(self, inputs, t, zero_mean=True):
+            # inputs: (B,N,D)
+            # coord: (B,N,D)
+            inputs = inputs.permute(0,2,1)
+            coord = super().forward(inputs, t)
+            coord = coord.permute(0,2,1)
+            if zero_mean:
+                coord = coord - coord.mean(dim=1, keepdim=True)
+            return coord
 
 
-class PVCNN2(PVCNN2Base):
-    sa_blocks = [
-        ((32, 2, 32), (1024, 0.1, 32, (32, 64))),
-        ((64, 3, 16), (256, 0.2, 32, (64, 128))),
-        ((128, 3, 8), (64, 0.4, 32, (128, 256))),
-        (None, (16, 0.8, 32, (256, 256, 512))),
-    ]
-    fp_blocks = [
-        ((256, 256), (256, 3, 8)),
-        ((256, 256), (256, 3, 8)),
-        ((256, 128), (128, 2, 16)),
-        ((128, 128, 64), (64, 2, 32)),
-    ]
+    class PVCNN2(PVCNN2Base):
+        sa_blocks = [
+            ((32, 2, 32), (1024, 0.1, 32, (32, 64))),
+            ((64, 3, 16), (256, 0.2, 32, (64, 128))),
+            ((128, 3, 8), (64, 0.4, 32, (128, 256))),
+            (None, (16, 0.8, 32, (256, 256, 512))),
+        ]
+        fp_blocks = [
+            ((256, 256), (256, 3, 8)),
+            ((256, 256), (256, 3, 8)),
+            ((256, 128), (128, 2, 16)),
+            ((128, 128, 64), (64, 2, 32)),
+        ]
 
-    def __init__(self, num_classes=3, embed_dim=64, use_att=True, dropout=0.1,
-            extra_feature_channels=0, width_multiplier=1,
-                 voxel_resolution_multiplier=1):
-        super().__init__(
-            num_classes=num_classes, embed_dim=embed_dim, use_att=use_att,
-            dropout=dropout, extra_feature_channels=extra_feature_channels,
-            width_multiplier=width_multiplier, voxel_resolution_multiplier=voxel_resolution_multiplier
-        )
+        def __init__(self, num_classes=3, embed_dim=64, use_att=True, dropout=0.1,
+                extra_feature_channels=0, width_multiplier=1,
+                     voxel_resolution_multiplier=1):
+            super().__init__(
+                num_classes=num_classes, embed_dim=embed_dim, use_att=use_att,
+                dropout=dropout, extra_feature_channels=extra_feature_channels,
+                width_multiplier=width_multiplier, voxel_resolution_multiplier=voxel_resolution_multiplier
+            )
 
-    def forward(self, inputs, t, zero_mean=True):
-        # inputs: (B,N,D)
-        # coord: (B,N,D)
-        inputs = inputs.permute(0,2,1)
-        coord = super().forward(inputs, t)
-        coord = coord.permute(0,2,1)
-        if zero_mean:
-            coord = coord - coord.mean(dim=1, keepdim=True)
-        return coord
+        def forward(self, inputs, t, zero_mean=True):
+            # inputs: (B,N,D)
+            # coord: (B,N,D)
+            inputs = inputs.permute(0,2,1)
+            coord = super().forward(inputs, t)
+            coord = coord.permute(0,2,1)
+            if zero_mean:
+                coord = coord - coord.mean(dim=1, keepdim=True)
+            return coord
+except:
+    print("PVD unavalable")
 
 
 def get_model(args, device):
@@ -117,7 +119,7 @@ def get_model(args, device):
 def get_optim(args, generative_model):
     optim = torch.optim.AdamW(
         generative_model.parameters(),
-        lr=args.lr, amsgrad=getattr(args, 'amggrad', True),
+        lr=args.lr, amsgrad=getattr(args, 'amsgrad', False),
         betas=(args.beta1, args.beta2) if hasattr(args, 'beta1') else (0.9, 0.999),
         weight_decay=getattr(args, 'wd', 1e-12))
 

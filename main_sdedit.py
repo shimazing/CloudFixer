@@ -215,14 +215,18 @@ parser.add_argument('--ddim', action='store_true')
 parser.add_argument('--preprocess', action='store_true')
 parser.add_argument('--latent_subdist', action='store_true')
 parser.add_argument('--n_inversion_steps', type=int, default=50) #action='store_true')
-parser.add_argument('--n_reverse_steps', type=int, default=50) #action='store_true')
+parser.add_argument('--n_reverse_steps', type=int, default=20) #action='store_true')
 parser.add_argument('--voxel_resolution', type=int, default=32)
 parser.add_argument('--voxelization', action='store_true')
+parser.add_argument('--time_cond', action='store_true')
 parser.add_argument('--preprocess_model', type=str,
     default='outputs/stat_pred_only_lr1e-4_nregions5_rng3.5_droprate0.7/model.ptdgcnn')
 parser.add_argument('--nregions', type=int, default=5)
+parser.add_argument('--input_transform', action='store_true',
+    help='whether to apply input_transform (rotation) in DGCNN')
 
 args = parser.parse_args()
+ori_time_cond = args.time_cond
 zero_mean = not args.no_zero_mean
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 #dtype = torch.float32
@@ -270,11 +274,13 @@ if args.n_nodes == 1024:
             args.model = 'dgcnn'
             args.pred_stat = True
             args.time_cond = False
+            args.fc_norm = True
             preprocess_model = DGCNN(args).to(device)
             preprocess_model.load_state_dict(torch.load(args.preprocess_model,
                 map_location='cpu'))
             preprocess_model.eval()
             args.model = ori_model
+            args.time_cond = ori_time_cond
             args.pred_stat = False
     elif args.dataset == 'modelnet':
         test_dataset = ModelNet(io, './data', 'test', jitter=args.jitter,
@@ -321,7 +327,7 @@ else: # 2048
 args.wandb_usr = utils.get_wandb_username(args.wandb_usr)
 
 
-if args.ddim:
+if False: #args.ddim:
     # deterministic
     args.K = 1
 
@@ -375,8 +381,11 @@ if args.resume is not None:
 ori_args_model = args.model
 
 args.model = 'dgcnn'
-args.time_cond = False
-args.nregions = 3
+#args.time_cond = False
+if args.time_cond:
+    args.fc_norm = False
+    args.cls_scale_mode = 'unit_std'
+args.nregions = 3  # (default value)
 classifier = DGCNN(args).to(device).eval()
 classifier.load_state_dict(
 torch.load(
@@ -392,6 +401,7 @@ if args.egsde:
     from chamfer_distance import ChamferDistance as chamfer_dist
     chamfer_dist_fn = chamfer_dist()
     args.time_cond = True
+    args.fc_norm = True
     domain_cls = DGCNN(args).to(device).eval()
     domain_cls_state_dict = torch.load(
         args.domain_cls,
@@ -500,6 +510,8 @@ def main():
         correct_count = [0 for _ in range(K+1)]
         correct_count_y = [0 for _ in range(K+1)]
         correct_count_self_ensemble = [0 for _ in range(K)]
+        if args.ddim and ori_time_cond:
+            correct_count_itmd = [[0, 0] for _ in range(K)]
         correct_count_vote = 0
         correct_count_vote_soft = 0
         correct_count_vote_soft_ensemble = 0
@@ -535,6 +547,444 @@ def main():
                 x[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
             count += len(x)
             t = args.t * x.new_ones((x.shape[0], 1), device=x.device)
+            node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
+            gamma_t = model.inflate_batch_array(model.gamma(t), x)
+            alpha_t = model.alpha(gamma_t, x)
+            sigma_t = model.sigma(gamma_t, x)
+
+            @torch.enable_grad()
+            def cond_fn_entropy(yt, t, phi, x, model_kwargs):
+                # Ss (realistic expert)
+                classifier.requires_grad_(True)
+                yt.requires_grad_(True)
+                if args.model == 'pvd':
+                    model.train()
+                gamma_t = \
+                    model.inflate_batch_array(model.gamma(t), x)
+                alpha_t = model.alpha(gamma_t, x)
+                sigma_t = model.sigma(gamma_t, x)
+                if args.lambda_s > 0:
+                    eps = phi(yt, t, **model_kwargs)
+                    y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
+                    #if not ori_time_cond:
+                    if args.cls_scale_mode == 'unit_norm':
+                        y0_est_norm = scale_to_unit_cube_torch(y0_est)
+                        cls_output = classifier(y0_est_norm.permute(0,2,1))
+                    else:
+                        cls_output = classifier(y0_est,
+                                ts=torch.zeros_like(t).flatten())
+                    cls_logits = cls_output['cls']
+                    entropy = - (F.log_softmax(cls_logits, dim=-1) * F.softmax(cls_logits,
+                        dim=-1)).sum(dim=-1).mean()
+                else:
+                    entropy = 0
+                # Si (faithful expert)
+                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=model_kwargs['node_mask'],
+                    )
+                if args.lambda_i > 0:
+                    if args.latent_subdist: # loss_i in latent space
+                        xt = x * alpha_t + noise * sigma_t
+                        xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
+                                furthest_point_idx]
+                        yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
+                                furthest_point_idx]
+                        subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
+                        dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
+                        #print(dist1.shape)
+                        subdist_loss = dist1.mean()
+                    else: # after model run
+                        eps = phi(yt, t, **model_kwargs)
+                        x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
+                        y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
+                        y0_est_sub = y0_est[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
+                                furthest_point_idx]
+                        subdist_loss = (x_sub - y0_est_sub).pow(2).sum(-1).mean()
+                        dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
+                        subdist_loss = dist1_.mean()
+                else:
+                    subdist_loss = 0
+                grad = torch.autograd.grad(
+                    (args.lambda_s * entropy + args.lambda_i * subdist_loss),
+                    yt, allow_unused=True)[0]
+                if args.model == 'pvd':
+                    model.eval()
+                return grad
+
+            @torch.enable_grad()
+            def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
+                if args.model == 'pvd':
+                    model.train()
+                yt.requires_grad_(True)
+                # Ss (realistic expert)
+                gamma_t = \
+                    model.inflate_batch_array(model.gamma(t), x)
+                alpha_t = model.alpha(gamma_t, x).to(x)
+                sigma_t = model.sigma(gamma_t, x).to(x)
+                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=model_kwargs['node_mask'],
+                    ).to(x)
+                xt = x * alpha_t + noise * sigma_t
+                t_int = (t * model.T).long().float().flatten()
+
+                x_output = domain_cls(xt.permute(0,2,1), ts=t_int)
+                domain_x = x_output['domain_cls']
+                feat_x = x_output['features'].permute(0,2,1)
+
+                y_output = domain_cls(yt.permute(0,2,1), ts=t_int)
+                domain_y = y_output['domain_cls']
+                feat_y = y_output['features'].permute(0,2,1)
+                if True:
+                    if args.lambda_s > 0:
+                        domain_loss = F.cross_entropy(domain_y,
+                                domain_y.new_zeros((len(domain_y),)).long())
+                    else:
+                        domain_loss = 0
+                else:
+                    domain_loss = F.cosine_similarity(feat_x, feat_y, dim=-1).mean()
+
+                # Si (faithful expert)
+                if args.lambda_i > 0:
+                    if args.voxelization:
+                        if not args.latent_subdist: # in the sample space
+                            eps = phi(yt, t, **model_kwargs)
+                            x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                        furthest_point_idx]
+                            y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
+                            vox_x, _, norm = voxelization(x.permute(0,2,1),
+                                    x.permute(0,2,1))
+                            vox_y = voxelization(y0_est.permute(0,2,1),
+                                    y0_est.permute(0,2,1), norm=norm)[0]
+                        else: # in the latent space
+                            vox_x, _, norm = voxelization(xt.permute(0,2,1),
+                                    xt.permute(0,2,1))
+                            vox_y = voxelization(yt.permute(0,2,1),
+                                    yt.permute(0,2,1), norm=norm)[0]
+                        subdist_loss = F.mse_loss(vox_y, vox_x)
+                    elif args.latent_subdist: # chamfer dist in the latent space
+                        xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
+                                furthest_point_idx]
+                        yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
+                                furthest_point_idx]
+                        #subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
+                        dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
+                        subdist_loss = dist1.mean()
+                    else: # chamfer dist in the sample space
+                        eps = phi(yt, t, **model_kwargs)
+                        x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
+                        y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
+                        dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
+                        subdist_loss = dist1_.mean()
+                else:
+                    subdist_loss = 0
+                grad = torch.autograd.grad(
+                    (args.lambda_s * domain_loss + args.lambda_i * subdist_loss),
+                    yt, allow_unused=True)[0]
+                if args.model == 'pvd':
+                    model.eval()
+                return grad
+
+            @torch.enable_grad()
+            def cond_fn_sub_naive(yt, t, phi, x, model_kwargs):
+                gamma_t = \
+                    model.inflate_batch_array(model.gamma(t), x)
+                alpha_t = model.alpha(gamma_t, x)
+                sigma_t = model.sigma(gamma_t, x)
+                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=model_kwargs['node_mask'],
+                    )
+                xt = x * alpha_t + noise * sigma_t
+                xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
+                yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
+
+                loss = (xt_sub - yt_sub).pow(2).mean()
+                grad = torch.autograd.grad(loss, yt, allow_unused=True)[0]
+                return grad
+
+
+            @torch.enable_grad()
+            def cond_fn_sub(xt, t, phi, x, model_kwargs):
+                model.dynamics.requires_grad_(True)
+
+                #sub_x = \
+                #    pointnet2_utils.gather_operation(x.transpose(1,2).contiguous(), furthest_point_idx).transpose(1, 2).contiguous()
+
+                xt.requires_grad_(True)
+                eps = phi(xt, t, **model_kwargs)
+                # batch_size x N x 3
+
+                gamma_t = model.inflate_batch_array(model.gamma(t), x)
+                alpha_t = model.alpha(gamma_t, x)
+                sigma_t = model.sigma(gamma_t, x)
+
+                x0_est = 1 / alpha_t * (xt  - sigma_t * eps)
+                sub_x0_est = x0_est[torch.arange(len(x)).view(-1,
+                    1).to(furthest_point_idx),
+                        furthest_point_idx]
+                #sub_x0_est = \
+                #    pointnet2_utils.gather_operation(x0_est.transpose(1,2).contiguous(), furthest_point_idx).transpose(1, 2).contiguous()
+
+                loss = args.guidance_scale * (sub_x0_est - sub_x).pow(2).mean()
+
+                grad = torch.autograd.grad(loss, xt, allow_unused=True)[0]
+                return grad
+
+
+            #x_ori = x
+            x_edit_list = [x]
+            x_edit_list_y = [x]
+            labels_list = [labels]
+            if args.ddim and ori_time_cond:
+                itmd_list = []
+            for k in range(K):
+                print(k+1,  "/", K)
+                eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=node_mask,
+                    )
+                if False: #args.ddim:
+                    inversion_steps = np.linspace(0, args.t, args.n_inversion_steps)
+                    # inversion
+                    z = x.detach().clone()
+                    print("Inversion")
+                    for t, s in tqdm(zip(inversion_steps[:-1],
+                        inversion_steps[1:]), total=len(inversion_steps)-1):
+                        t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
+                        s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
+                        z = model_dp(z, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                t=t_tensor, node_mask=node_mask, edge_mask=None, cond_fn=None)
+                else:
+                    z = alpha_t * x + sigma_t * eps # diffusion
+
+                y = z.detach().clone()
+                if args.ddim:
+                    reverse_steps = np.linspace(args.t, 0, args.n_reverse_steps)
+                    print("Reverse Steps")
+                    if ori_time_cond:
+                        itmd = [] # list of (latent var, t)
+                    for t, s in tqdm(zip(reverse_steps[:-1], reverse_steps[1:]),
+                            total=len(reverse_steps)-1):
+                        t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
+                        s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
+                        z = model_dp(z, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
+                                cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
+                                if args.guidance_scale > 0 else None)), #noise=noise,
+                                x_ori=x,
+                                )
+                        if ori_time_cond:
+                            itmd.append((z, s))
+                        if args.egsde or args.entropy_guided:
+                            y = model_dp(y, sample_p_zs_given_zt_ddim=True, s=s_tensor,
+                                    t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
+                                    )
+                    if ori_time_cond:
+                        itmd_list.append(itmd)
+                else:
+                    for _ in tqdm(range(int(args.t * args.diffusion_steps))):
+                        z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
+                                1./args.diffusion_steps, t=t,
+                            node_mask=node_mask, edge_mask=None, #fix_noise=False,
+                            cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
+                            if args.guidance_scale > 0 else None)),
+                            x_ori=x,
+                            return_noise=True)
+                        if args.egsde or args.entropy_guided:
+                            y = model_dp(y, sample_p_zs_given_zt=True, s=t -
+                                    1./args.diffusion_steps, t=t,
+                                node_mask=node_mask, edge_mask=None, #fix_noise=False,
+                                cond_fn=None, noise=noise) # w/o guidance for comparison
+
+
+                        # constraint (like ilvr)
+                        if args.keep_sub:
+                            # for sub_x
+                            gamma_s = \
+                                model.inflate_batch_array(model.gamma(t-1./args.diffusion_steps), x)
+                            alpha_s = model.alpha(gamma_s, x)
+                            sigma_s = model.sigma(gamma_s, x)
+                            eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                                n_nodes=x.size(1),
+                                node_mask=node_mask,
+                                )
+                            z[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                              furthest_point_idx] = (alpha_s * x + sigma_s * eps)[
+                                    torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
+                            ###################################
+                            if zero_mean:
+                                z = z - z.mean(dim=1, keepdim=True)
+                            ###################################
+                        t = t - 1. / args.diffusion_steps
+
+                    assert torch.all(t.abs() < 1e-5)
+
+                if args.egsde or args.entropy_guided:
+                    x_edit_y = model_dp(y, sample_p_x_given_z0=True,
+                            node_mask=node_mask, edge_mask=None,
+                            #fix_noise=False,
+                            ddim=args.ddim)
+                    x_edit_list_y.append(x_edit_y)
+                x_edit = model_dp(z, sample_p_x_given_z0=True,
+                        node_mask=node_mask, edge_mask=None,
+                        #fix_noise=False,
+                        ddim=args.ddim)
+                if args.accum_edit:
+                    x = x_edit
+                x_edit_list.append(x_edit)
+                labels_list.append(labels)
+                t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # reset
+            if args.K:
+                x_edited_batch = torch.cat(x_edit_list[1:], dim=0).cpu()
+                label_batch = torch.cat(labels_list[1:], dim=0).cpu()
+
+                x_edited_batch_list.append(x_edited_batch)
+                label_batch_list.append(label_batch)
+
+            if args.cls_scale_mode == 'unit_norm':
+                x_edit_list = [scale_to_unit_cube_torch(x.clone().detach()) for x in x_edit_list] # undo scaling
+                x_edit_list_y = [scale_to_unit_cube_torch(x.clone().detach())
+                        for x in x_edit_list_y] # undo scaling
+            preds4vote = [] # hard
+            preds4vote_y = [] # hard
+            preds4vote_soft = []
+            preds4vote_soft_y = []
+            for k, x_edit in enumerate(x_edit_list): #, x_edit_list_y)):
+                logits = classifier(x_edit.permute(0, 2, 1),
+                        activate_DefRec=False, ts=x_edit.new_zeros(len(x_edit)))
+                # ignored when (not classifier.time_cond)
+                if args.egsde or args.entropy_guided:
+                    x_edit_y = x_edit_list_y[k]
+                    logits_y = classifier(x_edit_y.permute(0, 2, 1),
+                            activate_DefRec=False,
+                            ts=x_edit_y.new_zeros(len(x_edit_y)))
+                    preds_y = logits_y["cls"].max(dim=1)[1]
+                    correct_count_y[k] += (preds_y == labels).long().sum().item()
+                preds = logits["cls"].max(dim=1)[1] # argmax
+                if k == 0:
+                    ori_preds = preds
+                    ori_probs = logits["cls"].softmax(dim=-1)
+                else:
+                    preds4vote.append(preds)
+                    preds4vote_soft.append(torch.softmax(logits['cls'], dim=-1))
+                    if args.egsde or args.entropy_guided:
+                        preds4vote_y.append(preds_y)
+                        preds4vote_soft_y.append(torch.softmax(logits_y['cls'],
+                            dim=-1))
+                    for ind in range(len(labels)):
+                        pred_change[labels[ind].cpu(), ori_preds[ind].cpu(), preds[ind].cpu(), k-1] += 1
+
+                    #for label, ori, pred in zip(labels, ori_preds, preds):
+                    #    pred_change[int(label)][int(ori), int(pred), k-1] += 1
+                correct_count[k] += (preds == labels).long().sum().item()
+                if k>0:
+                    correct_count_self_ensemble[k-1] += \
+                        ((logits['cls'].softmax(dim=-1) +
+                                ori_probs).max(dim=1)[1]  ==
+                                labels).long().sum().item()
+                    if args.ddim and ori_time_cond:
+                        itmd_prob_k = []
+                        itmd_pred_k = []
+                        for xt, t in itmd_list[k-1]:
+                            itmd_prob_k.append(torch.softmax(classifier(xt.permute(0,2,1),
+                                    ts=xt.new_ones(len(xt)))['cls'], dim=-1))
+                            itmd_pred_k.append(
+                                itmd_prob_k[-1].argmax(dim=1))
+                        correct_count_itmd[k-1][0] += (torch.stack(itmd_prob_k,
+                                dim=1).mean(dim=1).argmax(dim=-1) ==
+                                labels).long().sum().item() # soft voting of itmd
+                        correct_count_itmd[k-1][1] += (torch.stack(itmd_pred_k,
+                            dim=1).mode(dim=1).values ==
+                            labels).long().sum().item() # hard voting of itmd
+
+            io.cprint("ACC")
+            for ck, cc in enumerate(correct_count):
+                io.cprint(f'{ck} {cc/max(count, 1)*100}')
+                if ck > 0:
+                    if args.egsde or args.entropy_guided:
+                        io.cprint(f'{ck} {correct_count_y[ck]/max(count,1)*100}')
+                    io.cprint(f'self ensemble {correct_count_self_ensemble[ck-1] / max(count,1)*100}')
+                    if args.ddim and ori_time_cond:
+                        io.cprint(f'itmd voting soft {correct_count_itmd[ck-1][0] / max(count, 1)*100}')
+                        io.cprint(f'itmd voting hard {correct_count_itmd[ck-1][1] / max(count, 1)*100}')
+
+            if args.K > 1:
+                preds_vote = torch.stack(preds4vote, dim=1).mode(dim=1).values
+                probs_vote_soft =  torch.stack(preds4vote_soft,dim=1).mean(dim=1)
+                preds_vote_soft = torch.stack(preds4vote_soft, dim=1).mean(dim=1).max(dim=1)[1]
+                correct_count_vote += (preds_vote == labels).long().sum().item()
+                correct_count_vote_soft += (preds_vote_soft == labels).long().sum().item()
+                correct_count_vote_soft_ensemble += ((probs_vote_soft + ori_probs).max(dim=1)[1] ==
+                        labels).long().sum().item()
+                io.cprint(f'vote {correct_count_vote / max(count, 1)*100}')
+                io.cprint(f'vote soft {correct_count_vote_soft / max(count, 1)*100}')
+                io.cprint(f'vote soft ensemble {correct_count_vote_soft_ensemble / max(count, 1)*100}')
+
+                if args.egsde or args.entropy_guided:
+                    preds_vote_y = torch.stack(preds4vote_y, dim=1).mode(dim=1).values
+                    probs_vote_soft_y =  torch.stack(preds4vote_soft_y,dim=1).mean(dim=1)
+                    preds_vote_soft_y = torch.stack(preds4vote_soft_y, dim=1).mean(dim=1).max(dim=1)[1]
+                    correct_count_vote_y += (preds_vote_y == labels).long().sum().item()
+                    correct_count_vote_soft_y += (preds_vote_soft_y == labels).long().sum().item()
+                    correct_count_vote_soft_ensemble_y += ((probs_vote_soft_y + ori_probs).max(dim=1)[1] ==
+                            labels).long().sum().item()
+                    io.cprint(f'vote (ori) {correct_count_vote_y / max(count, 1)*100}')
+                    io.cprint(f'vote soft (ori) {correct_count_vote_soft_y / max(count, 1)*100}')
+                    io.cprint(f'vote soft ensemble (ori) {correct_count_vote_soft_ensemble_y / max(count, 1)*100}')
+
+
+        if args.K:
+            x_edited_whole = torch.cat(x_edited_batch_list, dim=0)
+            label_whole = torch.cat(label_batch_list, dim=0)
+            #torch.save({'x': x_edited_whole, 'label':label_whole},
+            #            f'data/shapenet_dm_aug_{args.t}.pt')
+            #print('Save!', f'data/shapenet_dm_aug_{args.t}.pt')
+
+        for label, change in enumerate(pred_change):
+            print(label)
+            print(np.transpose(change, (2, 0, 1)))
+
+        io.cprint(args)
+
+    if 'vis' in args.mode:
+      with torch.no_grad():
+        for iter_idx, data in enumerate(test_loader_vis):
+            labels = [idx_to_label[int(d)] for d in data[1]]
+
+            print([idx_to_label[int(d)] for d in data[1]])
+            x = data[0].to(device)
+            rgbs = get_color(x.cpu().numpy())
+            furthest_point_idx = \
+                farthest_point_sample(x.permute(0,2,1), getattr(args,
+                        'n_subsample', 64))[0]
+            #furthest_point_idx = \
+            #    pointnet2_utils.furthest_point_sample(x,
+            #            getattr(args, 'n_subsample', 64))
+            furthest_point_idx = furthest_point_idx.long()
+            #print(furthest_point_idx)
+            #input()
+            # x : batch_size x N x 3
+            sub_x = \
+                x[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
+            rgbs_sub = rgbs[np.arange(len(x)).reshape(-1, 1),
+                    furthest_point_idx.cpu().numpy()]
+
+            #logits = classifier(scale_to_unit_cube_torch(x.clone().detach()).permute(0, 2, 1), activate_DefRec=False)
+            logits = classifier(x.clone().detach().permute(0, 2, 1), activate_DefRec=False)
+            preds = logits['cls'].max(dim=1)[1]
+            prob_ori = logits['cls'].softmax(-1)
+            preds_label = [idx_to_label[int(d)] for d in preds]
+            print("ori", preds_label)
+            #record = (data[1].to(device) == preds).long().sum() / len(x) < 0.5
+            #if not record:
+            #    continue
+
+            t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # 0~1
             node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
             gamma_t = model.inflate_batch_array(model.gamma(t), x)
             alpha_t = model.alpha(gamma_t, x)
@@ -717,34 +1167,24 @@ def main():
                 grad = torch.autograd.grad(loss, xt, allow_unused=True)[0]
                 return grad
 
+            x_ori = x
+            z_t_list = []
+            x_edit_list = []
+            x_edit_list_y = []
+            preds_list = []
+            preds_list_y = []
 
-            #x_ori = x
-            x_edit_list = [x]
-            x_edit_list_y = [x]
-            labels_list = [labels]
             for k in range(K):
-                print(k+1,  "/", K)
                 eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
                     node_mask=node_mask,
                     )
-                if args.ddim:
-                    inversion_steps = np.linspace(0, args.t, args.n_inversion_steps)
-                    # inversion
-                    z = x.detach().clone()
-                    print("Inversion")
-                    for t, s in tqdm(zip(inversion_steps[:-1],
-                        inversion_steps[1:]), total=len(inversion_steps)-1):
-                        t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)
-                        s_tensor = s * x.new_ones((x.shape[0], 1), device=x.device)
-                        z = model_dp(z, sample_p_zs_given_zt_ddim=True, s=s_tensor,
-                                t=t_tensor, node_mask=node_mask, edge_mask=None, cond_fn=None)
-                else:
-                    z = alpha_t * x + sigma_t * eps # diffusion
-
+                z = alpha_t * x + sigma_t * eps # diffusion
+                z_t_list.append(z)
                 y = z.detach().clone()
                 if args.ddim:
-                    reverse_steps = np.linspace(args.t, 0, args.n_reverse_steps)
+                    reverse_steps = np.linspace(args.diffusion_steps * args.t,
+                            0, args.n_reverse_steps).astype(int) / args.diffusion_steps
                     print("Reverse Steps")
                     for t, s in tqdm(zip(reverse_steps[:-1], reverse_steps[1:]),
                             total=len(reverse_steps)-1):
@@ -774,475 +1214,27 @@ def main():
                                     1./args.diffusion_steps, t=t,
                                 node_mask=node_mask, edge_mask=None, #fix_noise=False,
                                 cond_fn=None, noise=noise) # w/o guidance for comparison
-
-
-                        # constraint (like ilvr)
-                        if args.keep_sub:
-                            # for sub_x
-                            gamma_s = \
-                                model.inflate_batch_array(model.gamma(t-1./args.diffusion_steps), x)
-                            alpha_s = model.alpha(gamma_s, x)
-                            sigma_s = model.sigma(gamma_s, x)
-                            eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-                                n_nodes=x.size(1),
-                                node_mask=node_mask,
-                                )
-                            z[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-                              furthest_point_idx] = (alpha_s * x + sigma_s * eps)[
-                                    torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-                                    furthest_point_idx]
-                            ###################################
-                            if zero_mean:
-                                z = z - z.mean(dim=1, keepdim=True)
-                            ###################################
                         t = t - 1. / args.diffusion_steps
-
-                    assert torch.all(t.abs() < 1e-5)
-
-                if args.egsde or args.entropy_guided:
-                    x_edit_y = model_dp(y, sample_p_x_given_z0=True,
-                            node_mask=node_mask, edge_mask=None,
-                            #fix_noise=False,
-                            ddim=args.ddim)
-                    x_edit_list_y.append(x_edit_y)
-                x_edit = model_dp(z, sample_p_x_given_z0=True,
-                        node_mask=node_mask, edge_mask=None,
-                        #fix_noise=False,
-                        ddim=args.ddim)
-                if args.accum_edit:
-                    x = x_edit
-                x_edit_list.append(x_edit)
-                labels_list.append(labels)
-                t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # reset
-            if args.K:
-                x_edited_batch = torch.cat(x_edit_list[1:], dim=0).cpu()
-                label_batch = torch.cat(labels_list[1:], dim=0).cpu()
-
-                x_edited_batch_list.append(x_edited_batch)
-                label_batch_list.append(label_batch)
-
-            if args.cls_scale_mode == 'unit_norm':
-                x_edit_list = [scale_to_unit_cube_torch(x.clone().detach()) for x in x_edit_list] # undo scaling
-                x_edit_list_y = [scale_to_unit_cube_torch(x.clone().detach())
-                        for x in x_edit_list_y] # undo scaling
-            preds4vote = [] # hard
-            preds4vote_y = [] # hard
-            preds4vote_soft = []
-            preds4vote_soft_y = []
-            for k, x_edit in enumerate(x_edit_list): #, x_edit_list_y)):
-                logits = classifier(x_edit.permute(0, 2, 1), activate_DefRec=False)
-                if args.egsde or args.entropy_guided:
-                    x_edit_y = x_edit_list_y[k]
-                    logits_y = classifier(x_edit_y.permute(0, 2, 1), activate_DefRec=False)
-                    preds_y = logits_y["cls"].max(dim=1)[1]
-                    correct_count_y[k] += (preds_y == labels).long().sum().item()
-                preds = logits["cls"].max(dim=1)[1] # argmax
-                if k == 0:
-                    ori_preds = preds
-                    ori_probs = logits["cls"].softmax(dim=-1)
-                else:
-                    preds4vote.append(preds)
-                    preds4vote_soft.append(torch.softmax(logits['cls'], dim=-1))
-                    if args.egsde or args.entropy_guided:
-                        preds4vote_y.append(preds_y)
-                        preds4vote_soft_y.append(torch.softmax(logits_y['cls'],
-                            dim=-1))
-                    for ind in range(len(labels)):
-                        pred_change[labels[ind].cpu(), ori_preds[ind].cpu(), preds[ind].cpu(), k-1] += 1
-
-                    #for label, ori, pred in zip(labels, ori_preds, preds):
-                    #    pred_change[int(label)][int(ori), int(pred), k-1] += 1
-                correct_count[k] += (preds == labels).long().sum().item()
-                if k>0:
-                    correct_count_self_ensemble[k-1] += \
-                        ((logits['cls'].softmax(dim=-1) +
-                                ori_probs).max(dim=1)[1]  ==
-                                labels).long().sum().item()
-
-
-            io.cprint("ACC")
-            for ck, cc in enumerate(correct_count):
-                io.cprint(f'{ck} {cc/max(count, 1)*100}')
-                if ck > 0:
-                    if args.egsde or args.entropy_guided:
-                        io.cprint(f'{ck} {correct_count_y[ck]/max(count,1)*100}')
-                    io.cprint(f'self ensemble {correct_count_self_ensemble[ck-1] / max(count,1)*100}')
-
-            if args.K > 1:
-                preds_vote = torch.stack(preds4vote, dim=1).mode(dim=1).values
-                probs_vote_soft =  torch.stack(preds4vote_soft,dim=1).mean(dim=1)
-                preds_vote_soft = torch.stack(preds4vote_soft, dim=1).mean(dim=1).max(dim=1)[1]
-                correct_count_vote += (preds_vote == labels).long().sum().item()
-                correct_count_vote_soft += (preds_vote_soft == labels).long().sum().item()
-                correct_count_vote_soft_ensemble += ((probs_vote_soft + ori_probs).max(dim=1)[1] ==
-                        labels).long().sum().item()
-                io.cprint(f'vote {correct_count_vote / max(count, 1)*100}')
-                io.cprint(f'vote soft {correct_count_vote_soft / max(count, 1)*100}')
-                io.cprint(f'vote soft ensemble {correct_count_vote_soft_ensemble / max(count, 1)*100}')
-
-                if args.egsde or args.entropy_guided:
-                    preds_vote_y = torch.stack(preds4vote_y, dim=1).mode(dim=1).values
-                    probs_vote_soft_y =  torch.stack(preds4vote_soft_y,dim=1).mean(dim=1)
-                    preds_vote_soft_y = torch.stack(preds4vote_soft_y, dim=1).mean(dim=1).max(dim=1)[1]
-                    correct_count_vote_y += (preds_vote_y == labels).long().sum().item()
-                    correct_count_vote_soft_y += (preds_vote_soft_y == labels).long().sum().item()
-                    correct_count_vote_soft_ensemble_y += ((probs_vote_soft_y + ori_probs).max(dim=1)[1] ==
-                            labels).long().sum().item()
-                    io.cprint(f'vote (ori) {correct_count_vote_y / max(count, 1)*100}')
-                    io.cprint(f'vote soft (ori) {correct_count_vote_soft_y / max(count, 1)*100}')
-                    io.cprint(f'vote soft ensemble (ori) {correct_count_vote_soft_ensemble_y / max(count, 1)*100}')
-
-
-        if args.K:
-            x_edited_whole = torch.cat(x_edited_batch_list, dim=0)
-            label_whole = torch.cat(label_batch_list, dim=0)
-            #torch.save({'x': x_edited_whole, 'label':label_whole},
-            #            f'data/shapenet_dm_aug_{args.t}.pt')
-            #print('Save!', f'data/shapenet_dm_aug_{args.t}.pt')
-
-        for label, change in enumerate(pred_change):
-            print(label)
-            print(np.transpose(change, (2, 0, 1)))
-
-        io.cprint(args)
-
-    if 'vis' in args.mode:
-      with torch.no_grad():
-        for iter_idx, data in enumerate(test_loader_vis):
-            labels = [idx_to_label[int(d)] for d in data[1]]
-
-            print([idx_to_label[int(d)] for d in data[1]])
-            x = data[0].to(device)
-            rgbs = get_color(x.cpu().numpy())
-            furthest_point_idx = \
-                farthest_point_sample(x.permute(0,2,1), getattr(args,
-                        'n_subsample', 64))[0]
-            #furthest_point_idx = \
-            #    pointnet2_utils.furthest_point_sample(x,
-            #            getattr(args, 'n_subsample', 64))
-            furthest_point_idx = furthest_point_idx.long()
-            #print(furthest_point_idx)
-            #input()
-            # x : batch_size x N x 3
-            sub_x = \
-                x[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
-            rgbs_sub = rgbs[np.arange(len(x)).reshape(-1, 1),
-                    furthest_point_idx.cpu().numpy()]
-
-            #logits = classifier(scale_to_unit_cube_torch(x.clone().detach()).permute(0, 2, 1), activate_DefRec=False)
-            logits = classifier(x.clone().detach().permute(0, 2, 1), activate_DefRec=False)
-            preds = logits['cls'].max(dim=1)[1]
-            prob_ori = logits['cls'].softmax(-1)
-            preds_label = [idx_to_label[int(d)] for d in preds]
-            print("ori", preds_label)
-            #record = (data[1].to(device) == preds).long().sum() / len(x) < 0.5
-            #if not record:
-            #    continue
-
-            t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # 0~1
-            node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-            gamma_t = model.inflate_batch_array(model.gamma(t), x)
-            alpha_t = model.alpha(gamma_t, x)
-            sigma_t = model.sigma(gamma_t, x)
-
-
-            @torch.enable_grad()
-            def cond_fn_entropy(yt, t, phi, x, model_kwargs):
-                # Ss (realistic expert)
-                classifier.requires_grad_(True)
-                yt.requires_grad_(True)
-                gamma_t = \
-                    model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
-                if True: #args.lambda_s > 0:
-                    eps = phi(yt, t, **model_kwargs)
-                    y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-
-                    y0_est_norm = scale_to_unit_cube_torch(y0_est)
-
-                    cls_output = classifier(y0_est_norm.permute(0,2,1))
-                    cls_logits = cls_output['cls']
-
-                    entropy = - (F.log_softmax(cls_logits, dim=-1) * F.softmax(cls_logits,
-                        dim=-1)).sum(dim=-1).mean()
-                else:
-                    entropy = 0
-
-                # Si (faithful expert)
-
-                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-                    n_nodes=x.size(1),
-                    node_mask=model_kwargs['node_mask'],
-                    )
-                if args.lambda_i > 0:
-                    if False:
-                        xt = x * alpha_t + noise * sigma_t
-                        xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-                                furthest_point_idx]
-                        yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-                                furthest_point_idx]
-                        subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
-                        dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
-                        #print(dist1.shape)
-                        subdist_loss = dist1.mean()
-                    else:
-                        eps = phi(yt, t, **model_kwargs)
-                        x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-                                    furthest_point_idx]
-                        y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-                        y0_est_sub = y0_est[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-                                furthest_point_idx]
-                        subdist_loss = (x_sub - y0_est_sub).pow(2).sum(-1).mean()
-                        dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
-                        subdist_loss = dist1_.mean()
-                    print(subdist_loss)
-                else:
-                    subdist_loss = 0
-                grad = torch.autograd.grad(
-                    (args.lambda_s * entropy + args.lambda_i * subdist_loss),
-                    yt, allow_unused=True)[0]
-                #print(grad)
-                #print(grad[grad.nonzero(as_tuple=True)])
-                #print("!!!!!!!!!!!", len(grad.nonzero(as_tuple=True)[0]),
-                #"!!!!!!!!")
-                return grad
-
-            @torch.enable_grad()
-            def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
-                if args.model == 'pvd':
-                    model.train()
-                yt.requires_grad_(True)
-                # Ss (realistic expert)
-                gamma_t = \
-                    model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
-                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-                    n_nodes=x.size(1),
-                    node_mask=model_kwargs['node_mask'],
-                    )
-                xt = x * alpha_t + noise * sigma_t
-                t_int = (t * model.T).long().float().flatten()
-
-                x_output = domain_cls(xt.permute(0,2,1), ts=t_int)
-                domain_x = x_output['domain_cls']
-                feat_x = x_output['features'].permute(0,2,1)
-
-                y_output = domain_cls(yt.permute(0,2,1), ts=t_int)
-                domain_y = y_output['domain_cls']
-                print(domain_y.argmax(dim=1), "!!!!!!!!!!!!")
-                feat_y = y_output['features'].permute(0,2,1)
-                if True:
-                    if args.lambda_s > 0:
-                        domain_loss = F.cross_entropy(domain_y,
-                                domain_y.new_zeros((len(domain_y),)).long())
-                    else:
-                        domain_loss = 0
-                else:
-                    domain_loss = F.cosine_similarity(feat_x, feat_y, dim=-1).mean()
-
-                # Si (faithful expert)
-
-                if args.lambda_i > 0:
-                    if args.voxelization:
-                        if False:
-                            eps = phi(yt, t, **model_kwargs)
-                            x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-                                        furthest_point_idx]
-                            y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-                            vox_x, _, norm = voxelization(x.permute(0,2,1),
-                                    x.permute(0,2,1))
-                            vox_y = voxelization(y0_est.permute(0,2,1),
-                                    y0_est.permute(0,2,1), norm=norm)[0]
-                        else:
-                            vox_x, _, norm = voxelization(xt.permute(0,2,1),
-                                    xt.permute(0,2,1))
-                            vox_y = voxelization(yt.permute(0,2,1),
-                                    yt.permute(0,2,1), norm=norm)[0]
-                        subdist_loss = F.mse_loss(vox_y, vox_x)
-                    elif False:
-                        xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-                                furthest_point_idx]
-                        yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-                                furthest_point_idx]
-                        subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
-                        dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
-                        #print(dist1.shape)
-                        #subdist_loss = dist1.mean()
-                    else:
-                        eps = phi(yt, t, **model_kwargs)
-                        x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-                                    furthest_point_idx]
-                        y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-                        dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
-                        subdist_loss = dist1_.mean()
-                else:
-                    subdist_loss = 0
-                grad = torch.autograd.grad(
-                    (args.lambda_s * domain_loss + args.lambda_i * subdist_loss),
-                    yt, allow_unused=True)[0]
-                #print(grad.min(), grad.max(), grad.abs().mean()) #[grad.nonzero(as_tuple=True)])
-                #print("!!!!!!!!!!!", len(grad.nonzero(as_tuple=True)[0]),
-                #        grad.shape)
-                if args.model == 'pvd':
-                    model.eval()
-                return grad
-
-            #@torch.enable_grad()
-            #def cond_fn_egsde(yt, t, phi, model_kwargs):
-            #    if args.model == 'pvd':
-            #        model.train()
-            #    yt.requires_grad_(True)
-            #    # Ss (realistic expert)
-            #    gamma_t = \
-            #        model.inflate_batch_array(model.gamma(t), x)
-            #    alpha_t = model.alpha(gamma_t, x)
-            #    sigma_t = model.sigma(gamma_t, x)
-            #    noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-            #        n_nodes=x.size(1),
-            #        node_mask=node_mask,
-            #        )
-            #    xt = x * alpha_t + noise * sigma_t
-            #    t_int = (t * model.T).long().float().flatten()
-
-            #    x_output = domain_cls(xt.permute(0,2,1), ts=t_int)
-            #    domain_x = x_output['domain_cls']
-            #    feat_x = x_output['features'].permute(0,2,1)
-
-            #    y_output = domain_cls(yt.permute(0,2,1), ts=t_int)
-            #    domain_y = y_output['domain_cls']
-            #    feat_y = y_output['features'].permute(0,2,1)
-            #    print(domain_y.argmax(dim=1), "!!!!!!!!!!!!")
-            #    if True:
-            #        if args.lambda_s > 0:
-            #            domain_loss = F.cross_entropy(domain_y,
-            #                    domain_y.new_zeros((len(domain_y),)).long())
-            #        else:
-            #            domain_loss = 0
-            #    else:
-            #        domain_loss = F.cosine_similarity(feat_x, feat_y, dim=-1).mean()
-
-            #    # Si (faithful expert)
-
-            #    if args.lambda_i > 0:
-            #        if args.voxelization:
-            #            eps = phi(yt, t, **model_kwargs)
-            #            x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-            #                        furthest_point_idx]
-            #            y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-            #            vox_x, _, norm = voxelization(x.permute(0,2,1),
-            #                    x.permute(0,2,1))
-            #            vox_y = voxelization(y0_est.permute(0,2,1),
-            #                    y0_est.permute(0,2,1), norm=norm)[0] # batch_size x 3 x res x res x res
-            #            subdist_loss = F.mse_loss(vox_y, vox_x)
-            #        elif False:
-            #            xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-            #                    furthest_point_idx]
-            #            yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx),
-            #                    furthest_point_idx]
-            #            subdist_loss = (xt_sub - yt_sub).pow(2).sum(-1).mean()
-            #            dist1, dist2, *_ = chamfer_dist_fn(xt_sub, yt)
-            #            #print(dist1.shape)
-            #            #subdist_loss = dist1.mean()
-            #        else:
-            #            eps = phi(yt, t, **model_kwargs)
-            #            x_sub = x[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
-            #                        furthest_point_idx]
-            #            y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
-            #            dist1_, dist2_, *_ = chamfer_dist_fn(x_sub, y0_est)
-            #            subdist_loss = dist1_.mean()
-            #    else:
-            #        subdist_loss = 0
-            #    grad = torch.autograd.grad(
-            #        (args.lambda_s * domain_loss + args.lambda_i * subdist_loss),
-            #        yt, allow_unused=True)[0]
-            #    #print(grad[grad.nonzero(as_tuple=True)])
-            #    #print("!!!!!!!!!!!", len(grad.nonzero(as_tuple=True)[0]),
-            #    #"!!!!!!!!")
-            #    if args.model == 'pvd':
-            #        model.eval()
-            #    return grad
-
-            @torch.enable_grad()
-            def cond_fn_sub_naive(yt, t, phi, x, model_kwargs):
-                gamma_t = \
-                    model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
-                noise = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-                    n_nodes=x.size(1),
-                    node_mask=model_kwargs['node_mask'],
-                    )
-                xt = x * alpha_t + noise * sigma_t
-                xt_sub = xt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
-                yt_sub = yt[torch.arange(len(x)).view(-1,1).to(furthest_point_idx), furthest_point_idx]
-
-                loss = (xt_sub - yt_sub).pow(2).mean()
-                grad = torch.autograd.grad(loss, yt, allow_unused=True)[0]
-                return grad
-
-
-            @torch.enable_grad()
-            def cond_fn_sub(xt, t, phi, x, model_kwargs):
-                model.dynamics.requires_grad_(True)
-
-                #sub_x = \
-                #    pointnet2_utils.gather_operation(x.transpose(1,2).contiguous(), furthest_point_idx).transpose(1, 2).contiguous()
-
-                xt.requires_grad_(True)
-                eps = phi(xt, t, **model_kwargs)
-                # batch_size x N x 3
-
-                gamma_t = model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
-
-                x0_est = 1 / alpha_t * (xt  - sigma_t * eps)
-                sub_x0_est = x0_est[torch.arange(len(x)).view(-1,
-                    1).to(furthest_point_idx),
-                        furthest_point_idx]
-                #sub_x0_est = \
-                #    pointnet2_utils.gather_operation(x0_est.transpose(1,2).contiguous(), furthest_point_idx).transpose(1, 2).contiguous()
-
-                loss = args.guidance_scale * (sub_x0_est - sub_x).pow(2).mean()
-
-                grad = torch.autograd.grad(loss, xt, allow_unused=True)[0]
-                return grad
-
-            x_ori = x
-            z_t_list = []
-            x_edit_list = []
-            x_edit_list_y = []
-            preds_list = []
-            preds_list_y = []
-
-            for k in range(K):
-                eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
-                    n_nodes=x.size(1),
-                    node_mask=node_mask,
-                    )
-                z = alpha_t * x + sigma_t * eps # diffusion
-                z_t_list.append(z)
-                y = z.detach().clone()
-                for _ in tqdm(range(int(args.t * args.diffusion_steps))):
-                    z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
-                            1./args.diffusion_steps, t=t,
-                        node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
-                        cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
-                        if args.guidance_scale > 0 else None)), #noise=noise,
-                        x_ori=x,
-                        return_noise=True)
-                    if args.egsde or args.entropy_guided:
-                        y = model_dp(y, sample_p_zs_given_zt=True, s=t -
-                                1./args.diffusion_steps, t=t,
-                            node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
-                            cond_fn=None, noise=noise) #return_noise=True)
-                    t = t - 1. / args.diffusion_steps
-                    print('diff', (z-y).abs().max(), (z-y).abs().mean())
-                assert torch.all(t.abs() < 1e-5) #torch.allclose(t, torch.zeros_like(t))
+                    assert torch.all(t.abs() < 1e-5) #torch.allclose(t, torch.zeros_like(t))
+                #for _ in tqdm(range(int(args.t * args.diffusion_steps))):
+                #    z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
+                #            1./args.diffusion_steps, t=t,
+                #        node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
+                #        cond_fn=cond_fn_entropy if args.entropy_guided else (cond_fn_egsde if args.egsde else (cond_fn_sub
+                #        if args.guidance_scale > 0 else None)), #noise=noise,
+                #        x_ori=x,
+                #        return_noise=True)
+                #    if args.egsde or args.entropy_guided:
+                #        y = model_dp(y, sample_p_zs_given_zt=True, s=t -
+                #                1./args.diffusion_steps, t=t,
+                #            node_mask=node_mask, edge_mask=None, #None, #fix_noise=False,
+                #            cond_fn=None, noise=noise) #return_noise=True)
+                #    t = t - 1. / args.diffusion_steps
+                #    print('diff', (z-y).abs().max(), (z-y).abs().mean())
+                #assert torch.all(t.abs() < 1e-5) #torch.allclose(t, torch.zeros_like(t))
                 x_edit = model_dp(z, sample_p_x_given_z0=True,
                         node_mask=node_mask, edge_mask=None, #None,
+                        ddim=args.ddim,
                         #fix_noise=False
                         )
                 x = x_edit
@@ -1250,6 +1242,7 @@ def main():
                 if args.egsde or args.entropy_guided:
                     x_edit_y = model_dp(y, sample_p_x_given_z0=True,
                             node_mask=node_mask, edge_mask=None,
+                            ddim=args.ddim,
                             #None,
                             #fix_noise=False
                             )

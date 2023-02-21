@@ -255,26 +255,26 @@ if args.n_nodes == 1024:
             scale_mode=args.scale_mode,
             random_scale=False,
             random_rotation=False, zero_mean=not args.no_zero_mean)
-    dataset_tgt_val = dataset_dict[args.dataset_tgt](io, './data', 'val', jitter=args.jitter,
+    dataset_tgt_val = dataset_dict[args.dataset_tgt](io, './data', 'test', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=False, zero_mean=not args.no_zero_mean)
+            random_rotation=False, zero_mean=not args.no_zero_mean) # 참고용
 
     train_loader_src = DataLoader(dataset_src, batch_size=args.batch_size,
             sampler=None,
-            drop_last=True, num_workers=16)
+            drop_last=True, num_workers=args.num_workers)
     train_loader_tgt = DataLoader(dataset_tgt, batch_size=args.batch_size,
             sampler=None,
-            drop_last=True, num_workers=16)
+            drop_last=True, num_workers=args.num_workers)
     train_loader_tgt_iter = iter(train_loader_tgt)
 
     val_loader_src = DataLoader(dataset_src_val, batch_size=args.batch_size,
             sampler=None,
-            drop_last=False)
+            drop_last=False, num_workers=args.num_workers)
     val_loader_tgt = DataLoader(dataset_tgt_val, batch_size=args.batch_size,
             sampler=None,
-            drop_last=False)
+            drop_last=False, num_workers=args.num_workers)
 
 
 else: # 2048
@@ -355,7 +355,7 @@ def main():
 
         n_selected = 0
         selected_count = 0
-        for i, data_src in enumerate(tqdm(train_loader_src)):
+        for i, data_src in enumerate(train_loader_src):
             classifier.train()
             try:
                 data_tgt = next(train_loader_tgt_iter)
@@ -506,8 +506,8 @@ def main():
             cl_count += len(cl_feat)
 
             if (i+1) % 10 == 0:
-                print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_counts}')
-        print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_counts}' )
+                print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}')
+        print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}' )
 
 
         # Val : accuracy check
@@ -585,8 +585,12 @@ def main():
                     best_val = val_result
                     torch.save(classifier.module.state_dict(),
                             f'outputs/{args.exp_name}/best.pt')
-                torch.save(classifier.module.state_dict(),
-                        f'outputs/{args.exp_name}/last.pt')
+                if (epoch + 1) % 10 == 0:
+                    torch.save(classifier.module.state_dict(),
+                        f'outputs/{args.exp_name}/{epoch+1}.pt')
+                    torch.save(classifier.module.state_dict(),
+                            f'outputs/{args.exp_name}/last.pt')
+
 
 if __name__ == "__main__":
     main()

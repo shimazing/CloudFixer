@@ -92,7 +92,7 @@ parser.add_argument('--diffusion_noise_precision', type=float, default=1e-5,
 parser.add_argument('--diffusion_loss_type', type=str, default='l2',
                     help='vlb, l2')
 parser.add_argument('--no_zero_mean', action='store_true', default=True)
-parser.add_argument('--n_epochs', type=int, default=200)
+parser.add_argument('--n_epochs', type=int, default=100)
 parser.add_argument('--batch_size', type=int, default=64)
 parser.add_argument('--n_nodes', type=int, default=1024)
 parser.add_argument('--lr', type=float, default=1e-3)
@@ -206,8 +206,9 @@ parser.add_argument('--input_transform', action='store_true',
     help='whether to apply input_transform (rotation) in DGCNN')
 parser.add_argument('--with_dm', action='store_true',
     help='whether to obtain diffusion model views')
+parser.add_argument('--rotation', action='store_true',)
 parser.add_argument('--dm_resume',
-default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
+    default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
 
 args = parser.parse_args()
 
@@ -302,7 +303,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 args.exp_name = \
-    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}'
+    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}'
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -414,8 +415,9 @@ def main():
                 ).permute(0,2,1)
 
                 pcs_t2 = alpha_t2 * pcs + sigma_t2 * eps2
-                pcs_t2 = random_rotate_one_axis_torch(pcs_t2.permute(0,2,1),
-                        axis='z').permute(0,2,1)
+                if args.rotation:
+                    pcs_t2 = random_rotate_one_axis_torch(pcs_t2.permute(0,2,1),
+                            axis='z').permute(0,2,1)
                 # TODO: DGCNN에 t conditioning 하기
                 logits2 = classifier(
                     pcs_t2, ts=t_int2.flatten()
@@ -427,6 +429,10 @@ def main():
                         eps2_ = model(x=pcs_t2.permute(0,2,1), node_mask=node_mask, t=t2,
                                 phi=True).permute(0,2,1)
                         pcs_est = (pcs_t2 - sigma_t2 * eps2_) / alpha_t2
+                        if args.rotation:
+                            pcs_est = \
+                                random_rotate_one_axis_torch(pcs_est.permute(0,2,1),
+                                        axis='z').permute(0,2,1)
 
                     logits_est = classifier(
                         pcs_est, ts=torch.zeros_like(t_int).flatten()
@@ -478,14 +484,20 @@ def main():
 
             # constrastive learning (infoNCE loss)
             if args.with_dm:
-                cl_loss = infonce(torch.stack((cl_feat, cl_feat2, cl_feat_est), dim=1))
+                cl_loss = (infonce(torch.stack((cl_feat, cl_feat2), dim=1)) \
+                    + infonce(torch.stack((cl_feat, cl_feat_est), dim=1)) \
+                    + infonce(torch.stack((cl_feat2, cl_feat_est), dim=1)))/3
             else:
                 cl_loss = infonce(torch.stack((cl_feat, cl_feat2), dim=1))
 
             total_loss = args.lambda_cl * cl_loss + src_cls_loss + tgt_cls_loss
-            total_loss.backward()
-            optim.step()
-            optim.zero_grad()
+            (total_loss/args.accum_grad).backward()
+            if (i+1) % args.accum_grad  == 0:
+                optim.step()
+                optim.zero_grad()
+                optim_step = True
+            else:
+                optim_step = False
 
             # src_correct
             src_correct += (cls_logits[:n_src].argmax(dim=1) ==
@@ -507,6 +519,9 @@ def main():
 
             if (i+1) % 10 == 0:
                 print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}')
+        if not optim_step:
+            optim.step()
+            optim.zero_grad()
         print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}' )
 
 

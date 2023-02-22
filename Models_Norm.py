@@ -264,9 +264,10 @@ class transform_net(nn.Module):
         super(transform_net, self).__init__()
         self.K = out
         self.args = args
+        self.model = args.model
 
-        activation = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
-        bias = False if args.model == 'dgcnn' else True
+        activation = 'leakyrelu' if self.model == 'dgcnn' else 'relu'
+        bias = False if self.model == 'dgcnn' else True
 
         self.conv2d1 = conv_2d(in_ch, 64, kernel=1, activation=activation, bias=bias)
         self.conv2d2 = conv_2d(64, 128, kernel=1, activation=activation, bias=bias)
@@ -285,7 +286,7 @@ class transform_net(nn.Module):
 
         x = self.conv2d1(x)
         x = self.conv2d2(x)
-        if self.args.model == "dgcnn":
+        if self.model == "dgcnn":
             x = x.max(dim=-1, keepdim=False)[0]
             x = torch.unsqueeze(x, dim=3)
         x = self.conv2d3(x)

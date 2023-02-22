@@ -680,7 +680,7 @@ class DiffusionModel(torch.nn.Module):
                         )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
-            eps_t = eps_t + grad
+            eps_t = eps_t + sigma_t * grad
         if self.zero_mean:
             diffusion_utils.assert_mean_zero_with_mask(zt[:, :, :self.n_dims], node_mask)
             diffusion_utils.assert_mean_zero_with_mask(eps_t[:, :, :self.n_dims], node_mask)
@@ -716,7 +716,7 @@ class DiffusionModel(torch.nn.Module):
                         )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
-            eps_t = eps_t + grad
+            eps_t = eps_t + sigma_t * grad
 
         # Compute mu for p(zs | zt).
         if self.zero_mean:

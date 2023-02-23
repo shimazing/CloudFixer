@@ -219,6 +219,7 @@ parser.add_argument('--n_reverse_steps', type=int, default=20) #action='store_tr
 parser.add_argument('--voxel_resolution', type=int, default=32)
 parser.add_argument('--voxelization', action='store_true')
 parser.add_argument('--time_cond', action='store_true')
+parser.add_argument('--gn', action='store_true')
 parser.add_argument('--preprocess_model', type=str,
     default='outputs/stat_pred_only_lr1e-4_nregions5_rng3.5_droprate0.7/model.ptdgcnn')
 parser.add_argument('--nregions', type=int, default=5)
@@ -382,7 +383,7 @@ ori_args_model = args.model
 
 args.model = 'dgcnn'
 #args.time_cond = False
-if args.time_cond:
+if True: #args.time_cond:
     args.fc_norm = False
     args.cls_scale_mode = 'unit_std'
 args.nregions = 3  # (default value)
@@ -402,7 +403,10 @@ if args.egsde:
     chamfer_dist_fn = chamfer_dist()
     args.time_cond = True
     args.fc_norm = True
+    ori_input_transform = args.input_transform
+    args.input_transform = False
     domain_cls = DGCNN(args).to(device).eval()
+    args.input_transform = ori_input_transform
     domain_cls_state_dict = torch.load(
         args.domain_cls,
         map_location='cpu')
@@ -615,6 +619,8 @@ def main():
 
             @torch.enable_grad()
             def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
+                if args.lambda_s == 0 and args.lambda_i == 0:
+                    return torch.zeros_like(yt)
                 if args.model == 'pvd':
                     model.train()
                 yt.requires_grad_(True)

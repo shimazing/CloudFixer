@@ -182,12 +182,14 @@ def l2_norm(input, axit=1):
 
 
 class conv_2d(nn.Module):
-    def __init__(self, in_ch, out_ch, kernel, activation='relu', bias=True):
+    def __init__(self, in_ch, out_ch, kernel, activation='relu', bias=True,
+            gn=False):
         super(conv_2d, self).__init__()
         if activation == 'relu':
             self.conv = nn.Sequential(
                 nn.Conv2d(in_ch, out_ch, kernel_size=kernel, bias=bias),
-                nn.BatchNorm2d(out_ch),
+                nn.BatchNorm2d(out_ch) if not gn else
+                nn.GroupNorm(num_channels=out_ch, num_groups=32),
                 # nn.InstanceNorm2d(out_ch),
                 # TransNorm2d(out_ch),
                 #nn.LayerNorm([out_ch, 1024, 20]),
@@ -196,7 +198,8 @@ class conv_2d(nn.Module):
         elif activation == 'leakyrelu':
             self.conv = nn.Sequential(
                 nn.Conv2d(in_ch, out_ch, kernel_size=kernel, bias=bias),
-                nn.BatchNorm2d(out_ch),
+                nn.BatchNorm2d(out_ch) if not gn else
+                nn.GroupNorm(num_channels=out_ch, num_groups=32),
                 # nn.InstanceNorm2d(out_ch),
                 # TransNorm2d(out_ch),
                 #nn.LayerNorm([out_ch, 1024, 20]),
@@ -269,9 +272,9 @@ class transform_net(nn.Module):
         activation = 'leakyrelu' if self.model == 'dgcnn' else 'relu'
         bias = False if self.model == 'dgcnn' else True
 
-        self.conv2d1 = conv_2d(in_ch, 64, kernel=1, activation=activation, bias=bias)
-        self.conv2d2 = conv_2d(64, 128, kernel=1, activation=activation, bias=bias)
-        self.conv2d3 = conv_2d(128, 1024, kernel=1, activation=activation, bias=bias)
+        self.conv2d1 = conv_2d(in_ch, 64, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
+        self.conv2d2 = conv_2d(64, 128, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
+        self.conv2d3 = conv_2d(128, 1024, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
         self.fc1 = fc_layer(1024, 512, activation=activation, bias=bias,
                 bn=True,
             norm=getattr(args, 'fc_norm', True)
@@ -389,13 +392,13 @@ class DGCNN(nn.Module):
             self.activation = swish
 
         self.k = K
-
+        self.input_transform = self.args.input_transform
         self.input_transform_net = transform_net(args, 6, 3)
         if not self.time_cond:
-            self.conv1 = conv_2d(6, 64, kernel=1, bias=False, activation='leakyrelu')
-            self.conv2 = conv_2d(64 * 2, 64, kernel=1, bias=False, activation='leakyrelu')
-            self.conv3 = conv_2d(64 * 2, 128, kernel=1, bias=False, activation='leakyrelu')
-            self.conv4 = conv_2d(128 * 2, 256, kernel=1, bias=False, activation='leakyrelu')
+            self.conv1 = conv_2d(6, 64, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
+            self.conv2 = conv_2d(64 * 2, 64, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
+            self.conv3 = conv_2d(64 * 2, 128, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
+            self.conv4 = conv_2d(128 * 2, 256, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
         else:
             self.conv1 = conv_2d_time_cond(6, 64, kernel=1, bias=False, activation='leakyrelu')
             self.conv2 = conv_2d_time_cond(64 * 2, 64, kernel=1, bias=False, activation='leakyrelu')
@@ -403,7 +406,7 @@ class DGCNN(nn.Module):
             self.conv4 = conv_2d_time_cond(128 * 2, 256, kernel=1, bias=False, activation='leakyrelu')
         num_f_prev = 64 + 64 + 128 + 256
 
-        if self.time_cond:
+        if self.time_cond or getattr(args, 'gn', False):
             self.bn5 = nn.LayerNorm([512, 1024]) # TODO for GN mode
         else:
             self.bn5 = nn.BatchNorm1d(512)
@@ -440,7 +443,7 @@ class DGCNN(nn.Module):
 
         # returns a tensor of (batch_size, 6, #points, #neighboors)
         # interpretation: each point is represented by 20 NN, each of size 6
-        if getattr(self.args, 'input_transform', False):
+        if getattr(self, 'input_transform', False):
             x0, _ = get_graph_feature(x, self.args, k=self.k, mask=mask)  # x0: [b, 6, 1024, 20]
             # align to a canonical space (e.g., apply rotation such that all inputs will have the same rotation)
             transformd_x0 = self.input_transform_net(x0)  # transformd_x0: [3, 3]

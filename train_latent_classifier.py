@@ -195,7 +195,7 @@ parser.add_argument('--n_subsample', type=int, default=64)
 #parser.add_argument('--classifier', type=str,
 #    default='../GAST/experiments/GAST_balanced_unitnorm_randomscale0.2/model.ptdgcnn')
 parser.add_argument('--self_ensemble', action='store_true')
-parser.add_argument('--time_cond', action='store_true', default=True)
+parser.add_argument('--time_cond', action='store_true') #, default=True)
 parser.add_argument('--fc_norm', action='store_true', default=False)
 ########################## CL
 parser.add_argument('--cl', action='store_true', help='whether to use cl head')
@@ -207,10 +207,15 @@ parser.add_argument('--input_transform', action='store_true',
 parser.add_argument('--with_dm', action='store_true',
     help='whether to obtain diffusion model views')
 parser.add_argument('--rotation', action='store_true',)
+parser.add_argument('--clf_guidance', action='store_true',)
+parser.add_argument('--lambda_clf', action='store_true',)
+parser.add_argument('--gn', action='store_true',) # make classifier deterministic
 parser.add_argument('--dm_resume',
     default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
 
 args = parser.parse_args()
+if args.input_transform or not args.time_cond:
+    args.gn = True # deterministic
 
 io = log.IOStream(args)
 
@@ -303,7 +308,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 args.exp_name = \
-    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}'
+    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}'
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -319,9 +324,7 @@ kwargs = {'entity': args.wandb_usr, 'name': args.exp_name , 'project':
 wandb.init(**kwargs)
 wandb.save('*.txt')
 
-# alpha, sigma 계산을 위해
 time_cond = args.time_cond
-
 model = get_model(args, device)
 model = model.to(device)
 model.load_state_dict(torch.load(args.dm_resume, map_location='cpu'))
@@ -363,6 +366,17 @@ def main():
             except:
                 train_loader_tgt_iter = iter(train_loader_tgt)
                 data_tgt = next(train_loader_tgt_iter)
+
+            @torch.enable_grad()
+            def cond_fn_clf_guidance(yt, t_int, labels):
+                # with dm
+                yt.requires_grad_(True)
+                logits = classifier(yt, ts=t_int.flatten())
+                cls_logits = logits['cls']
+                cls_loss = criterion(cls_logits, labels)
+                grad = torch.autograd.grad(args.lambda_clf * cls_loss, yt)[0]
+                return grad
+
             #data = torch.stack((
             #    data_src[0].to(device).permute(0, 2, 1),
             #    data_tgt[0].to(device).permute(0, 2, 1)),dim=1)
@@ -377,10 +391,10 @@ def main():
                 data_src[0].to(device), #.permute(0, 2, 1),
                 data_tgt[0].to(device) #.permute(0, 2, 1)
                 ),dim=0)
-            if time_cond:
+            if True: #time_cond:
                 pcs = data.permute(0,2,1) #,2)
                 t_int = torch.randint(
-                    0, int(args.diffusion_steps * args.t), # ~= diffusion_steps * 0.4
+                    0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
                     size=(pcs.size(0), 1), device=device).float()
                 t = t_int / args.diffusion_steps
                 gamma_t = model.module.inflate_batch_array(model.module.gamma(t),
@@ -401,7 +415,7 @@ def main():
                     ) #, activate_DefRec=False)
 
                 t_int2 = torch.randint(
-                    0, int(args.diffusion_steps * args.t), # ~= diffusion_steps * 0.4
+                    0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
                     size=(pcs.size(0), 1), device=device).float()
                 t2 = t_int2 / args.diffusion_steps
                 gamma_t2 = model.module.inflate_batch_array(model.module.gamma(t2),
@@ -422,12 +436,33 @@ def main():
                 logits2 = classifier(
                     pcs_t2, ts=t_int2.flatten()
                     ) #, activate_DefRec=False)
+                cls_logits = logits['cls']
+                cls_logits2 = logits2['cls']
+                cl_feat = logits['cl_feat']
+                cl_feat2 = logits2['cl_feat']
+                max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
+                max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
+                selected = max_prob > threshold
+                selected2 = max_prob2 > threshold
+                selected_final = selected & selected2 & (label_tgt == label_tgt2)
+                n_selected += selected_final.float().sum().item()
+                selected_count += len(selected_final)
                 if args.with_dm:
                     with torch.no_grad():
                         #node_mask = pcs_t2.new_ones(pcs_t2.shape[0],
                         #        pcs_t2.shape[2]).unsqueeze(-1)
                         eps2_ = model(x=pcs_t2.permute(0,2,1), node_mask=node_mask, t=t2,
                                 phi=True).permute(0,2,1)
+                        if args.clf_guidance:
+                            grad = cond_fn_clf_guidance(pcs_t2,
+                                    t_int2,
+                                    torch.cat((label_src, label_tgt), dim=0))
+                            # src
+                            eps2_[:n_src] = eps2_[:n_src] + sigma_t2[:n_src] * grad[:n_src]
+                            # tgt
+                            tgt_selected_idx = selected_final.nonzero(as_tuple=True)[0]+n_src
+                            eps2_[tgt_selected_idx] = eps2_[tgt_selected_idx] +\
+                                    sigma_t2[tgt_selected_idx] * grad[tgt_selected_idx]
                         pcs_est = (pcs_t2 - sigma_t2 * eps2_) / alpha_t2
                         if args.rotation:
                             pcs_est = \
@@ -437,17 +472,13 @@ def main():
                     logits_est = classifier(
                         pcs_est, ts=torch.zeros_like(t_int).flatten()
                         )
+                #if args.with_dm:
+                    cls_logits_est = logits_est['cls']
             else:
                 # bn 때문에 한번에 pass 해주도록 수정함
                 logits = classifier(
                     data.permute(0,2,1)
                     ) #, activate_DefRec=False)
-            cls_logits = logits['cls']
-            cls_logits2 = logits2['cls']
-            if args.with_dm:
-                cls_logits_est = logits_est['cls']
-            cl_feat = logits['cl_feat']
-            cl_feat2 = logits2['cl_feat']
             if args.with_dm:
                 cl_feat_est = logits_est['cl_feat']
 
@@ -457,16 +488,11 @@ def main():
                     (criterion(cls_logits_est[:n_src], label_src) if args.with_dm
                     else 0)
             # Pseudo Labeling (SPST)
-            max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
-            max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
+            #max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
+            #max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
             if args.with_dm:
                 max_prob_est, label_tgt_est = F.softmax(cls_logits_est[n_src:], dim=-1).max(dim=-1)
 
-            selected = max_prob > threshold
-            selected2 = max_prob2 > threshold
-            selected_final = selected  & selected2 & (label_tgt == label_tgt2)
-            n_selected += selected_final.float().sum().item()
-            selected_count += len(selected_final)
 
             if torch.any(selected_final):
                 tgt_cls_loss = criterion(cls_logits[n_src:][selected_final],
@@ -534,10 +560,10 @@ def main():
                 n_total_src = 0
                 n_total_tgt = 0
                 for val_src in val_loader_src:
-                    if time_cond:
+                    if True: #time_cond:
                         pcs = val_src[0].to(device).permute(0,2,1)
                         t_int = torch.randint(
-                            0, int(args.diffusion_steps * args.t), # ~= diffusion_steps * 0.4
+                            0, max(int(args.diffusion_steps * args.t), 1), # ~= diffusion_steps * 0.4
                             size=(pcs.size(0), 1), device=device).float()
                         t = t_int / args.diffusion_steps
 
@@ -563,10 +589,10 @@ def main():
                     n_total_src += len(logits_src['cls'])
 
                 for val_tgt in val_loader_tgt:
-                    if time_cond:
+                    if True: #time_cond:
                         pcs = val_tgt[0].to(device).permute(0,2,1)
                         t_int = torch.randint(
-                            0, int(args.diffusion_steps * args.t), # ~= diffusion_steps * 0.4
+                            0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
                             size=(pcs.size(0), 1), device=device).float()
                         t = t_int / args.diffusion_steps
 
@@ -600,11 +626,17 @@ def main():
                     best_val = val_result
                     torch.save(classifier.module.state_dict(),
                             f'outputs/{args.exp_name}/best.pt')
+                    torch.save(optim.state_dict(),
+                            f'outputs/{args.exp_name}/best_optim.pt')
                 if (epoch + 1) % 10 == 0:
                     torch.save(classifier.module.state_dict(),
                         f'outputs/{args.exp_name}/{epoch+1}.pt')
-                    torch.save(classifier.module.state_dict(),
-                            f'outputs/{args.exp_name}/last.pt')
+                    torch.save(optim.state_dict(),
+                        f'outputs/{args.exp_name}/{epoch+1}_optim.pt')
+                torch.save(classifier.module.state_dict(),
+                        f'outputs/{args.exp_name}/last.pt')
+                torch.save(optim.state_dict(),
+                        f'outputs/{args.exp_name}/last_optim.pt')
 
 
 if __name__ == "__main__":

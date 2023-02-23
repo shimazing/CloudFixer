@@ -209,13 +209,13 @@ parser.add_argument('--with_dm', action='store_true',
 parser.add_argument('--rotation', action='store_true',)
 parser.add_argument('--clf_guidance', action='store_true',)
 parser.add_argument('--lambda_clf', action='store_true',)
-parser.add_argument('--gn', action='store_true',) # make classifier deterministic
+parser.add_argument('--gn', action='store_true', default=True) # make classifier deterministic
 parser.add_argument('--dm_resume',
     default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
 
 args = parser.parse_args()
-if args.input_transform or not args.time_cond:
-    args.gn = True # deterministic
+#if args.input_transform or not args.time_cond:
+#    args.gn = True # deterministic
 
 io = log.IOStream(args)
 

@@ -194,10 +194,9 @@ parser.add_argument('--scale', type=float, default=1)
 ########################
 parser.add_argument('--dropout', type=float, default=0.5, help='dropout rate')
 parser.add_argument('--output_pts', type=int, default=512)
-
 ######################## guided sampling
 parser.add_argument('--guidance_scale', type=float, default=0)
-parser.add_argument('--mode', nargs='+', type=str, default=['eval'])
+parser.add_argument('--mode', nargs='+', type=str, default=['train'])
 parser.add_argument('--dataset', type=str, default='shapenet')
 parser.add_argument('--keep_sub', action='store_true', help='Disable wandb') # TODO
 parser.add_argument('--n_subsample', type=int, default=64)
@@ -205,6 +204,9 @@ parser.add_argument('--classifier', type=str,
     default='../GAST/experiments/GAST_balanced_unitnorm_randomscale0.2/model.ptdgcnn')
 parser.add_argument('--self_ensemble', action='store_true')
 parser.add_argument('--time_cond', action='store_true', default=True)
+parser.add_argument('--fc_norm', action='store_true')
+parser.add_argument('--no_zero_mean', action='store_true', default=True)
+parser.add_argument('--input_transform', action='store_true')
 
 
 args = parser.parse_args()
@@ -240,23 +242,23 @@ if args.n_nodes == 1024:
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=True)
+            random_rotation=True, zero_mean=not args.no_zero_mean)
     dataset_tgt = ScanNet(io, './data', 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=True)
+            random_rotation=True, zero_mean=not args.no_zero_mean)
     # val
     dataset_src_val = ShapeNet(io, './data', 'val', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=False)
+            random_rotation=False, zero_mean=not args.no_zero_mean)
     dataset_tgt_val = ScanNet(io, './data', 'val', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=False)
+            random_rotation=False, zero_mean=not args.no_zero_mean)
 
     #if args.dataset == 'scannet':
     #    test_dataset = ScanNet(io, './data', 'test', jitter=args.jitter,
@@ -375,8 +377,9 @@ def main():
             alpha_t = model.alpha(gamma_t, pcs.permute(0,2,1))
             sigma_t = model.sigma(gamma_t, pcs.permute(0,2,1))
 
+            node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
             eps = model.sample_combined_position_feature_noise(
-                n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=None,
+                n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=node_mask,
                 device=device
             ).permute(0,2,1)
 
@@ -402,8 +405,9 @@ def main():
             alpha_t = model.alpha(gamma_t, pcs.permute(0,2,1))
             sigma_t = model.sigma(gamma_t, pcs.permute(0,2,1))
 
+            node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
             eps = model.sample_combined_position_feature_noise(
-                n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=None,
+                    n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=node_mask,
                 device=device
             ).permute(0,2,1)
 
@@ -415,8 +419,8 @@ def main():
         n_correct_tgt += (logits_tgt['domain_cls'].argmax(dim=1) ==
                 1).float().sum().item()
         n_total_tgt += len(logits_tgt['domain_cls'])
-    print("source acc", n_correct_src / n_total_src)
-    print('target acc', n_correct_tgt / n_total_tgt)
+    print("####### source acc", n_correct_src / n_total_src)
+    print('####### target acc', n_correct_tgt / n_total_tgt)
 
 
   if 'train' in args.mode:
@@ -455,8 +459,10 @@ def main():
                 alpha_t = model.alpha(gamma_t, pcs.permute(0,2,1))
                 sigma_t = model.sigma(gamma_t, pcs.permute(0,2,1))
 
+                node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
                 eps = model.sample_combined_position_feature_noise(
-                    n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=None,
+                    n_samples=pcs.size(0), n_nodes=pcs.size(2),
+                    node_mask=node_mask,
                     device=device
                 ).permute(0,2,1)
 
@@ -478,7 +484,7 @@ def main():
             train_count += len(logits)
 
             loss = loss_fn(logits, labels)
-            print(loss.item())
+            print("loss", loss.item())
             loss.backward()
             optim.step()
             optim.zero_grad()
@@ -506,8 +512,10 @@ def main():
                         alpha_t = model.alpha(gamma_t, pcs.permute(0,2,1))
                         sigma_t = model.sigma(gamma_t, pcs.permute(0,2,1))
 
+                        node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
                         eps = model.sample_combined_position_feature_noise(
-                            n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=None,
+                            n_samples=pcs.size(0), n_nodes=pcs.size(2),
+                            node_mask=node_mask,
                             device=device
                         ).permute(0,2,1)
 
@@ -535,7 +543,8 @@ def main():
                         sigma_t = model.sigma(gamma_t, pcs.permute(0,2,1))
 
                         eps = model.sample_combined_position_feature_noise(
-                            n_samples=pcs.size(0), n_nodes=pcs.size(2), node_mask=None,
+                            n_samples=pcs.size(0), n_nodes=pcs.size(2),
+                            node_mask=node_mask,
                             device=device
                         ).permute(0,2,1)
 
@@ -556,7 +565,9 @@ def main():
                 if val_result > best_val:
                     best_val = val_result
                     torch.save(classifier.module.state_dict(),
-                            "outputs/domain_classifier_DGCNN_shape_scan_timecondGN_fullt.pt")
+                            f"outputs/domain_classifier_DGCNN_shape_scan_timecondGN_fullt_fcnorm{args.fc_norm}.pt")
+                torch.save(classifier.module.state_dict(),
+                        f"outputs/domain_classifier_DGCNN_shape_scan_timecondGN_fullt_fcnorm{args.fc_norm}_last.pt")
 
 if __name__ == "__main__":
     main()

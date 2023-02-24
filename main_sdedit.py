@@ -225,6 +225,7 @@ parser.add_argument('--preprocess_model', type=str,
 parser.add_argument('--nregions', type=int, default=5)
 parser.add_argument('--input_transform', action='store_true',
     help='whether to apply input_transform (rotation) in DGCNN')
+parser.add_argument('--temperature', type=float, default=2.5)
 
 args = parser.parse_args()
 ori_time_cond = args.time_cond
@@ -568,16 +569,21 @@ def main():
                 alpha_t = model.alpha(gamma_t, x)
                 sigma_t = model.sigma(gamma_t, x)
                 if args.lambda_s > 0:
-                    eps = phi(yt, t, **model_kwargs)
-                    y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
+                    if not ori_time_cond:
+                        eps = phi(yt, t, **model_kwargs)
+                        y0_est = 1 / alpha_t * (yt  - sigma_t * eps)
                     #if not ori_time_cond:
-                    if args.cls_scale_mode == 'unit_norm':
-                        y0_est_norm = scale_to_unit_cube_torch(y0_est)
-                        cls_output = classifier(y0_est_norm.permute(0,2,1))
+                        if args.cls_scale_mode == 'unit_norm':
+                            y0_est_norm = scale_to_unit_cube_torch(y0_est)
+                            cls_output = classifier(y0_est_norm.permute(0,2,1))
+                        else:
+                            cls_output = classifier(y0_est,
+                                    ts=torch.zeros_like(t).flatten())
                     else:
-                        cls_output = classifier(y0_est,
-                                ts=torch.zeros_like(t).flatten())
-                    cls_logits = cls_output['cls']
+                        print(t)
+                        cls_output = classifier(yt,
+                                ts=t.flatten()*args.diffusion_steps)
+                    cls_logits = cls_output['cls'] / args.temperature
                     entropy = - (F.log_softmax(cls_logits, dim=-1) * F.softmax(cls_logits,
                         dim=-1)).sum(dim=-1).mean()
                 else:
@@ -769,7 +775,8 @@ def main():
 
                 y = z.detach().clone()
                 if args.ddim:
-                    reverse_steps = np.linspace(args.t, 0, args.n_reverse_steps)
+                    reverse_steps = np.linspace(args.t*args.diffusion_steps, 0,
+                            args.n_reverse_steps) / args.diffusion_steps
                     print("Reverse Steps")
                     if ori_time_cond:
                         itmd = [] # list of (latent var, t)
@@ -784,7 +791,7 @@ def main():
                                 x_ori=x,
                                 )
                         if ori_time_cond:
-                            itmd.append((z, s))
+                            itmd.append((z, s*args.diffusion_steps))
                         if args.egsde or args.entropy_guided:
                             y = model_dp(y, sample_p_zs_given_zt_ddim=True, s=s_tensor,
                                     t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
@@ -898,7 +905,7 @@ def main():
                         itmd_pred_k = []
                         for xt, t in itmd_list[k-1]:
                             itmd_prob_k.append(torch.softmax(classifier(xt.permute(0,2,1),
-                                    ts=xt.new_ones(len(xt)))['cls'], dim=-1))
+                                    ts=xt.new_ones(len(xt))*t)['cls'], dim=-1))
                             itmd_pred_k.append(
                                 itmd_prob_k[-1].argmax(dim=1))
                         correct_count_itmd[k-1][0] += (torch.stack(itmd_prob_k,

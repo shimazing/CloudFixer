@@ -202,14 +202,16 @@ parser.add_argument('--cl', action='store_true', help='whether to use cl head')
 parser.add_argument('--cl_dim', default=1024, type=int)
 parser.add_argument('--lambda_cl', default=1, type=float)
 parser.add_argument('--temperature', default=0.1, type=float)
+parser.add_argument('--threshold', default=0.8, type=float)
 parser.add_argument('--input_transform', action='store_true',
     help='whether to apply input_transform (rotation) in DGCNN')
 parser.add_argument('--with_dm', action='store_true',
     help='whether to obtain diffusion model views')
 parser.add_argument('--rotation', action='store_true',)
 parser.add_argument('--clf_guidance', action='store_true',)
-parser.add_argument('--lambda_clf', action='store_true',)
+parser.add_argument('--lambda_clf', default=100.0, type=float) #action='store_true',)
 parser.add_argument('--gn', action='store_true', default=True) # make classifier deterministic
+parser.add_argument('--deterministic_val', action='store_true', default=True) # make classifier deterministic
 parser.add_argument('--dm_resume',
     default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
 
@@ -308,7 +310,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 args.exp_name = \
-    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}'
+        f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}_clf_guidance{args.clf_guidance}{args.lambda_clf}'
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -343,7 +345,7 @@ args.model = ori_model
 def main():
     loss_fn = torch.nn.CrossEntropyLoss()
     best_val = 0
-    threshold = 0.8
+    threshold = args.threshold
     for epoch in range(args.n_epochs):
         # Train
         train_count = 0
@@ -563,7 +565,8 @@ def main():
                     if True: #time_cond:
                         pcs = val_src[0].to(device).permute(0,2,1)
                         t_int = torch.randint(
-                            0, max(int(args.diffusion_steps * args.t), 1), # ~= diffusion_steps * 0.4
+                            0, max(int(args.diffusion_steps * args.t) if not
+                                args.deterministic_val else 1, 1), # ~= diffusion_steps * 0.4
                             size=(pcs.size(0), 1), device=device).float()
                         t = t_int / args.diffusion_steps
 
@@ -592,7 +595,8 @@ def main():
                     if True: #time_cond:
                         pcs = val_tgt[0].to(device).permute(0,2,1)
                         t_int = torch.randint(
-                            0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
+                            0, max(int(args.diffusion_steps * args.t) if not
+                                args.deterministic_val else 1,1), # ~= diffusion_steps * 0.4
                             size=(pcs.size(0), 1), device=device).float()
                         t = t_int / args.diffusion_steps
 
@@ -637,6 +641,7 @@ def main():
                         f'outputs/{args.exp_name}/last.pt')
                 torch.save(optim.state_dict(),
                         f'outputs/{args.exp_name}/last_optim.pt')
+            print(args.exp_name)
 
 
 if __name__ == "__main__":

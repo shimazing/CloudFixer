@@ -226,6 +226,8 @@ parser.add_argument('--nregions', type=int, default=5)
 parser.add_argument('--input_transform', action='store_true',
     help='whether to apply input_transform (rotation) in DGCNN')
 parser.add_argument('--temperature', type=float, default=2.5)
+parser.add_argument('--noise_t0', action='store_true')
+parser.add_argument('--bn', default='ln', type=str)
 
 args = parser.parse_args()
 ori_time_cond = args.time_cond
@@ -375,51 +377,62 @@ wandb.save('*.txt')
 
 # Create EGNN flow
 model = get_model(args, device)
-model = model.to(device)
 if args.resume is not None:
     model.load_state_dict(torch.load(args.resume))
 
 
 ori_args_model = args.model
-
 args.model = 'dgcnn'
 #args.time_cond = False
 if True: #args.time_cond:
     args.fc_norm = False
     args.cls_scale_mode = 'unit_std'
+
 args.nregions = 3  # (default value)
 classifier = DGCNN(args).to(device).eval()
-classifier.load_state_dict(
-torch.load(
-    args.classifier, map_location='cpu'),
-strict=False
-)
 classifier = torch.nn.DataParallel(classifier)
-
+if args.bn == 'bn':
+    from sync_batchnorm import convert_model
+    classifier = convert_model(classifier).to(device)
+classifier.load_state_dict(
+    torch.load(
+        args.classifier, map_location='cpu'),
+        strict=True
+)
+classifier.eval()
 args.model = ori_args_model
-
 
 if args.egsde:
     from chamfer_distance import ChamferDistance as chamfer_dist
     chamfer_dist_fn = chamfer_dist()
+    ori_model = args.model
+    args.model = 'dgcnn'
+    ori_time_cond = args.time_cond
     args.time_cond = True
-    args.fc_norm = True
+    args.fc_norm = False
     ori_input_transform = args.input_transform
     args.input_transform = False
-    domain_cls = DGCNN(args).to(device).eval()
+    ori_bn = args.bn
+    args.bn = 'ln'
+    domain_cls = DGCNN(args).eval().to(device)
     args.input_transform = ori_input_transform
     domain_cls_state_dict = torch.load(
         args.domain_cls,
         map_location='cpu')
-    keys = list(domain_cls_state_dict.keys())
-    for key in keys:
-        if 'input_transform_net' in key:
-            domain_cls_state_dict.pop(key)
+    #keys = list(domain_cls_state_dict.keys())
+    #for key in keys:
+    #    if 'input_transform_net' in key:
+    #        domain_cls_state_dict.pop(key)
     domain_cls.load_state_dict(
         domain_cls_state_dict, strict=False
         )
-    args.time_cond = False
-    model.domain_cls = domain_cls
+    args.bn = ori_bn
+    args.time_cond = ori_time_cond
+    args.model = ori_model
+    domain_cls = torch.nn.DataParallel(domain_cls)
+    #model.domain_cls = domain_cls
+model = model.to(device)
+
 if args.entropy_guided:
     from chamfer_distance import ChamferDistance as chamfer_dist
     chamfer_dist_fn = chamfer_dist()
@@ -557,8 +570,19 @@ def main():
             alpha_t = model.alpha(gamma_t, x)
             sigma_t = model.sigma(gamma_t, x)
 
+            t0 = torch.zeros_like(t)
+            gamma_t0 = model.inflate_batch_array(model.gamma(t0), x)
+            alpha_t0 = model.alpha(gamma_t0, x)
+            sigma_t0 = model.sigma(gamma_t0, x)
+            noise_t0 = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=node_mask,
+                    )
+
             @torch.enable_grad()
             def cond_fn_entropy(yt, t, phi, x, model_kwargs):
+                if args.lambda_s == 0 and args.lambda_i == 0:
+                    return torch.zeros_like(yt)
                 # Ss (realistic expert)
                 classifier.requires_grad_(True)
                 yt.requires_grad_(True)
@@ -577,11 +601,10 @@ def main():
                             y0_est_norm = scale_to_unit_cube_torch(y0_est)
                             cls_output = classifier(y0_est_norm.permute(0,2,1))
                         else:
-                            cls_output = classifier(y0_est,
+                            cls_output = classifier(y0_est.permute(0,2,1),
                                     ts=torch.zeros_like(t).flatten())
                     else:
-                        print(t)
-                        cls_output = classifier(yt,
+                        cls_output = classifier(yt.permute(0,2,1),
                                 ts=t.flatten()*args.diffusion_steps)
                     cls_logits = cls_output['cls'] / args.temperature
                     entropy = - (F.log_softmax(cls_logits, dim=-1) * F.softmax(cls_logits,
@@ -623,8 +646,9 @@ def main():
                     model.eval()
                 return grad
 
+            #def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
             @torch.enable_grad()
-            def cond_fn_egsde(yt, t, phi, x, domain_cls, model_kwargs):
+            def cond_fn_egsde(yt, t, phi, x, model_kwargs):
                 if args.lambda_s == 0 and args.lambda_i == 0:
                     return torch.zeros_like(yt)
                 if args.model == 'pvd':
@@ -748,8 +772,8 @@ def main():
 
 
             #x_ori = x
-            x_edit_list = [x]
-            x_edit_list_y = [x]
+            x_edit_list = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
+            x_edit_list_y = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
             labels_list = [labels]
             if args.ddim and ori_time_cond:
                 itmd_list = []
@@ -779,7 +803,7 @@ def main():
                             args.n_reverse_steps) / args.diffusion_steps
                     print("Reverse Steps")
                     if ori_time_cond:
-                        itmd = [] # list of (latent var, t)
+                        itmd = [(z, args.t*args.diffusion_steps)] # list of (latent var, t)
                     for t, s in tqdm(zip(reverse_steps[:-1], reverse_steps[1:]),
                             total=len(reverse_steps)-1):
                         t_tensor = t * x.new_ones((x.shape[0], 1), device=x.device)

@@ -22,7 +22,7 @@ import numpy as np
 from tqdm import tqdm
 from Models_Norm import PointNet, DGCNN
 from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch
-from losses import InfoNCELoss
+from losses import InfoNCELoss, softmax_entropy
 import torch.nn as nn
 import torch.nn.functional as F
 from utils import random_rotate_one_axis_torch
@@ -202,16 +202,21 @@ parser.add_argument('--cl', action='store_true', help='whether to use cl head')
 parser.add_argument('--cl_dim', default=1024, type=int)
 parser.add_argument('--lambda_cl', default=1, type=float)
 parser.add_argument('--temperature', default=0.1, type=float)
+parser.add_argument('--em_temperature', default=2.5, type=float)
 parser.add_argument('--threshold', default=0.8, type=float)
 parser.add_argument('--input_transform', action='store_true',
     help='whether to apply input_transform (rotation) in DGCNN')
 parser.add_argument('--with_dm', action='store_true',
     help='whether to obtain diffusion model views')
 parser.add_argument('--rotation', action='store_true',)
+parser.add_argument('--src_random_remove', action='store_true', help='remove random part from src')
+parser.add_argument('--use_ori', action='store_true', help='remove random part from src')
 parser.add_argument('--clf_guidance', action='store_true',)
 parser.add_argument('--lambda_clf', default=100.0, type=float) #action='store_true',)
 parser.add_argument('--gn', action='store_true', default=True) # make classifier deterministic
 parser.add_argument('--deterministic_val', action='store_true', default=True) # make classifier deterministic
+parser.add_argument('--tgt_train_mode', default='pseudo_label',
+        choices=['pseudo_label', 'entropy_minimization'])
 parser.add_argument('--dm_resume',
     default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
 
@@ -251,7 +256,8 @@ if args.n_nodes == 1024:
             scale=args.scale,
             scale_mode=args.scale_mode,
             random_scale=False,
-            random_rotation=True, zero_mean=not args.no_zero_mean)
+            random_rotation=True, zero_mean=not args.no_zero_mean,
+            random_remove=args.src_random_remove)
     dataset_tgt = dataset_dict[args.dataset_tgt](io, './data', 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
@@ -310,7 +316,7 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 args.exp_name = \
-        f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}_clf_guidance{args.clf_guidance}{args.lambda_clf}'
+    f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}_clf_guidance{args.clf_guidance}{args.lambda_clf}_tgtTrainMode{args.tgt_train_mode}{args.em_temperature}_srcRandomRemove{args.src_random_remove}_useOri{args.use_ori}'
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -393,8 +399,20 @@ def main():
                 data_src[0].to(device), #.permute(0, 2, 1),
                 data_tgt[0].to(device) #.permute(0, 2, 1)
                 ),dim=0)
-            if True: #time_cond:
-                pcs = data.permute(0,2,1) #,2)
+            if args.src_random_remove:
+                data_rm = torch.cat((
+                    data_src[4].to(device), #.permute(0, 2, 1),
+                    data_tgt[0].to(device) #.permute(0, 2, 1)
+                    ),dim=0)
+            #if True: #time_cond:
+            pcs = data.permute(0,2,1) #,2)
+            if args.src_random_remove:
+                pcs = data_rm.permute(0,2,1) #,2)
+            node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
+            t_int = torch.randint(
+                0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
+                size=(pcs.size(0), 1), device=device).float()
+            if not args.use_ori:
                 t_int = torch.randint(
                     0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
                     size=(pcs.size(0), 1), device=device).float()
@@ -403,85 +421,80 @@ def main():
                         pcs.permute(0,2,1))
                 alpha_t = model.module.alpha(gamma_t, pcs.permute(0,2,1))
                 sigma_t = model.module.sigma(gamma_t, pcs.permute(0,2,1))
-                node_mask = pcs.new_ones(pcs.shape[0], pcs.shape[2]).unsqueeze(-1)
                 eps = model.module.sample_combined_position_feature_noise(
                     n_samples=pcs.size(0), n_nodes=pcs.size(2),
                     node_mask=node_mask,
                     device=device
                 ).permute(0,2,1)
-
                 pcs_t = alpha_t * pcs + sigma_t * eps
-                # TODO: DGCNN에 t conditioning 하기
-                logits = classifier(
-                    pcs_t, ts=t_int.flatten()
-                    ) #, activate_DefRec=False)
-
-                t_int2 = torch.randint(
-                    0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
-                    size=(pcs.size(0), 1), device=device).float()
-                t2 = t_int2 / args.diffusion_steps
-                gamma_t2 = model.module.inflate_batch_array(model.module.gamma(t2),
-                        pcs.permute(0,2,1))
-                alpha_t2 = model.module.alpha(gamma_t2, pcs.permute(0,2,1))
-                sigma_t2 = model.module.sigma(gamma_t2, pcs.permute(0,2,1))
-                eps2 = model.module.sample_combined_position_feature_noise(
-                    n_samples=pcs.size(0), n_nodes=pcs.size(2),
-                    node_mask=node_mask,
-                    device=device
-                ).permute(0,2,1)
-
-                pcs_t2 = alpha_t2 * pcs + sigma_t2 * eps2
-                if args.rotation:
-                    pcs_t2 = random_rotate_one_axis_torch(pcs_t2.permute(0,2,1),
-                            axis='z').permute(0,2,1)
-                # TODO: DGCNN에 t conditioning 하기
-                logits2 = classifier(
-                    pcs_t2, ts=t_int2.flatten()
-                    ) #, activate_DefRec=False)
-                cls_logits = logits['cls']
-                cls_logits2 = logits2['cls']
-                cl_feat = logits['cl_feat']
-                cl_feat2 = logits2['cl_feat']
-                max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
-                max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
-                selected = max_prob > threshold
-                selected2 = max_prob2 > threshold
-                selected_final = selected & selected2 & (label_tgt == label_tgt2)
-                n_selected += selected_final.float().sum().item()
-                selected_count += len(selected_final)
-                if args.with_dm:
-                    with torch.no_grad():
-                        #node_mask = pcs_t2.new_ones(pcs_t2.shape[0],
-                        #        pcs_t2.shape[2]).unsqueeze(-1)
-                        eps2_ = model(x=pcs_t2.permute(0,2,1), node_mask=node_mask, t=t2,
-                                phi=True).permute(0,2,1)
-                        if args.clf_guidance:
-                            grad = cond_fn_clf_guidance(pcs_t2,
-                                    t_int2,
-                                    torch.cat((label_src, label_tgt), dim=0))
-                            # src
-                            eps2_[:n_src] = eps2_[:n_src] + sigma_t2[:n_src] * grad[:n_src]
-                            # tgt
-                            tgt_selected_idx = selected_final.nonzero(as_tuple=True)[0]+n_src
-                            eps2_[tgt_selected_idx] = eps2_[tgt_selected_idx] +\
-                                    sigma_t2[tgt_selected_idx] * grad[tgt_selected_idx]
-                        pcs_est = (pcs_t2 - sigma_t2 * eps2_) / alpha_t2
-                        if args.rotation:
-                            pcs_est = \
-                                random_rotate_one_axis_torch(pcs_est.permute(0,2,1),
-                                        axis='z').permute(0,2,1)
-
-                    logits_est = classifier(
-                        pcs_est, ts=torch.zeros_like(t_int).flatten()
-                        )
-                #if args.with_dm:
-                    cls_logits_est = logits_est['cls']
             else:
-                # bn 때문에 한번에 pass 해주도록 수정함
-                logits = classifier(
-                    data.permute(0,2,1)
-                    ) #, activate_DefRec=False)
+                pcs_t = pcs
+                t_int = torch.zeros_like(t_int)
+                # TODO: DGCNN에 t conditioning 하기
+            logits = classifier(
+                pcs_t, ts=t_int.flatten()
+                ) #, activate_DefRec=False)
+
+            if args.src_random_remove:
+                pcs = data.permute(0,2,1) #,2)
+            t_int2 = torch.randint(
+                0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
+                size=(pcs.size(0), 1), device=device).float()
+            t2 = t_int2 / args.diffusion_steps
+            gamma_t2 = model.module.inflate_batch_array(model.module.gamma(t2),
+                    pcs.permute(0,2,1))
+            alpha_t2 = model.module.alpha(gamma_t2, pcs.permute(0,2,1))
+            sigma_t2 = model.module.sigma(gamma_t2, pcs.permute(0,2,1))
+            eps2 = model.module.sample_combined_position_feature_noise(
+                n_samples=pcs.size(0), n_nodes=pcs.size(2),
+                node_mask=node_mask,
+                device=device
+            ).permute(0,2,1)
+
+            pcs_t2 = alpha_t2 * pcs + sigma_t2 * eps2
+            if args.rotation:
+                pcs_t2 = random_rotate_one_axis_torch(pcs_t2.permute(0,2,1), axis='z').permute(0,2,1)
+            # TODO: DGCNN에 t conditioning 하기
+            logits2 = classifier(
+                pcs_t2, ts=t_int2.flatten()
+                ) #, activate_DefRec=False)
+            cls_logits = logits['cls']
+            cls_logits2 = logits2['cls']
+            cl_feat = logits['cl_feat']
+            cl_feat2 = logits2['cl_feat']
+            max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
+            max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
+            selected = max_prob > threshold
+            selected2 = max_prob2 > threshold
+            selected_final = selected & selected2 & (label_tgt == label_tgt2)
+            n_selected += selected_final.float().sum().item()
+            selected_count += len(selected_final)
             if args.with_dm:
+                with torch.no_grad():
+                    #node_mask = pcs_t2.new_ones(pcs_t2.shape[0],
+                    #        pcs_t2.shape[2]).unsqueeze(-1)
+                    eps2_ = model(x=pcs_t2.permute(0,2,1), node_mask=node_mask, t=t2,
+                            phi=True).permute(0,2,1)
+                    if args.clf_guidance:
+                        grad = cond_fn_clf_guidance(pcs_t2,
+                                t_int2,
+                                torch.cat((label_src, label_tgt), dim=0))
+                        # src
+                        eps2_[:n_src] = eps2_[:n_src] + sigma_t2[:n_src] * grad[:n_src]
+                        # tgt
+                        tgt_selected_idx = selected_final.nonzero(as_tuple=True)[0]+n_src
+                        eps2_[tgt_selected_idx] = eps2_[tgt_selected_idx] +\
+                                sigma_t2[tgt_selected_idx] * grad[tgt_selected_idx]
+                    pcs_est = (pcs_t2 - sigma_t2 * eps2_) / alpha_t2
+                    if args.rotation:
+                        pcs_est = \
+                            random_rotate_one_axis_torch(pcs_est.permute(0,2,1),
+                                    axis='z').permute(0,2,1)
+
+                logits_est = classifier(
+                    pcs_est, ts=torch.zeros_like(t_int).flatten()
+                    )
+                cls_logits_est = logits_est['cls']
                 cl_feat_est = logits_est['cl_feat']
 
             # src loss
@@ -495,20 +508,26 @@ def main():
             if args.with_dm:
                 max_prob_est, label_tgt_est = F.softmax(cls_logits_est[n_src:], dim=-1).max(dim=-1)
 
-
-            if torch.any(selected_final):
-                tgt_cls_loss = criterion(cls_logits[n_src:][selected_final],
-                        label_tgt[selected_final]) + \
-                        criterion(cls_logits2[n_src:][selected_final],
-                            label_tgt2[selected_final])
-                if args.with_dm:
-                    selected_est = max_prob_est > threshold
-                    selected_est_final = selected & selected_est & (label_tgt == label_tgt_est)
-                    tgt_cls_loss = tgt_cls_loss + \
-                        criterion(cls_logits_est[n_src:][selected_est_final],
-                            label_tgt_est[selected_est_final])
-            else:
-                tgt_cls_loss = 0
+            if args.tgt_train_mode == 'pseudo_label':
+                if torch.any(selected_final):
+                    tgt_cls_loss = criterion(cls_logits[n_src:][selected_final],
+                            label_tgt[selected_final]) + \
+                            criterion(cls_logits2[n_src:][selected_final],
+                                label_tgt2[selected_final])
+                    if args.with_dm:
+                        selected_est = max_prob_est > threshold
+                        selected_est_final = selected & selected_est & (label_tgt == label_tgt_est)
+                        tgt_cls_loss = tgt_cls_loss + \
+                            criterion(cls_logits_est[n_src:][selected_est_final],
+                                label_tgt_est[selected_est_final])
+                else:
+                    tgt_cls_loss = 0
+            else: # entropy_minimization
+                tgt_cls_loss = \
+                    softmax_entropy(cls_logits[n_src:]/args.em_temperature) + \
+                    softmax_entropy(cls_logits2[n_src:]/args.em_temperature) + \
+                    (softmax_entropy(cls_logits_est[n_src:]/args.em_temperature)
+                            if args.with_dm else 0)
 
             # constrastive learning (infoNCE loss)
             if args.with_dm:
@@ -582,7 +601,8 @@ def main():
                             device=device
                         ).permute(0,2,1)
 
-                        pcs_t = alpha_t * pcs + sigma_t * eps
+                        pcs_t = alpha_t * pcs + sigma_t * eps if not \
+                            args.deterministic_val else pcs
                         logits_src = classifier(pcs_t, ts=t_int.flatten())
                     else:
                         logits_src = classifier(val_src[0].to(device).permute(0,2,1))
@@ -612,7 +632,8 @@ def main():
                             device=device
                         ).permute(0,2,1)
 
-                        pcs_t = alpha_t * pcs + sigma_t * eps
+                        pcs_t = alpha_t * pcs + sigma_t * eps if not \
+                                args.deterministic_val else pcs
                         logits_tgt = classifier(pcs_t, ts=t_int.flatten())
                     else:
                         logits_tgt = classifier(val_tgt[0].to(device).permute(0,2,1))

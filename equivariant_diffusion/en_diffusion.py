@@ -670,7 +670,7 @@ class DiffusionModel(torch.nn.Module):
         # Neural net prediction.
         eps_t = self.phi(zt, t, node_mask, edge_mask)
         if cond_fn is not None:
-            if hasattr(self, 'domain_cls'):
+            if False: #hasattr(self, 'domain_cls'):
                 grad = cond_fn(zt, t, self.phi, x, self.domain_cls, # model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
@@ -706,7 +706,7 @@ class DiffusionModel(torch.nn.Module):
         # Neural net prediction.
         eps_t = self.phi(zt, t, node_mask, edge_mask)
         if cond_fn is not None:
-            if hasattr(self, 'domain_cls'):
+            if False:#hasattr(self, 'domain_cls'):
                 grad = cond_fn(zt, t, self.phi, x, self.domain_cls,# model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )

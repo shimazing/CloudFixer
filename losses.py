@@ -4,6 +4,8 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 
+def softmax_entropy(x, dim=-1):
+    return -(x.softmax(dim) * x.log_softmax(dim)).sum(dim).mean()
 
 def sum_except_batch(x):
     return x.view(x.size(0), -1).sum(dim=-1)

@@ -23,6 +23,96 @@ class GroupNormTimeCond(torch.nn.GroupNorm):
         output = output * (weight[:, :, None, None] + 1) + bias[:,:, None, None]
         return output
 
+class Density_prediction(nn.Module):
+    def __init__(self, args, input_size):
+        super(Density_prediction, self).__init__()
+        if isinstance(args,float):
+            dropout = args
+        else:
+            dropout = args.dropout
+        # self.args = args
+        self.of1 = 512
+        # self.of2 = 256
+        # self.of3 = 128
+
+        self.bn1 = nn.BatchNorm1d(self.of1)
+        # self.bn2 = nn.BatchNorm1d(self.of2)
+        # self.bn3 = nn.BatchNorm1d(self.of3)
+        self.dp1 = nn.Dropout(p=dropout)
+        # self.dp2 = nn.Dropout(p=dropout)
+
+        self.conv1 = nn.Conv1d(input_size, self.of1, kernel_size=1, bias=False)
+        # self.conv2 = nn.Conv1d(self.of1, self.of2, kernel_size=1, bias=False)
+        # self.conv3 = nn.Conv1d(self.of2, self.of3, kernel_size=1, bias=False)
+        # self.conv4 = nn.Conv1d(self.of3, 3, kernel_size=1, bias=False)
+        self.num_class = args.density_num_class
+        # self.C = density_classifier(args, self.num_class)
+
+        activate = 'leakyrelu' #if args.model == 'dgcnn' else 'relu'
+        bias = True if args.model == 'dgcnn' else False
+
+        self.mlp1 = fc_layer(512, 256, bias=bias, activation=activate, bn=getattr(args, 'bn', 'ln'))
+        self.dp1 = nn.Dropout(p=args.dropout)
+        self.mlp2 = fc_layer(256, 256, bias=True, activation=activate,
+                bn=getattr(args, 'bn', 'ln'))
+        self.dp2 = nn.Dropout(p=args.dropout)
+        self.mlp3 = nn.Linear(256, self.num_class)
+
+        self.fc2 = torch.nn.Linear(self.num_class, 1, bias=False)
+        for i in range(self.num_class):
+            torch.nn.init.constant(self.fc2.weight[0, i], args.pergroup*i)
+        self.fc2.weight.requires_grad = False
+
+    def forward(self, x):
+        x = self.dp1(F.relu(self.bn1(self.conv1(x))))
+        x = x.permute(0, 2, 1)
+        # print(x.shape, self.of1)
+        x = x.reshape(-1, self.of1)
+        # x = self.C(x)
+        x = self.dp1(self.mlp1(x))
+        x2 = self.dp2(self.mlp2(x))
+        logits = self.mlp3(x2)
+        p_vec = F.softmax(logits, dim=1)
+        # p_vec = torch.ones_like(p_vec).cuda()
+        # print('self.fc2',self.fc2.weight[0])
+        density = self.fc2(p_vec)
+        return p_vec, density[:, 0]
+
+
+class Normal_prediction(nn.Module):
+    """
+    Normal prediction Network
+    For more details see https://arxiv.org/pdf/2003.12641.pdf
+    """
+    def __init__(self, args, input_size):
+        super(Normal_prediction, self).__init__()
+        if isinstance(args,float):
+            dropout = args
+        else:
+            dropout = args.dropout
+        # self.args = args
+        self.of1 = 256
+        self.of2 = 256
+        self.of3 = 128
+
+        self.bn1 = nn.BatchNorm1d(self.of1)
+        self.bn2 = nn.BatchNorm1d(self.of2)
+        self.bn3 = nn.BatchNorm1d(self.of3)
+        self.dp1 = nn.Dropout(p=dropout)
+        self.dp2 = nn.Dropout(p=dropout)
+
+        self.conv1 = nn.Conv1d(input_size, self.of1, kernel_size=1, bias=False)
+        self.conv2 = nn.Conv1d(self.of1, self.of2, kernel_size=1, bias=False)
+        self.conv3 = nn.Conv1d(self.of2, self.of3, kernel_size=1, bias=False)
+        self.conv4 = nn.Conv1d(self.of3, 3, kernel_size=1, bias=False)
+
+    def forward(self, x):
+        x = self.dp1(F.relu(self.bn1(self.conv1(x))))
+        x = self.dp2(F.relu(self.bn2(self.conv2(x))))
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = self.conv4(x) #[batch_size, 3, num_points]
+        return x.permute(0, 2, 1)
+
 
 
 
@@ -231,7 +321,7 @@ class conv_2d_time_cond(nn.Module):
 
 
 class fc_layer(nn.Module):
-    def __init__(self, in_ch, out_ch, bn=False, activation='relu', bias=True,
+    def __init__(self, in_ch, out_ch, bn='', activation='relu', bias=True,
             norm=True):
         super(fc_layer, self).__init__()
         self.norm = norm
@@ -242,8 +332,7 @@ class fc_layer(nn.Module):
         if bn:
             self.fc = nn.Sequential(
                 nn.Linear(in_ch, out_ch, bias=bias),
-                #nn.BatchNorm1d(out_ch),
-                nn.LayerNorm(out_ch),
+                nn.BatchNorm1d(out_ch) if bn == 'bn' else nn.LayerNorm(out_ch),
                 self.ac
             )
         else:
@@ -269,18 +358,17 @@ class transform_net(nn.Module):
         self.args = args
         self.model = args.model
 
-        activation = 'leakyrelu' if self.model == 'dgcnn' else 'relu'
-        bias = False if self.model == 'dgcnn' else True
+        activation = 'leakyrelu' #if self.model == 'dgcnn' else 'relu'
+        bias = False #if self.model == 'dgcnn' else True
 
         self.conv2d1 = conv_2d(in_ch, 64, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
         self.conv2d2 = conv_2d(64, 128, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
         self.conv2d3 = conv_2d(128, 1024, kernel=1, activation=activation, bias=bias, gn=getattr(args, 'gn', False))
         self.fc1 = fc_layer(1024, 512, activation=activation, bias=bias,
-                bn=True,
-            norm=getattr(args, 'fc_norm', True)
+            bn=getattr(args, 'bn', 'ln'), norm=False, #getattr(args, 'fc_norm', True)
                 )
-        self.fc2 = fc_layer(512, 256, activation=activation, bn=True,
-            norm=getattr(args, 'fc_norm', True)
+        self.fc2 = fc_layer(512, 256, activation=activation, bn=getattr(args, 'bn', 'ln'),
+            norm=False, #getattr(args, 'fc_norm', True)
                 )
         self.fc3 = nn.Linear(256, out * out)
 
@@ -382,7 +470,6 @@ class DGCNN(nn.Module):
     def __init__(self, args):
         super(DGCNN, self).__init__()
         self.args = args
-
         self.time_cond = getattr(args, 'time_cond', False)
         if getattr(args, 'time_cond', False):
             t_dim = 128
@@ -392,8 +479,9 @@ class DGCNN(nn.Module):
             self.activation = swish
 
         self.k = K
-        self.input_transform = self.args.input_transform
-        self.input_transform_net = transform_net(args, 6, 3)
+        self.input_transform = getattr(self.args, 'input_transform', False)
+        if self.input_transform:
+            self.input_transform_net = transform_net(args, 6, 3)
         if not self.time_cond:
             self.conv1 = conv_2d(6, 64, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
             self.conv2 = conv_2d(64 * 2, 64, kernel=1, bias=False, activation='leakyrelu', gn=getattr(args, 'gn', False))
@@ -414,21 +502,28 @@ class DGCNN(nn.Module):
 
         self.cls_C = class_classifier(args, 1024, 10)
         self.domain_C = domain_classifier(args, 1024, 2)
-        self.rotcls_C1 = linear_classifier(1024, 4)
-        self.rotcls_C2 = linear_classifier(1024, 4)
-        self.defcls_C = linear_classifier(1024, getattr(args, 'nregions', 3)**3)
+        #self.rotcls_C1 = linear_classifier(1024, 4)
+        #self.rotcls_C2 = linear_classifier(1024, 4)
+        #self.defcls_C = linear_classifier(1024, getattr(args, 'nregions', 3)**3)
         if getattr(args, 'pred_stat', False):
-            self.stat_C = linear_classifier(1024, getattr(args, 'nregions',
-                3)*3 + 1)
+            self.stat_C = linear_classifier(1024, 3+1) #getattr(args, 'nregions',
+            #    3)*3 + 1)
         if getattr(args, 'cl', False):
             self.cl_head = ssl_classifier(args, 1024, args.cl_dim)
         # self.normreg_C = nn.Conv1d(1024, 4, kernel_size=1, bias=False)
         # self.curvconfreg_C = linear_classifier(1)
-        self.DecoderFC = DecoderFC(args, 1024)
 
-        self.DefRec = RegionReconstruction(args, num_f_prev + 1024)
+        #self.DecoderFC = DecoderFC(args, 1024)
+        #self.DefRec = RegionReconstruction(args, num_f_prev + 1024)
+        if hasattr(args, 'density_num_class'):
+            self.Norm_pred = Normal_prediction(args, num_f_prev + 1024)
+            self.Rec_scan = RegionReconstruction(args, num_f_prev + 1024)
+            self.Density_cls = Density_prediction(args, num_f_prev + 1024)
 
-    def forward(self, x, alpha=0, ts=None, activate_DefRec=False, mask=None):
+    def forward(self, x, alpha=0, ts=None, activate_DefRec=False, mask=None,
+            activate_normal=False, activate_scan=False,
+             activate_density=False, activate_density_normal_ondef=False,
+            ):
         if self.time_cond:
             assert ts is not None
             t_emb = calc_t_emb(ts, self.t_dim)
@@ -525,7 +620,7 @@ class DGCNN(nn.Module):
         # Generate a feature vector for the whole shape
         # x5_pool = F.adaptive_max_pool1d(x5, 1).view(batch_size, -1)
         # x = x5_pool
-
+        cls_logits['global_features'] = x # for self distillation
         cls_logits["cls"] = self.cls_C(x)
         if alpha != 0:
             reverse_x = ReverseLayerF.apply(x, alpha)
@@ -536,18 +631,34 @@ class DGCNN(nn.Module):
         else:
             cls_logits['cl_feat'] = l2_norm(x, 1) # without head
         cls_logits["domain_cls"] = self.domain_C(reverse_x)
-        cls_logits["rot_cls1"] = self.rotcls_C1(x)
-        cls_logits["rot_cls2"] = self.rotcls_C2(x)
-        cls_logits["def_cls"] = self.defcls_C(x)
+
+        #cls_logits["rot_cls1"] = self.rotcls_C1(x)
+        #cls_logits["rot_cls2"] = self.rotcls_C2(x)
+        #cls_logits["def_cls"] = self.defcls_C(x)
         # cls_logits["curv_conf"] = self.curvconfreg_C(x)
         # cls_logits["norm_reg"] = self.normreg_C(x5).permute(0, 2, 1)
-        cls_logits["decoder"] = self.DecoderFC(x)
+        #cls_logits["decoder"] = self.DecoderFC(x)
         if hasattr(self, 'stat_C'):
             cls_logits['stat'] = self.stat_C(x)
 
         if activate_DefRec:
             DefRec_input = torch.cat((x_cat, x.unsqueeze(2).repeat(1, 1, num_points)), dim=1)
             cls_logits["DefRec"] = self.DefRec(DefRec_input)
+        if activate_normal:
+            Normal_input = torch.cat((x_cat, x.unsqueeze(2).repeat(1, 1, num_points)), dim=1) #bs C 1024
+            cls_logits["Normal"] = self.Norm_pred(Normal_input)
+        if activate_scan:
+            Rec_scan_input = torch.cat((x_cat, x.unsqueeze(2).repeat(1, 1, num_points)), dim=1) #bs C 1024
+            cls_logits["Rec_scan"] = self.Rec_scan(Rec_scan_input)
+        if activate_density:
+            Density_input = torch.cat((x_cat, x.unsqueeze(2).repeat(1, 1, num_points)), dim=1) #bs C 1024
+            cls_logits['density'], cls_logits['density_mse'] = self.Density_cls(Density_input)
+
+        if activate_density_normal_ondef:
+            pred_input = torch.cat((x_cat, x.unsqueeze(2).repeat(1, 1, num_points)), dim=1) #bs C 1024
+            cls_logits["DefRec"] = self.DefRec(pred_input)
+            cls_logits['density'], cls_logits['density_mse'] = self.Density_cls(pred_input)
+            cls_logits["Normal"] = self.Norm_pred(pred_input)
 
         return cls_logits
 
@@ -560,10 +671,11 @@ class class_classifier(nn.Module):
         bias = True if args.model == 'dgcnn' else False
 
         self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
-                bn=True, norm=getattr(args, 'fc_norm', True))
+                bn=getattr(args, 'bn', 'gn'), norm=getattr(args, 'fc_norm', True))
         self.dp1 = nn.Dropout(p=args.dropout)
-        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True
-            , norm=getattr(args, 'fc_norm', True)
+        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate,
+            bn=getattr(args, 'bn', 'gn'),
+            norm=getattr(args, 'fc_norm', True)
                 )
         self.dp2 = nn.Dropout(p=args.dropout)
         self.mlp3 = nn.Linear(256, num_class)
@@ -581,7 +693,8 @@ class ssl_classifier(nn.Module):
         activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
         self.mlp1 = fc_layer(input_dim, 256,
             activation=activate,
-            norm=getattr(args, 'fc_norm', True)
+            norm=getattr(args, 'fc_norm', True),
+            bn=getattr(args, 'bn', 'ln'),
                 )
         self.dp1 = nn.Dropout(p=args.dropout)
         self.mlp2 = nn.Linear(256, num_class)
@@ -611,10 +724,11 @@ class domain_classifier(nn.Module):
         bias = True if args.model == 'dgcnn' else False
 
         self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
-                bn=True,
+                bn=getattr(args, 'bn', 'ln'),
             norm=getattr(args, 'fc_norm', True)
                 )
-        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate, bn=True,
+        self.mlp2 = fc_layer(512, 256, bias=True, activation=activate,
+                bn=getattr(args, 'bn', 'ln'),
             norm=getattr(args, 'fc_norm', True)
                 )
         self.mlp3 = nn.Linear(256, num_class)
@@ -633,10 +747,11 @@ class DecoderFC(nn.Module):
         bias = True if args.model == 'dgcnn' else False
 
         self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
-                bn=True,
-            norm=getattr(args, 'fc_norm', True)
+                bn=getattr(args, 'bn', 'ln'),
+            norm=getattr(args, 'fc_norm', True),
                 )
-        self.mlp2 = fc_layer(512, 512, bias=True, activation=activate, bn=True,
+        self.mlp2 = fc_layer(512, 512, bias=True, activation=activate,
+                bn=getattr(args, 'bn', 'ln'),
             norm=getattr(args, 'fc_norm', True)
                 )
         self.mlp3 = nn.Linear(512, args.output_pts * 3)
@@ -657,6 +772,10 @@ class RegionReconstruction(nn.Module):
     def __init__(self, args, input_size):
         super(RegionReconstruction, self).__init__()
         self.args = args
+        if isinstance(args,float):
+            dropout = args
+        else:
+            dropout = args.dropout
         self.of1 = 256
         self.of2 = 256
         self.of3 = 128
@@ -669,10 +788,12 @@ class RegionReconstruction(nn.Module):
         self.conv2 = nn.Conv1d(self.of1, self.of2, kernel_size=1, bias=False)
         self.conv3 = nn.Conv1d(self.of2, self.of3, kernel_size=1, bias=False)
         self.conv4 = nn.Conv1d(self.of3, 3, kernel_size=1, bias=False)
+        self.dp1 = nn.Dropout(p=dropout)
+        self.dp2 = nn.Dropout(p=dropout)
 
     def forward(self, x):
-        x = F.leaky_relu(self.bn1(self.conv1(x)), negative_slope=0.2)
-        x = F.leaky_relu(self.bn2(self.conv2(x)), negative_slope=0.2)
+        x = self.dp1(F.leaky_relu(self.bn1(self.conv1(x)), negative_slope=0.2))
+        x = self.dp2(F.leaky_relu(self.bn2(self.conv2(x)), negative_slope=0.2))
         x = F.leaky_relu(self.bn3(self.conv3(x)), negative_slope=0.2)
         x = self.conv4(x)
         return x.permute(0, 2, 1)

@@ -3,6 +3,61 @@ import getpass
 import os
 import torch
 
+RADIUS = 0.5 * 3
+MIN_POINTS = 20
+KL_SCALER = 10.0
+NREGIONS = 3
+
+
+def draw_from_gaussian(mean, num_points):
+    """
+    Input:
+        mean: a numpy vector
+        num_points: number of points to sample
+    Return:
+        points sampled around the mean with small std
+    """
+    return np.random.multivariate_normal(mean, np.eye(3) * 0.001 * 3, num_points).T
+
+
+def collapse_to_point(x, device):
+    """
+    Input:
+        X: point cloud [C, N] # 3x1024
+        device: cuda:0, cpu
+    Return:
+        x: A deformed point cloud. Randomly sample a point and cluster all point
+        within a radius of RADIUS around it with some Gaussian noise.
+        indices: the points that were clustered around x
+    """
+    # get pairwise distances
+    inner = -2 * torch.matmul(x.transpose(1, 0), x)
+    xx = torch.sum(x ** 2, dim=0, keepdim=True)
+    pairwise_distance = xx + inner + xx.transpose(1, 0)
+
+    # get mask of points in threshold
+    mask = pairwise_distance.clone()
+    mask[mask > RADIUS ** 2] = 100
+    mask[mask <= RADIUS ** 2] = 1
+    mask[mask == 100] = 0
+
+    # Choose only from points that have more than MIN_POINTS within a RADIUS of them
+    pts_pass = torch.sum(mask, dim=1)
+    pts_pass[pts_pass < MIN_POINTS] = 0
+    pts_pass[pts_pass >= MIN_POINTS] = 1
+    indices = (pts_pass != 0).nonzero()
+
+    # pick a point from the ones that passed the threshold
+    point_ind = np.random.choice(indices.squeeze().cpu().numpy())
+    point = x[:, point_ind]  # get point
+    point_mask = mask[point_ind, :]  # get point mask
+
+    # draw a gaussian centered at the point for points falling in the region
+    indices = (point_mask != 0).nonzero().squeeze()
+    x[:, indices] = torch.tensor(draw_from_gaussian(point.cpu().numpy(), len(indices)), dtype=torch.float).to(device)
+    return x, indices
+
+
 def random_rotate_one_axis_torch(X, axis='z'):
     """
     Apply random rotation about one axis
@@ -102,7 +157,7 @@ def remove(points, p_keep=0.7):
 
     return points[mask, :]
 
-def region_mean(num_regions=3, rng=4):
+def region_mean(num_regions=3, rng=3):
     """
     Input:
         num_regions - number of regions
@@ -121,10 +176,10 @@ def region_mean(num_regions=3, rng=4):
     lookup = np.array(lookup)  # n**3 x 3
     return lookup
 
-def assign_region_to_point(X, device, NREGIONS=3, rng=4):
+def assign_region_to_point(X, device, NREGIONS=3, rng=3):
     """
     Input:
-        X: point cloud [B,N,C]
+        X: point cloud [B,C,N]
         device: cuda:0, cpu
     Return:
         Y: Region assignment per point [B, N]
@@ -132,14 +187,17 @@ def assign_region_to_point(X, device, NREGIONS=3, rng=4):
 
     n = NREGIONS
     d = 2 * rng / n
-    X_clip = torch.clamp(X, -1*rng + 1e-8, rng - 1e-8).permute(0,2,1) #-0.99999999, 0.99999999)  # [B, C, N]
-
-    Y = n * n * ((X_clip[:, 0] > -rng + d).float() + (X_clip[:, 0] >
-        -rng+2*d).long()) # x
-    Y += n * ((X_clip[:, 1] > -rng + d).float() + (X_clip[:, 1] >
-        -rng+2*d).long()) # y
-    Y += ((X_clip[:, 2] > -rng + d).long() + (X_clip[:, 2] > -rng+2*d).float()) # z
-
+    X_clip = torch.clamp(X, -1*rng + 1e-8, rng - 1e-8) #-0.99999999, 0.99999999)  # [B, C, N]
+    Y = 0
+    for i in range(n-1):
+        Y = Y + n * n * ((X_clip[:, 0] > -rng + (i+1)*d).float())
+        Y = Y + n * ((X_clip[:, 1] > -rng + (i+1)*d).float())
+        Y = Y + ((X_clip[:, 2] > -rng + (i+1)*d).float())
+    #+ (X_clip[:, 0] >
+    #    -rng+2*d).float()) # x
+    #Y += n * ((X_clip[:, 1] > -rng + d).float() + (X_clip[:, 1] >
+    #    -rng+2*d).long()) # y
+    #Y += ((X_clip[:, 2] > -rng + d).long() + (X_clip[:, 2] > -rng+2*d).float()) # z
     return Y
     #batch_size, _, num_points = X.shape
     #Y = torch.zeros((batch_size, num_points), device=device, dtype=torch.long)  # label matrix  [B, N]
@@ -206,6 +264,7 @@ def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rn
     region[~drop_region] = -1
     dropped = (regions.unsqueeze(2) == region.unsqueeze(1)).float().sum(-1) > 0 # [B, N, nxn] -> [B, N]
     mask = (~dropped).float().unsqueeze(2) # B x N x 1
+    mask_bool = (~dropped).unsqueeze(2) # B x N x 1
     assert torch.all(mask.sum(dim=1) > 10)
 
     sum = (X * mask).sum(dim=1, keepdim=True) # B x 1 x 3
@@ -215,7 +274,12 @@ def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rn
     # unit_std
     std = (X.pow(2).sum(dim=2, keepdim=True).sum(dim=1,
             keepdim=True) / (num * 3)).sqrt() # B x 1 x 1
-    X = X / std * mask #(~dropped).float().unsqueeze(2)
+    X = X / std #* mask #(~dropped).float().unsqueeze(2)
+
+    while torch.any(mask == 0):
+        sorted_mask, order = torch.sort(mask.squeeze(-1), dim=1, descending=True)
+        empty = (1-sorted_mask).sum(dim=1)
+
     return X, mask, drop_region, mean, std
 
 

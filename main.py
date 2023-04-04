@@ -113,6 +113,7 @@ parser.add_argument('--test_ema', action='store_true')
 parser.add_argument('--random_seed', default=0, type=int)
 parser.add_argument('--no_zero_mean', action='store_true')
 parser.add_argument('--lr_gamma', default=1, type=float)
+parser.add_argument('--cls_uniform', default=True, type=eval)
 args = parser.parse_args()
 
 zero_mean = not args.no_zero_mean
@@ -219,8 +220,9 @@ if args.n_nodes == 1024:
                     zero_mean=zero_mean)
         train_dataset_sampler, val_dataset_sampler = None, None #split_set(dataset_)
         train_loader = DataLoader(dataset_, batch_size=args.batch_size,
-                sampler=ImbalancedDatasetSampler(dataset_), #train_dataset_sampler,
+                sampler=None if not args.cls_uniform else ImbalancedDatasetSampler(dataset_), #train_dataset_sampler,
                 drop_last=True,
+                shuffle=True if not args.cls_uniform else False,
                 num_workers=args.num_workers)
         val_loader = DataLoader(dataset_val, batch_size=args.batch_size,
                 shuffle=False,

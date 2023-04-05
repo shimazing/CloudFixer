@@ -2,11 +2,48 @@ import numpy as np
 import getpass
 import os
 import torch
+import pytorch3d as p3d
 
 RADIUS = 0.5 * 3
 MIN_POINTS = 20
 KL_SCALER = 10.0
 NREGIONS = 3
+
+
+def median_filter(x, K=20, radius=0.1):
+    # x: B x N x 3
+    dist, idx, nn = p3d.ops.ball_query(x, x, K=K,radius=radius, return_nn=True)
+    K = (idx != -1).long().sum(dim=-1) # B x N
+    med = (K / 2).int()
+    # dist : B x N x K
+    _, indices = dist.sort(dim=-1, descending=True)
+    filtered = nn[
+       torch.arange(len(x))[:, None].to(nn.device).long(),
+       torch.arange(x.shape[1])[None, :].to(nn.device).long(),
+       med.to(nn.device).long()]
+    #filtered = nn[
+    #    torch.arange(len(x))[:, None, None, None].to(x.device),
+    #   torch.arange(x.shape[1])[None, :, None, None].to(x.device),
+    #filtered = torch.zeros_like(x)
+    return filtered
+
+def mean_filter(x, K=20, radius=0.1):
+    # x: B x N x 3
+    N = x.shape[1]
+    dist, idx, nn = p3d.ops.ball_query(x, x, K=K,radius=radius,
+            return_nn=True)
+    K = (idx != -1).long().sum(dim=-1, keepdim=True)
+    filtered = nn.sum(dim=2) / K
+    print(K.squeeze())
+    print(filtered.shape)
+    #idx[idx == torch.arange(N).to(idx)[:, None]] = -1
+    #nn[idx.unsqueeze(-1).expand_as(nn) == -1] = 0
+    #print(idx)
+    #print(dist, idx.shape)
+    #print(nn)
+    #input("dist")
+    #filtered = nn.mean(dim=2)
+    return filtered
 
 
 def draw_from_gaussian(mean, num_points):

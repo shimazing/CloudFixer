@@ -190,6 +190,9 @@ class ScanNet(Dataset):
         # read data
         self.data, self.label = load_data_h5py_scannet10(partition, dataroot)
         self.num_examples = self.data.shape[0]
+        io.cprint("number of " + partition + " examples in scannet" + ": " + str(self.data.shape[0]))
+        self.data = list(self.data)
+
         self.zero_mean = zero_mean
 
         # split train to train part and validation part
@@ -201,9 +204,38 @@ class ScanNet(Dataset):
                 % 10 >= 8]).astype(int)
             #np.random.shuffle(self.val_ind)
 
-        io.cprint("number of " + partition + " examples in scannet" + ": " + str(self.data.shape[0]))
         unique, counts = np.unique(self.label, return_counts=True)
         io.cprint("Occurrences count of classes in scannet " + partition + " set: " + str(dict(zip(unique, counts))))
+        # remove dup point
+        processed_fn = f"data/PointDA_data/scannet/processed_{partition}.pt"
+        if not os.path.exists(processed_fn):
+            print("Remove dup point")
+            for item in tqdm(range(len(self.data))):
+                pointcloud = np.copy(self.data[item])[:, :3]
+                norm_curv = np.copy(self.data[item])[:, 3:].astype(np.float32)
+                dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+                    None, :]), 2),
+                        axis=-1) < 1e-8
+                dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+                mask = np.ones(len(pointcloud))
+                if np.any(dup_points):
+                    row, col = dup_points.nonzero()
+                    row, col = row[row<col], col[row<col]
+                    dup = np.unique(col)
+                    mask[dup] = 0
+                valid, = mask.nonzero()
+                mask = mask.astype(bool)
+                self.data[item] = self.data[item][mask]
+            print("Remove dup point done")
+            self.data = np.array(self.data, dtype=object)
+
+            with open(processed_fn, 'wb') as f:
+                np.save(f, self.data, allow_pickle=True)
+        else:
+            with open(processed_fn, 'rb') as f:
+                self.data = np.load(f, allow_pickle=True)
+            print("Processed PCs are loaded")
+
 
     def __getitem__(self, item):
         item_ = item
@@ -215,20 +247,20 @@ class ScanNet(Dataset):
         norm_curv = np.copy(self.data[item])[:, 3:].astype(np.float32)
         label = np.copy(self.label[item])
 
-        dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
-            None, :]), 2),
-                axis=-1) < 1e-8
-        dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-        mask = np.ones(len(pointcloud))
-        if np.any(dup_points):
-            row, col = dup_points.nonzero()
-            row, col = row[row<col], col[row<col]
-            dup = np.unique(col)
-            mask[dup] = 0
-        valid, = mask.nonzero()
-        mask = mask.astype(bool)
-        pointcloud = pointcloud[mask]
-        norm_curv = norm_curv[mask]
+        #dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+        #    None, :]), 2),
+        #        axis=-1) < 1e-8
+        #dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+        #mask = np.ones(len(pointcloud))
+        #if np.any(dup_points):
+        #    row, col = dup_points.nonzero()
+        #    row, col = row[row<col], col[row<col]
+        #    dup = np.unique(col)
+        #    mask[dup] = 0
+        #valid, = mask.nonzero()
+        #mask = mask.astype(bool)
+        #pointcloud = pointcloud[mask]
+        #norm_curv = norm_curv[mask]
 
         # Rotate ScanNet by -90 degrees
         pointcloud = self.rotate_pc(pointcloud)
@@ -305,7 +337,7 @@ class ScanNet(Dataset):
             return len(self.train_ind)
         elif self.partition == 'val':
             return len(self.val_ind)
-        return self.data.shape[0]
+        return len(self.data)
 
     # scannet is rotated such that the up direction is the y axis
     def rotate_pc(self, pointcloud):

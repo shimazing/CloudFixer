@@ -217,7 +217,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
 
     def forward(self, t):
         t_int = torch.round(t * self.timesteps).long()
-        return self.gamma[t_int]
+        return self.gamma[t_int.to(self.gamma.device)]
 
 
 class GammaNetwork(torch.nn.Module):
@@ -626,17 +626,20 @@ class DiffusionModel(torch.nn.Module):
     def forward(self, x, h=None, node_mask=None, edge_mask=None,
             sample_p_zs_given_zt=False, sample_p_x_given_z0=False,
             sample_p_zs_given_zt_ddim=False, phi=False, s=None, t=None,
-            cond_fn=None, return_noise=False, x_ori=None, noise=None, ddim=False):
+            cond_fn=None, return_noise=False, x_ori=None, noise=None,
+            ddim=False, furthest_point_idx=None):
         """
         Computes the loss (type l2 or NLL) if training. And if eval then always computes NLL.
         """
         if sample_p_zs_given_zt:
             return self.sample_p_zs_given_zt(s, t, x, node_mask, edge_mask,
                     fix_noise=False, cond_fn=cond_fn, x=x_ori,
-                    return_noise=return_noise, noise=noise)
+                    return_noise=return_noise, noise=noise,
+                    furthest_point_idx=furthest_point_idx)
         if sample_p_zs_given_zt_ddim:
             return self.sample_p_zs_given_zt_ddim(s, t, x, node_mask, edge_mask,
-                    fix_noise=False, cond_fn=cond_fn, x=x_ori)
+                    fix_noise=False, cond_fn=cond_fn, x=x_ori,
+                    furthest_point_idx=furthest_point_idx)
         if sample_p_x_given_z0:
             return self.sample_p_x_given_z0(x, node_mask, edge_mask,
                     fix_noise=False, ddim=ddim)
@@ -656,7 +659,7 @@ class DiffusionModel(torch.nn.Module):
 
 
     def sample_p_zs_given_zt_ddim(self, s, t, zt, node_mask, edge_mask,
-            fix_noise=False, cond_fn=None, x=None): #, return_noise=False, noise=None):
+            fix_noise=False, cond_fn=None, x=None, furthest_point_idx=None): #, return_noise=False, noise=None):
         """Samples from zs ~ p(zs | zt). Only used during sampling."""
         gamma_s = self.gamma(s)
         gamma_t = self.gamma(t)
@@ -675,7 +678,7 @@ class DiffusionModel(torch.nn.Module):
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             else:
-                grad = cond_fn(zt, t, self.phi, x, # model
+                grad = cond_fn(zt, t, self.phi, x, furthest_point_idx, # model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
@@ -692,7 +695,8 @@ class DiffusionModel(torch.nn.Module):
 
 
     def sample_p_zs_given_zt(self, s, t, zt, node_mask, edge_mask,
-            fix_noise=False, cond_fn=None, x=None, return_noise=False, noise=None):
+            fix_noise=False, cond_fn=None, x=None, return_noise=False,
+            noise=None, furthest_point_idx=None):
         """Samples from zs ~ p(zs | zt). Only used during sampling."""
         gamma_s = self.gamma(s)
         gamma_t = self.gamma(t)
@@ -711,7 +715,7 @@ class DiffusionModel(torch.nn.Module):
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             else:
-                grad = cond_fn(zt, t, self.phi, x, # model
+                grad = cond_fn(zt, t, self.phi, x, furthest_point_idx,# model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):

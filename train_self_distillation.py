@@ -204,7 +204,7 @@ parser.add_argument('--em_temperature', default=2.5, type=float)
 parser.add_argument('--threshold', default=0.8, type=float)
 parser.add_argument('--with_dm', action='store_true',
     help='whether to obtain diffusion model views')
-parser.add_argument('--rotation', action='store_true',)
+parser.add_argument('--rotation', type=eval, default=True)
 parser.add_argument('--src_random_remove', action='store_true', help='remove random part from src')
 parser.add_argument('--use_ori', action='store_true', help='remove random part from src')
 parser.add_argument('--clf_guidance', action='store_true',)
@@ -222,14 +222,19 @@ parser.add_argument('--input_transform', action='store_true',
 parser.add_argument('--fc_norm', action='store_true', default=False)
 parser.add_argument('--cl', action='store_true', help='whether to use cl head')
 parser.add_argument('--cl_dim', default=1024, type=int)
+parser.add_argument('--cl_norm', default=False, type=eval)
 parser.add_argument('--time_cond', action='store_true', default=True)
 parser.add_argument('--interval', type=int, default=5) # for step2
+parser.add_argument('--elastic_distortion', type=eval, default=True)
+parser.add_argument('--random_scale', type=eval, default=True)
+parser.add_argument('--ssl', type=str, default='ori')
 
 args = parser.parse_args()
 #if args.input_transform or not args.time_cond:
 #    args.gn = True # deterministic
+args.random_remove = False
 if args.dataset_tgt == 'scannet':
-    args.src_random_remove = True
+    args.random_remove = args.src_random_remove
 
 io = log.IOStream(args)
 
@@ -255,8 +260,8 @@ def split_set(dataset, domain='scannet', set_type="source"):
     valid_sampler = SubsetRandomSampler(val_indices)
     return train_sampler, valid_sampler
 
-args.random_scale = True
-args.elastic_distortion = True
+#args.random_scale = True
+#args.elastic_distortion = True
 #args.src_random_remove = False
 if args.n_nodes == 1024:
     dataset_dict = {'shapenet': ShapeNet, 'scannet': ScanNet, 'modelnet': ModelNet}
@@ -266,7 +271,7 @@ if args.n_nodes == 1024:
             scale_mode=args.scale_mode,
             random_scale=args.random_scale,
             random_rotation=True, zero_mean=not args.no_zero_mean,
-            random_remove=args.src_random_remove,
+            random_remove=args.random_remove,
             self_distillation=True,
             elastic_distortion=args.elastic_distortion,
             p_keep=0.7,
@@ -316,7 +321,8 @@ device = torch.device("cuda" if args.cuda else "cpu")
 dtype = torch.float32
 
 args.exp_name = \
-    f'SDist_{args.t}_fc_norm{args.fc_norm}bn{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_srcRandomRemove{args.src_random_remove}_useOri{args.use_ori}_epochs{args.n_epochs}_step1'
+        f'SDist_{args.t}_fc_norm{args.fc_norm}{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_aug{args.random_remove}{args.jitter}{args.elastic_distortion}{args.rotation}{args.random_scale}_useOri{args.use_ori}_epochs{args.n_epochs}_cl{args.cl}{args.cl_dim}{args.cl_norm}_{args.ssl}_step1'
+    #f'SDist_{args.t}_fc_norm{args.fc_norm}bn{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_srcRandomRemove{args.random_remove}_useOri{args.use_ori}_epochs{args.n_epochs}_step1'
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -359,14 +365,22 @@ if args.bn == 'bn':
     classifier = convert_model(classifier).to(device)
     classifier_ema = convert_model(classifier_ema).to(device)
 classifier_ema.eval()
-optim = get_optim(args, classifier)
-scheduler = CosineAnnealingLR(optim, args.n_epochs)
-scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr=args.lr,
-        epochs=args.n_epochs,
-        steps_per_epoch=int(len(train_loader_src)/args.accum_grad))
-criterion = nn.CrossEntropyLoss()
-infonce = InfoNCELoss(args.temperature)
-args.model = ori_model
+
+class BYOL(nn.Module):
+    def __init__(self, feat_dim=1024, hidden_dim=256, proj_dim=1024):
+        super().__init__()
+        self.predictor = nn.Sequential(
+            nn.Linear(feat_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, proj_dim)
+        )
+
+    def forward(self, x, target_x):
+        x = F.normalize(self.predictor(x), dim=1)
+        target_x = F.normalize(target_x)
+        return (2 - 2 * (x*target_x).sum(dim=-1)).mean()
+
 
 class Distillation_Loss(nn.Module):
     def __init__(self, out_dim=10, teacher_temp=0.1, student_temp=0.5):
@@ -385,7 +399,15 @@ class Distillation_Loss(nn.Module):
 
         return total_loss.mean()
 
-dist_loss = Distillation_Loss()
+dist_loss = Distillation_Loss() if args.ssl == 'ori' else BYOL().to(device)
+optim = get_optim(args, classifier, ssl_loss=dist_loss)
+scheduler = CosineAnnealingLR(optim, args.n_epochs)
+scheduler = torch.optim.lr_scheduler.OneCycleLR(optim, max_lr=args.lr,
+        epochs=args.n_epochs,
+        steps_per_epoch=int(len(train_loader_src)/args.accum_grad))
+criterion = nn.CrossEntropyLoss()
+infonce = InfoNCELoss(args.temperature)
+args.model = ori_model
 
 def sigmoid_rampup(current, rampup_length):
         if rampup_length == 0:
@@ -439,7 +461,10 @@ if 'step2' in args.mode:
     print("Load the best model")
     #args.exp_name = 'SDist' + args.exp_name[16:] + "_step2"
     args.exp_name = \
-        f'SDist_{args.t}_fc_norm{args.fc_norm}bn{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_srcRandomRemove{args.src_random_remove}_useOri{args.use_ori}_epochs{args.n_epochs}_step2'
+        f'SDist_{args.t}_fc_norm{args.fc_norm}{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_aug{args.random_remove}{args.jitter}{args.elastic_distortion}{args.rotation}{args.random_scale}_useOri{args.use_ori}_epochs{args.n_epochs}_cl{args.cl}{args.cl_dim}{args.cl_norm}_{args.ssl}_step2'
+        #f'SDist_{args.t}_fc_norm{args.fc_norm}{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_aug{args.src_random_remove}{args.jitter}{args.elastic_distortion}{args.rotation}_useOri{args.use_ori}_epochs{args.n_epochs}_cl{args.cl}{args.cl_dim}{args.cl_norm}_{args.ssl}_step2'
+        #f'SDist_{args.t}_fc_norm{args.fc_norm}{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_aug{args.src_random_remove}{args.jitter}{args.elastic_distortion}{args.rotation}_useOri{args.use_ori}_epochs{args.n_epochs}_cl{args.cl}{args.cl_dim}{args.cl_norm}_step2'
+        #f'SDist_{args.t}_fc_norm{args.fc_norm}{args.bn}gn{args.gn}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_timecond{args.time_cond}_clf_guidance{args.clf_guidance}{args.lambda_clf}_aug{args.src_random_remove}{args.jitter}{args.elastic_distortion}{args.rotation}_useOri{args.use_ori}_epochs{args.n_epochs}_step2'
     if not os.path.exists(f'outputs/{args.exp_name}'):
         os.makedirs(f'outputs/{args.exp_name}')
     confident = torch.zeros(len(dataset_tgt)).bool().to(device) #torch.zeros((0)).to(device)
@@ -586,6 +611,7 @@ def refine_labels(epoch):
     tgt_pseudo_labels[confident] = preds[confident]
 
 
+import time
 
 def main():
     best_val = 0
@@ -593,7 +619,6 @@ def main():
     best_tgt = 0
     threshold = args.threshold
     optim.zero_grad()
-
     for epoch in range(args.n_epochs):
         src_correct = 0
         src_est_correct = 0
@@ -613,15 +638,18 @@ def main():
         #        print(param)
         #        break
         #    input()
-
+        start = time.time()
         for i, data_src in enumerate(train_loader_src):
+            #print("loading src", time.time() - start)
+            #start = time.time()
             classifier.train()
             try:
                 data_tgt = next(train_loader_tgt_iter)
             except:
                 train_loader_tgt_iter = iter(train_loader_tgt)
                 data_tgt = next(train_loader_tgt_iter)
-
+            #print("loading tgt", time.time() - start)
+            #start = time.time()
             @torch.enable_grad()
             def cond_fn_clf_guidance(yt, t_int, labels):
                 # with dm
@@ -663,10 +691,10 @@ def main():
             #    0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
             #    size=(pcs.size(0), 1), device=device).float()
 
+            t_int = torch.randint(
+                0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
+                size=(pcs.size(0), 1), device=device).float()
             if not args.use_ori:
-                t_int = torch.randint(
-                    0, max(int(args.diffusion_steps * args.t),1), # ~= diffusion_steps * 0.4
-                    size=(pcs.size(0), 1), device=device).float()
                 t = t_int / args.diffusion_steps
                 gamma_t = model_.inflate_batch_array(model_.gamma(t),
                         pcs.permute(0,2,1))
@@ -726,9 +754,12 @@ def main():
 
             cls_logits = logits_ema['cls']
             cls_logits2 = logits2['cls']
-            cl_feat = logits_ema['global_features']
-            cl_feat2 = logits2['global_features']
-
+            if args.ssl == 'ori':
+                cl_feat = logits_ema['global_features']
+                cl_feat2 = logits2['global_features']
+            else: #'byol'
+                cl_feat = logits_ema['cl_feat']
+                cl_feat2 = logits2['cl_feat']
 
             max_prob, label_tgt = F.softmax(cls_logits[n_src:], dim=-1).max(dim=-1)
             max_prob2, label_tgt2 = F.softmax(cls_logits2[n_src:], dim=-1).max(dim=-1)
@@ -805,6 +836,7 @@ def main():
             ssl_loss = dist_loss(cl_feat2, cl_feat) + \
                     (dist_loss(cl_feat_est, cl_feat) if args.with_dm else 0)
 
+
             total_loss = ssl_loss * get_current_consistency_weight(epoch) + \
                 src_cls_loss #+ tgt_cls_loss #+ src_cls_loss_weak + tgt_cls_loss
             if 'step2' in args.mode:
@@ -837,6 +869,8 @@ def main():
                         get_current_consistency_weight(epoch),
                         src_cls_loss.item(), tgt_cls_loss)
                 print(get_current_consistency_weight(epoch))
+            #print(time.time() - start, "for loop")
+            #start = time.time()
         if not optim_step:
             optim.step()
             optim.zero_grad()

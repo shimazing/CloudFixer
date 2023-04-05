@@ -509,7 +509,8 @@ class DGCNN(nn.Module):
             self.stat_C = linear_classifier(1024, 3+1) #getattr(args, 'nregions',
             #    3)*3 + 1)
         if getattr(args, 'cl', False):
-            self.cl_head = ssl_classifier(args, 1024, args.cl_dim)
+            self.cl_head = ssl_classifier(args, 1024, args.cl_dim, getattr(args,
+                'cl_norm', True))
         # self.normreg_C = nn.Conv1d(1024, 4, kernel_size=1, bias=False)
         # self.curvconfreg_C = linear_classifier(1)
 
@@ -626,10 +627,11 @@ class DGCNN(nn.Module):
             reverse_x = ReverseLayerF.apply(x, alpha)
         else:
             reverse_x = x
-        if hasattr(self, 'cl_head'):
+        if hasattr(self, 'cl'):
             cls_logits['cl_feat'] = self.cl_head(x)
         else:
-            cls_logits['cl_feat'] = l2_norm(x, 1) # without head
+            cls_logits['cl_feat'] = l2_norm(x, 1) if getattr(self.args, 'cl_norm',
+                    True) else x # without head
         cls_logits["domain_cls"] = self.domain_C(reverse_x)
 
         #cls_logits["rot_cls1"] = self.rotcls_C1(x)
@@ -688,7 +690,7 @@ class class_classifier(nn.Module):
 
 
 class ssl_classifier(nn.Module):
-    def __init__(self, args, input_dim, num_class):
+    def __init__(self, args, input_dim, num_class, norm=True):
         super(ssl_classifier, self).__init__()
         activate = 'leakyrelu' if args.model == 'dgcnn' else 'relu'
         self.mlp1 = fc_layer(input_dim, 256,
@@ -698,11 +700,13 @@ class ssl_classifier(nn.Module):
                 )
         self.dp1 = nn.Dropout(p=args.dropout)
         self.mlp2 = nn.Linear(256, num_class)
+        self.norm = norm
 
     def forward(self, x):
         x = self.dp1(self.mlp1(x))
         feats = self.mlp2(x)
-        feats = l2_norm(feats, 1)
+        if self.norm:
+            feats = l2_norm(feats, 1)
         return feats
 
 

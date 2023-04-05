@@ -116,9 +116,10 @@ def get_model(args, device):
         raise ValueError(args.probabilistic_model)
 
 
-def get_optim(args, generative_model):
+def get_optim(args, generative_model, ssl_loss=None):
     optim = torch.optim.AdamW(
-        generative_model.parameters(),
+        list(generative_model.parameters()) + (list(ssl_loss.parameters()) if
+            ssl_loss is not None else []),
         lr=args.lr, amsgrad=getattr(args, 'amsgrad', False),
         betas=(args.beta1, args.beta2) if hasattr(args, 'beta1') else (0.9, 0.999),
         weight_decay=getattr(args, 'wd', 1e-12))

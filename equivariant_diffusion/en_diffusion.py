@@ -201,6 +201,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
             raise ValueError(noise_schedule)
 
         print('alphas2', alphas2)
+        self.alphas2 = alphas2 # == alphas_cumprod in ddpm paper
 
         sigmas2 = 1 - alphas2
 
@@ -623,9 +624,9 @@ class DiffusionModel(torch.nn.Module):
         return loss, {'t': t_int.squeeze(), 'loss_t': loss.squeeze(),
                       'error': error.squeeze()}
 
-    def forward(self, x, h=None, node_mask=None, edge_mask=None,
+    def forward(self, x, t=None, h=None, node_mask=None, edge_mask=None,
             sample_p_zs_given_zt=False, sample_p_x_given_z0=False,
-            sample_p_zs_given_zt_ddim=False, phi=False, s=None, t=None,
+            sample_p_zs_given_zt_ddim=False, phi=False, s=None, #t=None,
             cond_fn=None, return_noise=False, x_ori=None, noise=None,
             ddim=False, furthest_point_idx=None):
         """
@@ -644,7 +645,23 @@ class DiffusionModel(torch.nn.Module):
             return self.sample_p_x_given_z0(x, node_mask, edge_mask,
                     fix_noise=False, ddim=ddim)
         if phi:
-            return self.phi(x, t, node_mask, edge_mask)
+            eps_t = self.phi(x, t, node_mask, edge_mask)
+            gamma_t = self.gamma(t)
+            sigma_t = self.sigma(gamma_t, target_tensor=x)
+            alpha_t = self.alpha(gamma_t, target_tensor=x)
+            if cond_fn is not None:
+                if False: #hasattr(self, 'domain_cls'):
+                    grad = cond_fn(x, t, self.phi, x_ori, self.domain_cls, # model
+                            {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                            )
+                else:
+                    grad = cond_fn(x, t, self.phi, x_ori, furthest_point_idx, # model
+                            {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
+                            )
+                if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
+                    grad = grad - grad.mean(dim=1, keepdim=True)
+                eps_t = eps_t + sigma_t * grad
+            return eps_t
         if True: #self.training:
             # Only 1 forward pass when t0_always is False.
             loss, loss_dict = self.compute_loss(x, h, node_mask, edge_mask, t0_always=False)

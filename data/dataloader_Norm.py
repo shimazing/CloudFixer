@@ -57,6 +57,8 @@ def uniform_2_sphere(num: int = None):
 
 def remove(points, norm_curv, p_keep=0.5):
     #p_keep = p_keep + np.random.rand(1) * (1-p_keep) # random sample
+    if isinstance(p_keep, tuple):
+        p_keep = p_keep[0] + np.random.rand(1) * (p_keep[1] - p_keep[0])
     rand_xyz = uniform_2_sphere()
     centroid = np.mean(points[:, :3], axis=0)
     points_centered = points[:, :3] - centroid
@@ -419,12 +421,13 @@ class ModelNet(Dataset):
             std_rm = pointcloud_rm.reshape(-1).std(axis=0)
         else:
             pointcloud_rm = None
-        if self.scale_mode != 'unit_norm':
-            if self.random_remove:
-                pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
-        else:
-            if self.random_remove:
-                pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
+        if self.self_distillation:
+            if self.scale_mode != 'unit_norm':
+                if self.random_remove:
+                    pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
+            else:
+                if self.random_remove:
+                    pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
         # sample according to farthest point sampling
         if pointcloud.shape[0] > NUM_POINTS:
             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
@@ -602,12 +605,13 @@ class ShapeNet(Dataset):
             std_rm = pointcloud_rm.reshape(-1).std(axis=0)
         else:
             pointcloud_rm = None
-        if self.scale_mode != 'unit_norm':
-            if self.random_remove:
-                pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
-        else:
-            if self.random_remove:
-                pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
+        if self.self_distillation:
+            if self.scale_mode != 'unit_norm':
+                if self.random_remove:
+                    pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
+            else:
+                if self.random_remove:
+                    pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
         # Rotate ShapeNet by -90 degrees
         pointcloud = self.rotate_pc(pointcloud, label)
         if self.random_remove:

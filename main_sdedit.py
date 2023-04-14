@@ -200,7 +200,7 @@ parser.add_argument('--output_pts', type=int, default=512)
 parser.add_argument('--guidance_scale', type=float, default=0)
 parser.add_argument('--mode', nargs='+', type=str, default=['eval'])
 parser.add_argument('--dataset', type=str, default='shapenet')
-parser.add_argument('--keep_sub', action='store_true') # TODO
+parser.add_argument('--keep_sub', type=eval, default=False) # TODO
 parser.add_argument('--no_zero_mean', action='store_true') # TODO
 parser.add_argument('--n_subsample', type=int, default=128)
 parser.add_argument('--classifier', type=str,
@@ -214,6 +214,7 @@ parser.add_argument('--lambda_ent', default=100, type=float)
 parser.add_argument('--lambda_i', default=1, type=float)
 parser.add_argument('--random_seed', default=0, type=int)
 parser.add_argument('--ddim', action='store_true')
+parser.add_argument('--dpm_solver', action='store_true')
 parser.add_argument('--preprocess', action='store_true')
 parser.add_argument('--latent_subdist', action='store_true')
 parser.add_argument('--n_inversion_steps', type=int, default=50) #action='store_true')
@@ -383,6 +384,10 @@ model = get_model(args, device)
 if args.resume is not None:
     model.load_state_dict(torch.load(args.resume))
 
+if args.dpm_solver:
+    import dpm_solver
+    alphas_cumprod = torch.tensor(model.gamma.alphas2).to(device)
+    ns = dpm_solver.NoiseScheduleVP('discrete', alphas_cumprod=alphas_cumprod)
 
 ori_args_model = args.model
 args.model = 'dgcnn'
@@ -525,7 +530,7 @@ def main():
     np.random.seed(random_seed)
     random.seed(random_seed)
 
-    guide = args.lambda_i > 0 or args.lambda_s > 0 or args.lambda_ent > 0
+    guide = args.lambda_i > 0 or args.lambda_s > 0 or args.lambda_ent > 0 or args.keep_sub
     if 'eval' in args.mode: # calc acc
       with torch.no_grad():
         count = 0
@@ -702,7 +707,53 @@ def main():
                     z = alpha_t * x + sigma_t * eps # diffusion
 
                 y = z.detach().clone()
-                if args.ddim:
+                if args.dpm_solver:
+                    model_fn = dpm_solver.model_wrapper(
+                        model_dp,
+                        ns,
+                        model_kwargs={'cond_fn': cond_fn if guide else None, 'phi':True,
+                            'node_mask': node_mask, 'x_ori': x,
+                            'furthest_point_idx': furthest_point_idx,
+                            },
+                        guidance_type='uncond',
+                        )
+                    solver = dpm_solver.DPM_Solver(model_fn,
+                            noise_schedule=ns,
+                            algorithm_type='dpmsolver',
+                            )
+                    z = solver.sample(z, steps=args.n_reverse_steps, t_start=args.t,
+                            order=3,
+                            skip_type='time_uniform',
+                            method='singlestep_fixed',
+                            lower_order_final=True,
+                            denoise_to_zero=False,
+                            solver_type='dpmsolver',
+                    )
+                    # TODO keep_sub for dpm_solver
+
+                    if guide:
+                        model_fn = dpm_solver.model_wrapper(
+                            model_dp,
+                            ns,
+                            model_kwargs={'cond_fn': None, 'phi':True,
+                                'node_mask': node_mask, 'x_ori': x,
+                                },
+                            guidance_type='uncond',
+                            )
+                        solver = dpm_solver.DPM_Solver(model_fn,
+                                noise_schedule=ns,
+                                algorithm_type='dpmsolver',
+                                )
+                        y = solver.sample(y, steps=args.n_reverse_steps, t_start=args.t,
+                                order=3,
+                                skip_type='time_uniform',
+                                method='singlestep_fixed',
+                                lower_order_final=True,
+                                denoise_to_zero=False,
+                                solver_type='dpmsolver',
+                        )
+
+                elif args.ddim:
                     reverse_steps = np.linspace(args.t*args.diffusion_steps, 0,
                             args.n_reverse_steps) / args.diffusion_steps
                     print("Reverse Steps")
@@ -720,6 +771,20 @@ def main():
                                 x_ori=x,
                                 furthest_point_idx=furthest_point_idx,
                                 )
+                        if args.keep_sub:
+                            # for sub_x
+                            gamma_s = \
+                                model.inflate_batch_array(model.gamma(s_tensor), x)
+                            alpha_s = model.alpha(gamma_s, x)
+                            sigma_s = model.sigma(gamma_s, x)
+                            eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                                n_nodes=x.size(1),
+                                node_mask=node_mask,
+                                )
+                            z[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                              furthest_point_idx] = (alpha_s * x + sigma_s * eps)[
+                                    torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
                         if ori_time_cond:
                             itmd.append((z, s*args.diffusion_steps))
                         if guide: # args.egsde or args.entropy_guided:
@@ -729,6 +794,7 @@ def main():
                     if ori_time_cond:
                         itmd_list.append(itmd)
                 else:
+                    t = args.t * x.new_ones((x.shape[0], 1), device=x.device)
                     for _ in tqdm(range(int(args.t * args.diffusion_steps))):
                         z, noise = model_dp(z, sample_p_zs_given_zt=True, s=t -
                                 1./args.diffusion_steps, t=t,
@@ -739,12 +805,6 @@ def main():
                             x_ori=x,
                             furthest_point_idx=furthest_point_idx,
                             return_noise=True)
-                        if guide: #args.egsde or args.entropy_guided:
-                            y = model_dp(y, sample_p_zs_given_zt=True, s=t -
-                                    1./args.diffusion_steps, t=t,
-                                node_mask=node_mask, edge_mask=None, #fix_noise=False,
-                                cond_fn=None, noise=noise) # w/o guidance for comparison
-
                         # constraint (like ilvr)
                         if args.keep_sub:
                             # for sub_x
@@ -764,6 +824,12 @@ def main():
                             if zero_mean:
                                 z = z - z.mean(dim=1, keepdim=True)
                             ###################################
+                        if guide: #args.egsde or args.entropy_guided:
+                            y = model_dp(y, sample_p_zs_given_zt=True, s=t -
+                                    1./args.diffusion_steps, t=t,
+                                node_mask=node_mask, edge_mask=None, #fix_noise=False,
+                                cond_fn=None, noise=noise) # w/o guidance for comparison
+
                         t = t - 1. / args.diffusion_steps
 
                     assert torch.all(t.abs() < 1e-5)
@@ -1038,6 +1104,7 @@ def main():
             preds_list = []
             preds_list_y = []
             for k in range(K):
+                t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # 0~1
                 eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
                     n_nodes=x.size(1),
                     node_mask=node_mask,
@@ -1045,7 +1112,53 @@ def main():
                 z = alpha_t * x + sigma_t * eps # diffusion
                 z_t_list.append(z)
                 y = z.detach().clone()
-                if args.ddim:
+                if args.dpm_solver:
+                    model_fn = dpm_solver.model_wrapper(
+                        model_dp,
+                        ns,
+                        model_kwargs={'cond_fn': cond_fn if guide else None, 'phi':True,
+                            'node_mask': node_mask, 'x_ori': x,
+                            'furthest_point_idx': furthest_point_idx,
+                            },
+                        guidance_type='uncond',
+                        )
+                    solver = dpm_solver.DPM_Solver(model_fn,
+                            noise_schedule=ns,
+                            algorithm_type='dpmsolver',
+                            )
+                    z = solver.sample(z, steps=args.n_reverse_steps, t_start=args.t,
+                            order=3,
+                            skip_type='time_uniform',
+                            method='singlestep_fixed',
+                            lower_order_final=True,
+                            denoise_to_zero=False,
+                            solver_type='dpmsolver',
+                    )
+                    # TODO keep_sub for dpm_solver
+
+                    if guide:
+                        model_fn = dpm_solver.model_wrapper(
+                            model_dp,
+                            ns,
+                            model_kwargs={'cond_fn': None, 'phi':True,
+                                'node_mask': node_mask, 'x_ori': x,
+                                },
+                            guidance_type='uncond',
+                            )
+                        solver = dpm_solver.DPM_Solver(model_fn,
+                                noise_schedule=ns,
+                                algorithm_type='dpmsolver',
+                                )
+                        y = solver.sample(y, steps=args.n_reverse_steps, t_start=args.t,
+                                order=3,
+                                skip_type='time_uniform',
+                                method='singlestep_fixed',
+                                lower_order_final=True,
+                                denoise_to_zero=False,
+                                solver_type='dpmsolver',
+                        )
+
+                elif args.ddim:
                     reverse_steps = np.linspace(args.diffusion_steps * args.t,
                             0, args.n_reverse_steps).astype(int) / args.diffusion_steps
                     print("Reverse Steps")
@@ -1059,6 +1172,19 @@ def main():
                                 x_ori=x,
                                 furthest_point_idx=furthest_point_idx,
                                 )
+                        if args.keep_sub:
+                            gamma_s = \
+                                    model.inflate_batch_array(model.gamma(s_tensor), x)
+                            alpha_s = model.alpha(gamma_s, x)
+                            sigma_s = model.sigma(gamma_s, x)
+                            eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                                n_nodes=x.size(1),
+                                node_mask=node_mask,
+                                )
+                            z[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                              furthest_point_idx] = (alpha_s * x + sigma_s * eps)[
+                                    torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
                         if guide:
                             y = model_dp(y, sample_p_zs_given_zt_ddim=True, s=s_tensor,
                                     t=t_tensor, node_mask=node_mask, edge_mask=None, #None,
@@ -1072,6 +1198,20 @@ def main():
                             x_ori=x,
                             furthest_point_idx=furthest_point_idx,
                             return_noise=True)
+                        if args.keep_sub:
+                            # for sub_x
+                            gamma_s = \
+                                model.inflate_batch_array(model.gamma(t-1./args.diffusion_steps), x)
+                            alpha_s = model.alpha(gamma_s, x)
+                            sigma_s = model.sigma(gamma_s, x)
+                            eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
+                                n_nodes=x.size(1),
+                                node_mask=node_mask,
+                                )
+                            z[torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                              furthest_point_idx] = (alpha_s * x + sigma_s * eps)[
+                                    torch.arange(len(x)).view(-1, 1).to(furthest_point_idx),
+                                    furthest_point_idx]
                         if guide:
                             y = model_dp(y, sample_p_zs_given_zt=True, s=t -
                                     1./args.diffusion_steps, t=t,

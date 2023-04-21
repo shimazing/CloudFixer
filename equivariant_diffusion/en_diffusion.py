@@ -655,9 +655,13 @@ class DiffusionModel(torch.nn.Module):
                             {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                             )
                 else:
+                    if isinstance(self.dynamics, PVCNN2Base):
+                        self.dynamics.train()
                     grad = cond_fn(x, t, self.phi, x_ori, furthest_point_idx, # model
                             {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                             )
+                    if isinstance(self.dynamics, PVCNN2Base):
+                        self.dynamics.eval()
                 if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                     grad = grad - grad.mean(dim=1, keepdim=True)
                 eps_t = eps_t + sigma_t * grad
@@ -695,9 +699,13 @@ class DiffusionModel(torch.nn.Module):
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             else:
+                if isinstance(self.dynamics, PVCNN2Base):
+                    self.dynamics.train()
                 grad = cond_fn(zt, t, self.phi, x, furthest_point_idx, # model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
+                if isinstance(self.dynamics, PVCNN2Base):
+                    self.dynamics.eval()
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
             eps_t = eps_t + sigma_t * grad
@@ -732,9 +740,13 @@ class DiffusionModel(torch.nn.Module):
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
             else:
+                if isinstance(self.dynamics, PVCNN2Base):
+                    self.dynamics.train()
                 grad = cond_fn(zt, t, self.phi, x, furthest_point_idx,# model
                         {'node_mask':node_mask, 'edge_mask': edge_mask}, # model_kwargs
                         )
+                if isinstance(self.dynamics, PVCNN2Base):
+                    self.dynamics.eval()
             if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                 grad = grad - grad.mean(dim=1, keepdim=True)
             eps_t = eps_t + sigma_t * grad

@@ -211,14 +211,16 @@ parser.add_argument('--with_dm', action='store_true',
 parser.add_argument('--rotation', action='store_true',)
 parser.add_argument('--src_random_remove', action='store_true', help='remove random part from src')
 parser.add_argument('--use_ori', action='store_true', help='remove random part from src')
+parser.add_argument('--only_ori', action='store_true')
 parser.add_argument('--clf_guidance', action='store_true',)
 parser.add_argument('--lambda_clf', default=100.0, type=float) #action='store_true',)
 parser.add_argument('--gn', action='store_true', default=True) # make classifier deterministic
 parser.add_argument('--deterministic_val', action='store_true', default=True) # make classifier deterministic
 parser.add_argument('--tgt_train_mode', default='pseudo_label',
-        choices=['pseudo_label', 'entropy_minimization'])
+        choices=['pseudo_label', 'entropy_minimization', ''])
 parser.add_argument('--dm_resume',
     default='outputs/unit_std_pvd_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995/generative_model_ema_last.npy')
+parser.add_argument('--bn', default='ln', type=str)
 
 args = parser.parse_args()
 #if args.input_transform or not args.time_cond:
@@ -276,10 +278,12 @@ if args.n_nodes == 1024:
             random_rotation=False, zero_mean=not args.no_zero_mean) # 참고용
 
     train_loader_src = DataLoader(dataset_src, batch_size=args.batch_size,
+            shuffle=True,
             sampler=None,
             drop_last=True, num_workers=args.num_workers)
     train_loader_tgt = DataLoader(dataset_tgt, batch_size=args.batch_size,
             sampler=None,
+            shuffle=True,
             drop_last=True, num_workers=args.num_workers)
     train_loader_tgt_iter = iter(train_loader_tgt)
 
@@ -317,6 +321,10 @@ dtype = torch.float32
 
 args.exp_name = \
     f'latent_classifier_{args.t}_fc_norm{args.fc_norm}_{args.dataset_src}2{args.dataset_tgt}_withDM{args.with_dm}_dm{args.model}_cl{args.cl}{args.cl_dim}lam{args.lambda_cl}_temperature{args.temperature}_inputTrans{args.input_transform}_rotationAug{args.rotation}_timecond{args.time_cond}_gn{args.gn}_clf_guidance{args.clf_guidance}{args.lambda_clf}_tgtTrainMode{args.tgt_train_mode}{args.em_temperature}_srcRandomRemove{args.src_random_remove}_useOri{args.use_ori}'
+if args.only_ori:
+    args.exp_name = \
+        f'latent_classifier_onlyOri_{args.dataset_src}_fc_norm{args.fc_norm}_gn{args.gn}'
+
 
 if not os.path.exists(f'outputs/{args.exp_name}'):
     os.makedirs(f'outputs/{args.exp_name}')
@@ -395,10 +403,13 @@ def main():
             n_tgt = len(data_tgt[0])
             src_count += n_src
             tgt_count += n_tgt
-            data = torch.cat((
-                data_src[0].to(device), #.permute(0, 2, 1),
-                data_tgt[0].to(device) #.permute(0, 2, 1)
-                ),dim=0)
+            if args.only_ori:
+                data = data_src[0].to(device)
+            else:
+                data = torch.cat((
+                    data_src[0].to(device), #.permute(0, 2, 1),
+                    data_tgt[0].to(device) #.permute(0, 2, 1)
+                    ),dim=0)
             if args.src_random_remove:
                 data_rm = torch.cat((
                     data_src[4].to(device), #.permute(0, 2, 1),
@@ -434,6 +445,20 @@ def main():
             logits = classifier(
                 pcs_t, ts=t_int.flatten()
                 ) #, activate_DefRec=False)
+
+            if args.only_ori:
+                cls_logits = logits['cls']
+                src_cls_loss = criterion(cls_logits[:n_src], label_src)
+                src_cls_loss.backward()
+                optim.step()
+                optim.zero_grad()
+                src_correct += (cls_logits[:n_src].argmax(dim=1) ==
+                        label_src).float().sum().item()
+                optim_step = True
+                if (i+1) % 10 == 0:
+                    print(f'Epoch {epoch} {i} src acc {src_correct / src_count}')
+                continue
+
 
             if args.src_random_remove:
                 pcs = data.permute(0,2,1) #,2)
@@ -522,12 +547,14 @@ def main():
                                 label_tgt_est[selected_est_final])
                 else:
                     tgt_cls_loss = 0
-            else: # entropy_minimization
+            elif args.tgt_train_mode == 'entropy_minimization': # entropy_minimization
                 tgt_cls_loss = \
                     softmax_entropy(cls_logits[n_src:]/args.em_temperature) + \
                     softmax_entropy(cls_logits2[n_src:]/args.em_temperature) + \
                     (softmax_entropy(cls_logits_est[n_src:]/args.em_temperature)
                             if args.with_dm else 0)
+            else:
+                tgt_cls_loss = 0
 
             # constrastive learning (infoNCE loss)
             if args.with_dm:
@@ -537,7 +564,7 @@ def main():
             else:
                 cl_loss = infonce(torch.stack((cl_feat, cl_feat2), dim=1))
 
-            total_loss = args.lambda_cl * cl_loss + src_cls_loss + tgt_cls_loss
+            total_loss =  args.lambda_cl * cl_loss + src_cls_loss + tgt_cls_loss
             (total_loss/args.accum_grad).backward()
             if (i+1) % args.accum_grad  == 0:
                 optim.step()
@@ -569,7 +596,10 @@ def main():
         if not optim_step:
             optim.step()
             optim.zero_grad()
-        print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}' )
+        if args.only_ori:
+            print(f'Epoch {epoch} {i} src acc {src_correct / src_count}')
+        else:
+            print(f'Epoch {epoch} {i} src acc {src_correct / src_count} tgt acc {tgt_correct / tgt_count} cl acc {cl_correct / cl_count} selected {n_selected / selected_count}' )
 
 
         # Val : accuracy check

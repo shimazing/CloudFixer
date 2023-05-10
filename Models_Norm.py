@@ -332,7 +332,7 @@ class fc_layer(nn.Module):
         if bn:
             self.fc = nn.Sequential(
                 nn.Linear(in_ch, out_ch, bias=bias),
-                nn.BatchNorm1d(out_ch) if bn == 'bn' else nn.LayerNorm(out_ch),
+                nn.BatchNorm1d(out_ch) if bn == 'bn' else nn.LayerNorm(out_ch), # ln
                 self.ac
             )
         else:
@@ -500,7 +500,7 @@ class DGCNN(nn.Module):
             self.bn5 = nn.BatchNorm1d(512)
         self.conv5 = nn.Conv1d(num_f_prev, 512, kernel_size=1, bias=False)
 
-        self.cls_C = class_classifier(args, 1024, 10)
+        self.cls_C = class_classifier(args, 1024, getattr(args, 'num_classes', 10))
         self.domain_C = domain_classifier(args, 1024, 2)
         #self.rotcls_C1 = linear_classifier(1024, 4)
         #self.rotcls_C2 = linear_classifier(1024, 4)
@@ -673,10 +673,10 @@ class class_classifier(nn.Module):
         bias = True if args.model == 'dgcnn' else False
 
         self.mlp1 = fc_layer(input_dim, 512, bias=bias, activation=activate,
-                bn=getattr(args, 'bn', 'gn'), norm=getattr(args, 'fc_norm', True))
+                bn=getattr(args, 'bn', 'ln'), norm=getattr(args, 'fc_norm', True))
         self.dp1 = nn.Dropout(p=args.dropout)
         self.mlp2 = fc_layer(512, 256, bias=True, activation=activate,
-            bn=getattr(args, 'bn', 'gn'),
+            bn=getattr(args, 'bn', 'ln'),
             norm=getattr(args, 'fc_norm', True)
                 )
         self.dp2 = nn.Dropout(p=args.dropout)

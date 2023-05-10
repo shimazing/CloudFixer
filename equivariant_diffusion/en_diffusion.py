@@ -628,7 +628,7 @@ class DiffusionModel(torch.nn.Module):
             sample_p_zs_given_zt=False, sample_p_x_given_z0=False,
             sample_p_zs_given_zt_ddim=False, phi=False, s=None, #t=None,
             cond_fn=None, return_noise=False, x_ori=None, noise=None,
-            ddim=False, furthest_point_idx=None):
+            ddim=False, furthest_point_idx=None, return_x0_est=False):
         """
         Computes the loss (type l2 or NLL) if training. And if eval then always computes NLL.
         """
@@ -665,6 +665,8 @@ class DiffusionModel(torch.nn.Module):
                 if self.zero_mean and torch.any(grad.mean(dim=1).abs() > 1e-5):
                     grad = grad - grad.mean(dim=1, keepdim=True)
                 eps_t = eps_t + sigma_t * grad
+            if return_x0_est:
+                return eps_t, (x - sigma_t * eps_t) / alpha_t
             return eps_t
         if True: #self.training:
             # Only 1 forward pass when t0_always is False.

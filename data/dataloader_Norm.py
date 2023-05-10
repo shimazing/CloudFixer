@@ -25,6 +25,7 @@ except:
 
 eps = 10e-4
 NUM_POINTS = 1024
+#NUM_POINTS = 1500
 idx_to_label = {0: "bathtub", 1: "bed", 2: "bookshelf", 3: "cabinet",
                 4: "chair", 5: "lamp", 6: "monitor",
                 7: "plant", 8: "sofa", 9: "table"}
@@ -102,6 +103,194 @@ def load_data_h5py_scannet10(partition, dataroot='data'):
     all_data = np.concatenate(all_data, axis=0)
     all_label = np.concatenate(all_label, axis=0)
     return np.array(all_data).astype('float32'), np.array(all_label).astype('int64')
+
+
+def load_data(data_path='data/modelnet40_c',corruption='cutout',severity=1,
+        num_classes=40):
+    if corruption == 'original':
+        DATA_DIR = os.path.join(data_path, 'data_' + corruption + '.npy')
+    else:
+        DATA_DIR = os.path.join(data_path, 'data_' + corruption + '_' +str(severity) + '.npy')
+    # if corruption in ['occlusion']:
+    #     LABEL_DIR = os.path.join(data_path, 'label_occlusion.npy')
+    LABEL_DIR = os.path.join(data_path, 'label.npy')
+    all_data = np.load(DATA_DIR)
+    all_label = np.load(LABEL_DIR)
+
+    if num_classes == 40:
+        return all_data, all_label
+
+    pointda_label_dict = {
+        1: 0, # bathtub
+        2: 1, # bed
+        4: 2, # bookshelf
+        23: 3, # night_stand(cabinet)
+        8: 4, # chair
+        19: 5, # lamp
+        22: 6, # monitor
+        26: 7, # plant
+        30: 8, # sofa
+        33: 9, # table
+    }
+
+    pointda_label = [1, 2, 4, 8, 19, 22, 23, 26, 30, 33] # 1: bathtub, 2: bed, 4: bookshelf, 8: chair, 19: lamp, 22: monitor, 23: night_stand(cabinet), 26: plant, 30: sofa, 33: table
+    pointda_indices = np.isin(all_label, pointda_label).squeeze(-1)
+    all_data = all_data[pointda_indices, :, :]
+    all_label = all_label[pointda_indices, :]
+    all_label = np.array([pointda_label_dict[idx] for idx in all_label.squeeze()])
+
+    return all_data, all_label
+
+
+def load_modelnet_h5(partition='train'):
+    BASE_DIR = './' #os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, 'data')
+    all_data = []
+    all_label = []
+    for h5_name in glob.glob(os.path.join(DATA_DIR, 'modelnet40_ply_hdf5_2048', 'ply_data_%s*.h5'%partition)):
+        f = h5py.File(h5_name.strip(), 'r')
+        data = f['data'][:].astype('float32')
+        label = f['label'][:].astype('int64')
+        f.close()
+        all_data.append(data)
+        all_label.append(label)
+    all_data = np.concatenate(all_data, axis=0)
+    all_label = np.concatenate(all_label, axis=0)
+    return all_data, all_label
+
+def translate_pointcloud(pointcloud):
+    xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
+    xyz2 = np.random.uniform(low=-0.5, high=0.5, size=[3])
+
+    translated_pointcloud = np.add(np.multiply(pointcloud, xyz1), xyz2).astype('float32')
+    return translated_pointcloud
+
+
+def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
+    N, C = pointcloud.shape
+    pointcloud += np.clip(sigma * np.random.randn(N, C), -1*clip, clip)
+    return pointcloud
+
+class ModelNet40C(Dataset):
+    def __init__(self, split='test', test_data_path='data/modelnet40_c/',
+            corruption='background', severity=5, num_classes=40,
+            random_scale=False, random_rotation=True, random_trans=False,
+            rotate=True, subsample=1024, aug=False):
+        if corruption != 'original':
+            assert split == 'test'
+        self.split = split
+        self.aug = aug
+        self.data_path = {
+            "train": 'data/modelnet40_ply_hdf5_2048/',
+            "val": 'data/modelnet40_ply_hdf5_2048/',
+            "test":  test_data_path
+        }[self.split]
+        self.corruption = corruption
+        self.severity = severity
+        self.random_scale = random_scale
+        self.random_rotation = random_rotation
+        if corruption == 'original' and split != 'test':
+            self.data, self.label = load_modelnet_h5(partition=split)
+        else:
+            self.data, self.label = load_data(self.data_path, self.corruption,
+                self.severity, num_classes=num_classes)
+        # self.num_points = num_points
+        self.partition =  split
+        self.random_trans = random_trans
+        self.rotate = rotate
+        self.random_fill = False
+        self.subsample = subsample
+
+    def __getitem__(self, item):
+        pointcloud = self.data[item][:, :3]
+        #print("ori len", len(pointcloud))
+        norm_curv = self.data[item][:, 3:]
+
+        if len(pointcloud) > self.subsample: # and 'occlusion' in self.corruption:
+            #print(len(pointcloud))
+            pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+            norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
+                    norm_curv, self.subsample)
+            pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+            norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+        N = len(pointcloud)
+        mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
+        mask[N:] = 0
+
+        if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
+            dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+                None, :]), 2),
+                    axis=-1) < 1e-8
+            dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+            if np.any(dup_points):
+                row, col = dup_points.nonzero()
+                row, col = row[row<col], col[row<col]
+                dup = np.unique(col)
+                mask[dup] = 0
+            valid, = mask.flatten().nonzero()
+            #print("filter dup", len(valid))
+
+        label = self.label[item]
+        pc_ori = pointcloud.copy()
+        if self.rotate:
+            pointcloud = scale(pointcloud, 'unit_std')
+            pointcloud = self.rotate_pc(pointcloud)
+            if self.random_rotation:
+                pointcloud = random_rotate_one_axis(pointcloud, "z")
+        if self.aug:
+            pointcloud = translate_pointcloud(pointcloud)
+        if self.random_scale:
+            random_scale = np.random.uniform(0.9, 1.1)
+            pointcloud = random_scale * pointcloud
+        #mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
+        if NUM_POINTS > N and self.random_fill:
+            pointcloud = np.concatenate(
+                    (pointcloud, np.random.randn(NUM_POINTS - N,
+                        3).astype(pointcloud.dtype)), axis=0)
+        else:
+            #while 'lidar' not in self.corruption and len(pointcloud) < NUM_POINTS:
+            while len(pointcloud) < NUM_POINTS:
+                chosen = np.arange(N) #int(len(pointcloud)))
+                np.random.shuffle(chosen)
+                chosen = chosen[:NUM_POINTS - len(pointcloud)]
+                pointcloud = np.concatenate((
+                    pointcloud,
+                    pointcloud[chosen] #:NUM_POINTS - len(pointcloud)]
+                ), axis=0)
+                norm_curv = np.concatenate((
+                    norm_curv,
+                    norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
+                ), axis=0)
+        #if pointcloud.shape[0] > NUM_POINTS:
+        #    pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+        #    pc_ori = np.swapaxes(np.expand_dims(pc_ori, 0), 1, 2)
+        #    #norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+        #    _, pointcloud, pc_ori = farthest_point_sample_np(pointcloud,
+        #            pc_ori, NUM_POINTS)
+        #    pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+        #    pc_ori = np.swapaxes(pc_ori.squeeze(), 1, 0).astype('float32')
+        #    #norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+
+        pointcloud = pointcloud
+        if self.random_trans:
+            random_trans = np.clip(self.random_trans*np.random.randn(1,3), -1*self.random_trans,
+                    self.random_trans)
+            pointcloud += random_trans
+            return (pointcloud, label, random_trans)
+        return (pointcloud, label, self.rotate_pc(pointcloud, True), mask)
+
+    def __len__(self):
+        return self.data.shape[0]
+
+    def rotate_pc(self, pointcloud, reverse=False):
+        if reverse:
+            pointcloud = rotate_shape(pointcloud, 'x', np.pi / 2)
+            return pointcloud
+        pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
+        return pointcloud
 
 
 class ElasticDistortion:

@@ -179,13 +179,13 @@ def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
     farthest = np.random.randint(0, N, (B,), dtype=np.int64)
     batch_indices = np.arange(B, dtype=np.int64)
     centroids_vals = np.zeros((B, C, npoint))
-    centroids_norm_curv_vals = np.zeros((B, 5, npoint))
+    centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
     for i in range(npoint):
         centroids[:, i] = farthest  # save current chosen point index
         centroid = xyz[batch_indices, :, farthest].reshape(B, C, 1)  # get the current chosen point value
         centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
         centroids_vals[:, :, i] = centroid[:, :, 0].copy()
-        #centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
+        centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
         dist = np.sum((xyz - centroid) ** 2, 1)  # euclidean distance of points from the current centroid
         mask = dist < distance  # save index of all point that are closer than the current max distance
         distance[mask] = dist[mask]  # save the minimal distance of each point from all points that were chosen until now
@@ -212,6 +212,28 @@ def rotate_shape(x, axis, angle):
         return x.dot(R_y).astype('float32')
     else:
         return x.dot(R_z).astype('float32')
+
+def rotate_shape_tensor(x, axis, angle):
+    """
+    Input:
+        x: pointcloud data, [B, C, N]
+        axis: axis to do rotation about
+        angle: rotation angle
+    Return:
+        A rotated shape
+    """
+    if axis == "x":
+        R_x = torch.tensor([[[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0,
+            np.sin(angle), np.cos(angle)]]]).to(x) # 1 x 3 x 3
+        return x @ R_x
+    elif axis == "y":
+        R_y = torch.tensor([[[np.cos(angle), 0, np.sin(angle)], [0, 1, 0],
+            [-np.sin(angle), 0, np.cos(angle)]]]).to(x)
+        return x @ R_y
+    else:
+        R_z = torch.tensor([[[np.cos(angle), -np.sin(angle), 0], [np.sin(angle),
+            np.cos(angle), 0], [0, 0, 1]]]).to(x)
+        return x @ R_z
 
 
 def random_rotate_one_axis(X, axis):
@@ -308,7 +330,7 @@ def scale_to_unit_cube(x):
     x /= furthest_distance
     return x
 
-def scale_to_unit_cube_torch(x):
+def scale_to_unit_cube_torch(x, only_mean=False, no_mean=False):
     """
     Input:
        x: pointcloud data, [B, N=1024, C=3]
@@ -318,12 +340,14 @@ def scale_to_unit_cube_torch(x):
     assert len(x.shape) == 3
     if len(x) == 0:
         return x
-    centroid = torch.mean(x, dim=1, keepdim=True)
-    x = x - centroid
-    furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
-        keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
-    #print(furthest_distance)
-    x = x / furthest_distance
+    if not no_mean:
+        centroid = torch.mean(x, dim=1, keepdim=True)
+        x = x - centroid
+    if not only_mean:
+        furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
+            keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
+        #print(furthest_distance)
+        x = x / furthest_distance
     return x
 
 

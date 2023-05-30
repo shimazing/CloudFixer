@@ -273,7 +273,7 @@ class PointDiffusionTransformer(nn.Module):
         :param t: an [N] tensor.
         :return: an [N x C' x T] tensor.
         """
-        assert x.shape[-1] == self.n_ctx
+        #assert x.shape[-1] == self.n_ctx
         t_embed = self.time_embed(timestep_embedding(t, self.backbone.width))
         return self._forward_with_cond(x, [(t_embed, self.time_token_cond)])
 

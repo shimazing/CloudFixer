@@ -4,6 +4,7 @@ import utils
 import random
 import argparse
 import wandb
+import os
 from os.path import join
 from build_model import get_optim, get_model
 from equivariant_diffusion import en_diffusion
@@ -29,9 +30,11 @@ from dgcnn_modelnet40 import DGCNN as DGCNN_modelnet40
 from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, farthest_point_sample
 #from pointnet2_ops import pointnet2_utils
 import torch.nn.functional as F
-from voxelization_guide import Voxelization
+#from voxelization_guide import Voxelization
 import log
 from torch.cuda.amp import custom_bwd, custom_fwd
+from Models_Norm import knn
+from util import projected_gradient_descent # for adversarial attack
 
 
 class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
@@ -241,22 +244,52 @@ parser.add_argument('--ilvr', default=0, type=float)
 parser.add_argument('--pre_trans', action='store_true')
 parser.add_argument('--activate_mask', action='store_true')
 parser.add_argument('--latent_trans', action='store_true')
+parser.add_argument('--weighted_reg', type=eval, default=False)
 parser.add_argument('--random_trans', default=0, type=float)
 parser.add_argument('--n_update', default=1, type=int)
 parser.add_argument('--lr', type=float, default=1e-2) #2e-4)
 parser.add_argument('--beta1', type=float, default=0.5) #2e-4)
 parser.add_argument('--beta2', type=float, default=0.999) #2e-4)
 parser.add_argument('--l1', type=float, default=0) #2e-4)
+parser.add_argument('--l1_lb', type=float, default=0) #2e-4)
+parser.add_argument('--l2', type=float, default=0) #2e-4)
 parser.add_argument('--matching_t', type=float, default=0.2) #2e-4)
+parser.add_argument('--t_min', type=float, default=0.02) #2e-4)
+parser.add_argument('--optim_end_factor', type=float, default=0.2) #2e-4)
 parser.add_argument('--weight_decay', type=float, default=0) #2e-4)
 parser.add_argument('--n_iters_per_update', type=int, default=1) #2e-4)
 parser.add_argument('--accum', type=int, default=1) #2e-4)
 parser.add_argument('--optim', type=str, default='adamw') #2e-4)
 parser.add_argument('--subsample', type=int, default=1024) #2e-4)
+parser.add_argument('--pow', type=int, default=1) #2e-4)
+#parser.add_argument('--seed', type=int, default=42) #2e-4)
+parser.add_argument('--denoising_thrs', type=int, default=100) #2e-4)
+parser.add_argument('--learn_trans', type=eval, default=False) #2e-4)
+parser.add_argument('--corrupt_ori', type=eval, default=False) #2e-4)
+parser.add_argument('--mixed_corruption', type=eval, default=False) #2e-4)
+parser.add_argument('--adv_attack', type=eval, default=False) #2e-4)
+parser.add_argument('--save_itmd', type=int, default=0) #2e-4)
+
 
 args = parser.parse_args()
+#seed = args.seed
+#deterministic = True
+#
+#os.environ["PYTHONHASHSEED"] = str(seed)
+#random.seed(seed)
+#np.random.seed(seed)
+#np.random.default_rng(seed)
+#torch.manual_seed(seed)
+#torch.cuda.manual_seed_all(seed)
+#if deterministic:
+#    torch.backends.cudnn.deterministic = True
+#    torch.backends.cudnn.benchmark = False
+
+
+
 if 'eval' in args.mode:
     args.no_wandb = True
+    args.save_itmd = 0
 
 ori_time_cond = args.time_cond
 zero_mean = not args.no_zero_mean
@@ -265,7 +298,7 @@ args.cuda = not args.no_cuda and torch.cuda.is_available()
 device = torch.device("cuda" if args.cuda else "cpu")
 
 io = log.IOStream(args)
-voxelization = Voxelization(resolution=args.voxel_resolution)
+#voxelization = Voxelization(resolution=args.voxel_resolution)
 
 def split_set(dataset, domain='scannet', set_type="source"):
     """
@@ -506,9 +539,12 @@ def sds_loss(x, t=None, w=None):
     #loss.requires_grad_(True)
     return loss
 
-def matching_loss(x, t=None, w=None):
+def matching_loss(x, step, steps, t=None, w=None):
     if t is None:
-        t = 0.02 + args.matching_t * torch.rand(x.shape[0], 1).to(x.device)
+        #t = (0.02 * step/steps + (1-step/steps) * max(0.02, args.matching_t - 0.2)) + (0.2 * step/steps + args.matching_t * (1 - step/steps)) * torch.rand(x.shape[0], 1).to(x.device)
+        t = (args.t_min * min(1, step/max(1,args.denoising_thrs)) + (1-min(1,
+            step/max(1,args.denoising_thrs))) * max(args.t_min, args.matching_t - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
+        #t = 0.02 + (0.2 * step/steps + args.matching_t * (1 - step/steps)) * torch.rand(x.shape[0], 1).to(x.device)
     gamma_t = model.inflate_batch_array(model.gamma(t), x)
     alpha_t = model.alpha(gamma_t, x)
     sigma_t = model.sigma(gamma_t, x)
@@ -521,7 +557,7 @@ def matching_loss(x, t=None, w=None):
     z_t = x*alpha_t + eps*sigma_t
     pred_noise = model_dp(z_t, t=t, node_mask=node_mask, phi=True)
     loss = (pred_noise - eps).pow(2).mean()
-    return loss
+    return loss, z_t.detach().clone().cpu()
 
 @torch.enable_grad()
 def pre_trans(x, mask, lr=1e-1, steps=10000, verbose=True):
@@ -578,16 +614,13 @@ def shear_inv(shear):
 
 #def pre_trans_ver2(x, mask, lr=5e-2, steps=200, verbose=True):
 @torch.enable_grad()
-def pre_trans_ver2(x, mask, lr=args.lr, steps=args.n_update, verbose=True, activate_mask=args.activate_mask):
+def pre_trans_ver2(x, mask, ind, lr=args.lr, steps=args.n_update, verbose=True, activate_mask=args.activate_mask):
     if args.model == 'pvd':
         model.train()
-    if not activate_mask:
-        mask[:] = 0
-    else:
-        print(mask.sum(dim=1).flatten())
+    print(mask.sum(dim=1).flatten())
     trans = torch.nn.Parameter(x.new_zeros((x.size(0),1,3)))
     scale = torch.nn.Parameter(x.new_zeros((x.size(0),1,1)))
-    delta = torch.nn.Parameter(torch.zeros_like(x))
+    delta = torch.nn.Parameter(torch.zeros_like(x)) #randn_like(x)*1e-3)
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
 
     rotation = x.new_zeros((x.size(0), 6))
@@ -597,39 +630,119 @@ def pre_trans_ver2(x, mask, lr=args.lr, steps=args.n_update, verbose=True, activ
 
     shear = x.new_zeros((x.size(0), 4)) # b, d, e, f
     shear = torch.nn.Parameter(shear)
-
     if args.optim == 'adamw':
+        print("AdamW")
         optim = torch.optim.AdamW([
-            {'params': [delta], 'lr':(0 if (('shear' in args.dataset) or ('original' in
+            {'params': ([delta] if not (args.learn_trans and args.subsample ==
+                2048) else []) +([trans] if args.learn_trans else []), 'lr':(1 if (('shear' in args.dataset) or ('original' in
+                args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
+            {'params': [scale], 'lr': 0.0, 'weight_decay': 0.01},
+            {'params':([rotation] if not args.learn_trans else []) + ([] if args.learn_trans else []), 'lr': (0.2 if ('rotation' in args.dataset)
+                else 0.2)*0.1, 'weight_decay': 0.0},
+            #{'params': [delta, trans], 'lr':(0 if (('shear' in args.dataset) or ('original' in
+            #    args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
+            #{'params':[rotation], 'lr': (1 if 'rotation' in args.dataset or
+            #'distortion' in args.dataset else 0)
+            #    *lr, 'weight_decay': 0.0},
+            #{'params': [shear], 'lr':(1 if 'shear' in args.dataset else 0) * lr},
+                                ],
+                                lr=lr, weight_decay=args.weight_decay,
+                                betas=(args.beta1, args.beta2))
+    elif args.optim == 'adamax':
+        print("Adamax")
+        print('rotation' in args.dataset or 'distortion' in args.dataset)
+        optim = torch.optim.Adamax([
+            {'params': ([delta] if not (args.learn_trans and args.subsample ==
+                2048) else []) +([trans] if args.learn_trans else []), 'lr':(1 if (('shear' in args.dataset) or ('original' in
+                args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
+            {'params': [scale], 'lr': 0.0, 'weight_decay': 0.01},
+            {'params':([rotation] if (not args.learn_trans) and ('original' not in
+                args.dataset) else []) + ([] if args.learn_trans else []), 'lr': (0.2 if ('rotation' in args.dataset)
+                else 0.2)*0.1, 'weight_decay': 0.0},
+            #{'params': [shear], 'lr':(0 if 'shear' in args.dataset else 0) * lr},
+                                ],
+                                lr=lr, weight_decay=args.weight_decay,
+                                betas=(args.beta1, args.beta2))
+
+    else:
+        print("SGD")
+        optim = torch.optim.SGD([
+            {'params': [delta, trans], 'lr':(0 if (('shear' in args.dataset) or ('original' in
                 args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
             {'params':[rotation], 'lr': (1 if 'rotation' in args.dataset or
             'distortion' in args.dataset else 0)
                 *lr, 'weight_decay': 0.0},
             {'params': [shear], 'lr':(1 if 'shear' in args.dataset else 0) * lr},
                                 ],
-                                lr=lr, weight_decay=args.weight_decay,
-                                betas=(args.beta1, args.beta2))
-    else:
-        optim = torch.optim.SGD([
-            #{'params': [delta], 'lr':(0 if (('shear' in args.dataset) or ('original' in
-            #    args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
-            {'params':[rotation], 'lr': 100  #(1 if 'rotation' in args.dataset else 0)
-                *lr, 'weight_decay': 0.0},
-            #{'params': [shear], 'lr':(1 if 'shear' in args.dataset else 0) * lr, 'weight_decay':0},
-                                ],
                                 lr=lr, weight_decay=args.weight_decay
                                 )
+    scheduler = torch.optim.lr_scheduler.LinearLR(optim, start_factor=1,
+            end_factor=args.optim_end_factor, total_iters=steps)
+    #scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim,
+    #        T_max=args.n_update, eta_min=args.lr*args.optim_end_factor)
+    if not (args.learn_trans and args.subsample == 2048):
+        _, knn_dist_square_mean = knn(x.transpose(2,1), k=20,
+                mask=(mask.squeeze(-1).bool()), return_dist=True)
+        knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
+            None], ind]
+        weight = 1/knn_dist_square_mean.pow(args.pow)
+    else:
+        weight = x.new_ones((x.shape[0], x.shape[1]))
+    if not args.weighted_reg:
+        weight = torch.ones_like(weight)
+    #weight = weight * mask.squeeze(-1) # duplicate된 포인트에는 reg를 없애줌
+    weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
+    # first step
+    if args.save_itmd:
+        itmd = []
+        itmd_zt = []
     for step in tqdm(range(steps), desc='pre trans', ncols=100):
         rot = compute_rotation_matrix_from_ortho6d(rotation)
         #y = 2*torch.sigmoid(scale) * x
         #y = scale.exp() * x + trans + delta * (1-mask)
-        y = x + delta * (1-mask)
-        if 'original' not in args.dataset or 'rotation' not in args.dataset:
+        y = x  + delta + trans #* (1-mask)
+
+        if (step+1) == args.denoising_thrs and not (args.learn_trans and
+                args.subsample == 2048):
+            weight = weight * mask.squeeze(-1) # duplicate된 포인트에는 reg를
+            #없애줌 -> 자유롭게 움직여서 cutout같은데에서 partial한 곳을 채울 수
+            #있도록
+            weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
+            #optim = torch.optim.Adamax([
+            #    {'params': [delta, trans], 'lr':(1 if (('shear' in args.dataset) or ('original' in
+            #        args.dataset)) else 1) * lr}, #, 'weight_decay':0.0},
+            #    {'params':[rotation], 'lr': (0.2 if ('rotation' in args.dataset)
+            #        else 0.2)*0.1, 'weight_decay': 0.0},
+            #    #{'params': [shear], 'lr':(0 if 'shear' in args.dataset else 0) * lr},
+            #                        ],
+            #                        lr=0.1, weight_decay=args.weight_decay,
+            #                        betas=(args.beta1, args.beta2))
+            #scheduler = torch.optim.lr_scheduler.LinearLR(optim, start_factor=1,
+            #        end_factor=args.optim_end_factor, total_iters=steps-100)
+        if not args.learn_trans: #'original' not in args.dataset or 'rotation' not in args.dataset:
             y = y - y.mean(dim=1, keepdim=True)
-            y = y / y.flatten(1).std(dim=1, keepdim=True)[:, :, None]
-        y = y @ shear_inv(shear)
-        y = y @ rot
-        loss = matching_loss(y) + args.l1 *torch.norm(delta, 1) / args.batch_size / y.shape[1]
+            #y = y / y.flatten(1).std(dim=1, keepdim=True)[:, :, None]
+        #y = y @ shear_inv(shear)
+        y = scale.exp() * y
+        if (step+1) >= args.denoising_thrs:
+            y = y @ rot
+        #_, knn_dist_square_mean = knn(y.transpose(2,1), k=20,
+        #        mask=(mask.squeeze(-1).bool()), return_dist=True)
+        #weight = 1/knn_dist_square_mean.pow(2)
+        #if not args.weighted_reg:
+        #    weight = torch.ones_like(weight)
+        #weight = weight * mask.squeeze(-1) # duplicate된 포인트에는 reg를 없애줌
+        #weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
+        l1_norm = (torch.norm(delta, 2, dim=-1) * weight).sum(dim=1).mean() # B x N
+        # l2 norm
+        l2_norm = ((delta * delta).sum(dim=-1) * weight).sum(dim=1).mean() # B x
+        matching, zt = matching_loss(y, step, steps)
+        if args.save_itmd > 0 and step % args.save_itmd == 0:
+            itmd.append(y.clone().detach().cpu())
+            itmd_zt.append(zt.clone().detach().cpu())
+        loss = matching + ((args.l1 * np.cos(step/steps*np.pi/2) +
+            args.l1_lb * (1-np.cos(step/steps*np.pi/2))) * l1_norm + args.l2 *
+                l2_norm)#*(1-step/steps) #torch.norm(delta, 1) / args.batch_size / y.shape[1]
         #loss = sds_loss(y, w=1)
         #t = x.new_zeros((x.shape[0], 1), device=x.device)
         #with torch.no_grad():
@@ -640,6 +753,7 @@ def pre_trans_ver2(x, mask, lr=args.lr, steps=args.n_update, verbose=True, activ
         #assert not torch.all(delta.grad == 0)
         optim.step()
         optim.zero_grad()
+        scheduler.step()
         if verbose and step % 10 == 0:
             print()
             print(step, "delta.abs()", delta.abs().mean())
@@ -647,24 +761,28 @@ def pre_trans_ver2(x, mask, lr=args.lr, steps=args.n_update, verbose=True, activ
             #print(scale.exp().flatten())
             #print(scale.exp().flatten())
             #print((1+scale).clamp(min=0).flatten())
-            #print(step, "trans.abs()", trans.abs().mean())
-            #print(step, "mean", y.mean(dim=1).abs().mean())
-            #print(step, "scale", y.flatten(1).std(1).mean())
+            if args.learn_trans:
+                print(step, "trans.abs()", trans.abs().mean())
+                print("learned scale", scale.exp().flatten())
+            print(step, "mean", y.mean(dim=1).abs().mean())
+            print(step, "scale", y.flatten(1).std(1).mean())
     rot = compute_rotation_matrix_from_ortho6d(rotation)
     #return ((scale.clamp(min=0)*x+trans+delta*(1-mask)) @ rot).detach()
     #return scale.exp()
     #return 2*torch.sigmoid(scale)
     if args.model == 'pvd':
         model.eval()
-    y = (x + delta * (1-mask))
-    if 'original' not in args.dataset or 'rotation' not in args.dataset:
+    y = scale.exp()*(x +  trans + delta) #* (1-mask))
+    if not args.learn_trans: #'original' not in args.dataset or 'rotation' not in args.dataset:
         y = y - y.mean(dim=1, keepdim=True)
-        y = y / y.flatten(1).std(dim=1, keepdim=True)[:, :, None]
-    y = y @ shear_inv(shear) @ rot
+        #y = y / y.flatten(1).std(dim=1, keepdim=True)[:, :, None]
+    y = y @ rot #shear_inv(shear) @ rot
+    if args.save_itmd:
+        return y, itmd, itmd_zt
     return y
     #2*torch.sigmoid(scale) #(x*scale.clamp(min=0)).detach()
 
-
+args.num_classes = 10
 if args.n_nodes == 1024:
     dataset_ = ShapeNet(io, './data', 'train', jitter=args.jitter,
             scale=args.scale,
@@ -675,6 +793,7 @@ if args.n_nodes == 1024:
                 else 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
+            subsample=args.subsample,
             random_rotation=False, zero_mean=zero_mean) # for classification
         # for preprocessing
         if args.preprocess:
@@ -695,12 +814,14 @@ if args.n_nodes == 1024:
                 else 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
+            subsample=args.subsample,
             random_rotation=False, zero_mean=zero_mean) # for classification
     elif args.dataset == 'shapenet':
         test_dataset = ShapeNet(io, './data', 'test' if not 'aug' in args.mode
                 else 'train', jitter=args.jitter,
             scale=args.scale,
             scale_mode=args.scale_mode,
+            subsample=args.subsample,
             random_rotation=False, zero_mean=zero_mean) # for classification
     elif args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(split='test',
@@ -711,6 +832,8 @@ if args.n_nodes == 1024:
                 rotate=True, #False if not args.time_cond else True,
                 random_rotation=False,
                 subsample=args.subsample,
+                corrupt_ori=args.corrupt_ori,
+                mixed_corruption=args.mixed_corruption,
                 )
         args.num_classes = 40
     # TODO jitter??!!
@@ -784,7 +907,7 @@ wandb.save('*.txt')
 # Create EGNN flow
 model = get_model(args, device)
 if args.resume is not None:
-    model.load_state_dict(torch.load(args.resume))
+    model.load_state_dict(torch.load(args.resume, map_location='cpu'))
 
 if args.dpm_solver:
     import dpm_solver
@@ -792,11 +915,16 @@ if args.dpm_solver:
     ns = dpm_solver.NoiseScheduleVP('discrete', alphas_cumprod=alphas_cumprod)
 
 if args.dataset.startswith('modelnet40') and not args.time_cond:
-    classifier = DGCNN_modelnet40()
-    classifier.load_state_dict(torch.load('outputs/dgcnn_modelnet40_best_test.pth')['model_state'])
+    if args.classifier == 'pointnet2':
+        from pointnet2_modelnet40 import PointNet2
+        classifier = PointNet2()
+        classifier.load_state_dict(torch.load('outputs/pointnetpp_model_best_test.pth',map_location='cpu')['model_state'])
+    else: # args.classifier == 'dgcnn':
+        classifier = DGCNN_modelnet40()
+        classifier.load_state_dict(torch.load('outputs/dgcnn_modelnet40_best_test.pth', map_location='cpu')['model_state'])
     classifier = torch.nn.DataParallel(classifier)
     classifier.to(device).eval()
-    print("load dgcnn_modelnet40")
+    print("load classifier_modelnet40")
 else:
     ori_args_model = args.model
     args.model = 'dgcnn'
@@ -820,7 +948,7 @@ else:
     classifier.load_state_dict(
         torch.load(
             args.classifier, map_location='cpu'),
-            strict=True
+            strict=False
     )
     classifier.eval()
     args.model = ori_args_model
@@ -886,6 +1014,7 @@ def get_color(coords, corners=np.array([
                                     [1, -1, 1],
                                     [1, 1, 1]
                                 ]) * args.scale,
+            mask=None,
     ):
     coords = np.array(coords) # batch x n_points x 3
     corners = np.array(corners) # n_corners x 3
@@ -905,6 +1034,10 @@ def get_color(coords, corners=np.array([
 
     weight = softmax(-dist)[:, :, :, None] #batch x NUM_POINTS x n_corners x 1
     rgb = (weight * colors).sum(2).astype(int) # NUM_POINTS x 3
+    if mask is not None:
+        # mask : B x N
+        # rgb : B x N x 3 (RGB)
+        rgb[(~mask).nonzero()] = np.array([255, 255, 255])
     return rgb
 
 def preprocess(data):
@@ -974,9 +1107,12 @@ def main():
             if args.dataset.startswith('modelnet40') and not args.time_cond:
                 x_ori = scale_to_unit_cube_torch(data[2].to(device))
                 mask = data[3].to(device)
+                ind = data[4].to(device) # ori ind for duplicated point
                 print("get ori")
             else:
                 x_ori = data[0].to(device)
+                mask = data[-2].to(device)
+                ind = data[-1].to(device)
             labels = data[1].to(device).flatten()
             if args.dataset == 'scannet' and args.preprocess:
                 old_x, x, is_ori = preprocess(data)
@@ -990,14 +1126,26 @@ def main():
             else:
                 # is_ori : batch_size x 1024
                 x = data[0].to(device)
+                if args.adv_attack:
+                    x = projected_gradient_descent(
+                        classifier,
+                        x,
+                        labels,
+                        F.cross_entropy,
+                        num_steps=10, #10,
+                        step_size=4e-3, # 4e-2
+                        step_norm='inf',
+                        eps=0.016,
+                        eps_norm='inf',
+                    )
                 if args.pre_trans:
                     #x = pre_trans(x, mask)
-                    x = pre_trans_ver2(x, mask)
-                if args.random_trans:
-                    random_trans = data[2]
+                    x = pre_trans_ver2(x, mask, ind)
                 furthest_point_idx = \
                     farthest_point_sample(x.permute(0,2,1), getattr(args,
                             'n_subsample', 64))[0]
+                if args.random_trans:
+                    random_trans = data[2]
                 #furthest_point_idx = \
                 #    pointnet2_utils.furthest_point_sample(x,
                 #            getattr(args, 'n_subsample', 64))
@@ -1117,13 +1265,16 @@ def main():
             #x_ori = x.detach().clone()
 
             #x_edit_list = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
-            if False: #args.dataset.startswith('modelnet40') and not args.time_cond:
-                x_edit_list_y = [x_ori]
-            else:
-                x_edit_list_y = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
+            #if False: #args.dataset.startswith('modelnet40') and not args.time_cond:
+            #    x_edit_list_y = [x_ori]
+            #else:
+            #    x_edit_list_y = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
             labels_list = [labels]
             if args.ddim and ori_time_cond:
                 itmd_list = []
+
+            x_edit_list = [x] #alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
+            x_edit_list_y = [x] #alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
             for k in range(K):
                 print(k+1,  "/", K)
                 eps = model.sample_combined_position_feature_noise(n_samples=x.size(0),
@@ -1331,13 +1482,6 @@ def main():
                         t = t - 1. / args.diffusion_steps
 
                     assert torch.all(t.abs() < 1e-5)
-                if k == 0:
-                    if False: #args.dataset.startswith('modelnet40') and not args.time_cond:
-                        x_edit_list = [x_ori]
-                    else:
-                        x_edit_list = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
-                    #x_edit_list_y = [alpha_t0 * x + noise_t0 * sigma_t0 if args.noise_t0 else x]
-                    #labels_list = [labels]
 
                 if guide: #args.egsde or args.entropy_guided:
                     x_edit_y = model_dp(y, sample_p_x_given_z0=True,
@@ -1367,13 +1511,22 @@ def main():
             if args.cls_scale_mode == 'unit_norm':
                 print("scaling")
                 #x_edit_list = x_edit_list[0:1] + \
-                x_edit_list = [rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach()),
-                        'x', np.pi/2) for x in
-                            x_edit_list] # undo scaling
+                x_edit_list = \
+                    [rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach(),
+                        no_mean=args.corrupt_ori and args.learn_trans and
+                        (args.subsample == 2048)),
+                            'x', np.pi/2) for x in
+                                x_edit_list] # undo scaling
                 #x_edit_list_y = x_edit_list_y[0:1] + \
-                x_edit_list_y = [rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach()),
-                            'x', np.pi/2)
-                                for x in x_edit_list_y] # undo scaling
+                x_edit_list_y = \
+                    [rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach(),
+                        no_mean=args.corrupt_ori and args.learn_trans and
+                        (args.subsample == 2048)),
+                                'x', np.pi/2)
+                                    for x in x_edit_list_y] # undo scaling
+            else:
+                print("keep unit std")
+
             preds4vote = [] # hard
             preds4vote_y = [] # hard
             preds4vote_soft = []
@@ -1415,7 +1568,9 @@ def main():
                             dim=-1))
                     #for ind in range(len(labels)):
                     #    pred_change[labels[ind].cpu(), ori_preds[ind].cpu(), preds[ind].cpu(), k-1] += 1
-
+                #print()
+                #print(preds, labels)
+                #input("preds and labels")
                 correct_count[k] += (preds == labels).long().sum().item()
                 if k>0:
                     correct_count_self_ensemble[k-1] += \
@@ -1439,6 +1594,8 @@ def main():
 
             io.cprint("ACC")
             for ck, cc in enumerate(correct_count):
+                #print(cc, count)
+                #input("???")
                 io.cprint(f'{ck} {cc/max(count, 1)*100}')
                 if ck > 0:
                     if guide: #args.egsde or args.entropy_guided:
@@ -1498,11 +1655,54 @@ def main():
             labels = [idx_to_label[min(9, int(d))] for d in data[1]]
             print("GT", [idx_to_label[min(9, int(d))] for d in data[1]])
             x = data[0].to(device) #if not args.dataset.startswith('modelnet40') \
-                                   #     else data[2].to(device)
+                                    #     else data[2].to(device)
+            mask = data[3].to(device)
+            ind = data[4].to(device)
             if args.pre_trans:
-                mask = data[3].to(device)
                 #x = pre_trans(x, mask)
-                x = pre_trans_ver2(x, mask)
+                if args.save_itmd:
+                    x, itmd, itmd_zt = pre_trans_ver2(x, mask, ind)
+                else:
+                    x = pre_trans_ver2(x, mask, ind)
+            try:
+                ## Save ##
+                import open3d as o3d
+                print(args.save_itmd)
+                os.makedirs(f'exps/{args.exp_name}/vis', exist_ok=True)
+                if args.save_itmd > 0 and args.pre_trans:
+                    for j, (x_itmd, zt_itmd) in enumerate(zip(itmd, itmd_zt)):
+                        for i, (pc_data, pc_zt) in enumerate(zip(x_itmd, zt_itmd)):
+                            pcd = o3d.geometry.PointCloud()
+                            pcd.points = \
+                                o3d.utility.Vector3dVector(pc_data.cpu().numpy())
+                            pcd_name = \
+                                f"exps/{args.exp_name}/vis/pc_{i}_itmd_{j}.ply"
+                            o3d.io.write_point_cloud(pcd_name, pcd)
+                            print(pcd_name)
+
+                            pcd = o3d.geometry.PointCloud()
+                            pcd.points = \
+                                o3d.utility.Vector3dVector(pc_zt.cpu().numpy())
+                            pcd_name = \
+                                f"exps/{args.exp_name}/vis/zt_{i}_itmd_{j}.ply"
+                            o3d.io.write_point_cloud(pcd_name, pcd)
+                            print(pcd_name)
+                    print("saved itmd")
+
+                for i, pc_data in enumerate(x): #enumerate(zip(x,src_label)):
+                    pcd = o3d.geometry.PointCloud()
+                    pcd.points = o3d.utility.Vector3dVector(pc_data.cpu().numpy())
+                    pcd_name = f"exps/{args.exp_name}/vis/pc_{i}_final.ply"
+                    o3d.io.write_point_cloud(pcd_name, pcd)
+                    print(pcd_name)
+                print("--finish--")
+            except Exception as e:
+                print(e)
+                print("Unable toimport open3d")
+
+
+            rgbs_wMask = get_color(x.cpu().numpy(),
+                    mask=mask.bool().squeeze(-1).cpu().numpy())
             rgbs = get_color(x.cpu().numpy())
 
             x_filtered = utils.mean_filter(x, K=50, radius=args.radius)
@@ -1884,8 +2084,8 @@ def main():
 
                         obj3d = wandb.Object3D({
                             "type": "lidar/beta",
-                            "points": np.concatenate((x_filtered[b].cpu().numpy().reshape(-1, 3),
-                                rgbs_filtered[b]), axis=1),
+                            "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
+                                rgbs_wMask[b]), axis=1),
                             "boxes": np.array(
                                 [
                                     {
@@ -1907,34 +2107,61 @@ def main():
                                 ]
                             ),
                         })
-                        wandb.log({f'filtered': obj3d}, step=b, commit=False)
+                        wandb.log({f'masked ori': obj3d}, step=b, commit=False)
 
-                        obj3d = wandb.Object3D({
-                            "type": "lidar/beta",
-                            "points": np.concatenate((sub_x[b].cpu().numpy().reshape(-1, 3),
-                                rgbs_sub[b]), axis=1),
-                            "boxes": np.array(
-                                [
-                                    {
-                                        "corners":
-                                        (np.array([
-                                            [-1, -1, -1],
-                                            [-1, 1, -1],
-                                            [-1, -1, 1],
-                                            [1, -1, -1],
-                                            [1, 1, -1],
-                                            [-1, 1, 1],
-                                            [1, -1, 1],
-                                            [1, 1, 1]
-                                        ])*args.scale * (1 if args.scale_mode !=
-                                        'unit_std' else 3)).tolist(),
-                                        "label": f'{labels[b]} {pred_label_ori} {pred_val_ori:.2f}',
-                                        "color": [123, 321, 111], # ???
-                                    }
-                                ]
-                            ),
-                        })
-                        wandb.log({f'ori sub': obj3d}, step=b, commit=False)
+                        #obj3d = wandb.Object3D({
+                        #    "type": "lidar/beta",
+                        #    "points": np.concatenate((x_filtered[b].cpu().numpy().reshape(-1, 3),
+                        #        rgbs_filtered[b]), axis=1),
+                        #    "boxes": np.array(
+                        #        [
+                        #            {
+                        #                "corners":
+                        #                (np.array([
+                        #                    [-1, -1, -1],
+                        #                    [-1, 1, -1],
+                        #                    [-1, -1, 1],
+                        #                    [1, -1, -1],
+                        #                    [1, 1, -1],
+                        #                    [-1, 1, 1],
+                        #                    [1, -1, 1],
+                        #                    [1, 1, 1]
+                        #                ])*args.scale * (1 if args.scale_mode !=
+                        #                'unit_std' else 3)).tolist(),
+                        #                "label": f'{labels[b]} {pred_label_ori} {pred_val_ori:.2f}',
+                        #                "color": [123, 321, 111], # ???
+                        #            }
+                        #        ]
+                        #    ),
+                        #})
+                        #wandb.log({f'filtered': obj3d}, step=b, commit=False)
+
+                        #obj3d = wandb.Object3D({
+                        #    "type": "lidar/beta",
+                        #    "points": np.concatenate((sub_x[b].cpu().numpy().reshape(-1, 3),
+                        #        rgbs_sub[b]), axis=1),
+                        #    "boxes": np.array(
+                        #        [
+                        #            {
+                        #                "corners":
+                        #                (np.array([
+                        #                    [-1, -1, -1],
+                        #                    [-1, 1, -1],
+                        #                    [-1, -1, 1],
+                        #                    [1, -1, -1],
+                        #                    [1, 1, -1],
+                        #                    [-1, 1, 1],
+                        #                    [1, -1, 1],
+                        #                    [1, 1, 1]
+                        #                ])*args.scale * (1 if args.scale_mode !=
+                        #                'unit_std' else 3)).tolist(),
+                        #                "label": f'{labels[b]} {pred_label_ori} {pred_val_ori:.2f}',
+                        #                "color": [123, 321, 111], # ???
+                        #            }
+                        #        ]
+                        #    ),
+                        #})
+                        #wandb.log({f'ori sub': obj3d}, step=b, commit=False)
 
                     obj3d = wandb.Object3D({
                         "type": "lidar/beta",
@@ -1963,31 +2190,31 @@ def main():
                     wandb.log({f'corrupted {iter}': obj3d}, step=b, commit=False)
 
 
-                    obj3d = wandb.Object3D({
-                        "type": "lidar/beta",
-                        "points": np.concatenate((x_edit[b].cpu().numpy().reshape(-1, 3),
-                            rgbs[b]), axis=1),
-                        "boxes": np.array(
-                            [
-                                {
-                                    "corners": (np.array([
-                                        [-1, -1, -1],
-                                        [-1, 1, -1],
-                                        [-1, -1, 1],
-                                        [1, -1, -1],
-                                        [1, 1, -1],
-                                        [-1, 1, 1],
-                                        [1, -1, 1],
-                                        [1, 1, 1]
-                                    ])*args.scale*(1 if args.scale_mode !=
-                                    'unit_std' else 3)).tolist(),
-                                    "label": f'{labels[b]} {pred_label} {pred_val:.2f}',
-                                    "color": [123, 321, 111], # ???
-                                }
-                            ]
-                        ),
-                    })
-                    wandb.log({f'edit {iter}': obj3d}, step=b, commit=False)
+                    #obj3d = wandb.Object3D({
+                    #    "type": "lidar/beta",
+                    #    "points": np.concatenate((x_edit[b].cpu().numpy().reshape(-1, 3),
+                    #        rgbs[b]), axis=1),
+                    #    "boxes": np.array(
+                    #        [
+                    #            {
+                    #                "corners": (np.array([
+                    #                    [-1, -1, -1],
+                    #                    [-1, 1, -1],
+                    #                    [-1, -1, 1],
+                    #                    [1, -1, -1],
+                    #                    [1, 1, -1],
+                    #                    [-1, 1, 1],
+                    #                    [1, -1, 1],
+                    #                    [1, 1, 1]
+                    #                ])*args.scale*(1 if args.scale_mode !=
+                    #                'unit_std' else 3)).tolist(),
+                    #                "label": f'{labels[b]} {pred_label} {pred_val:.2f}',
+                    #                "color": [123, 321, 111], # ???
+                    #            }
+                    #        ]
+                    #    ),
+                    #})
+                    #wandb.log({f'edit {iter}': obj3d}, step=b, commit=False)
 
                     obj3d = wandb.Object3D({
                         "type": "lidar/beta",
@@ -2018,31 +2245,31 @@ def main():
                     if guide: #args.egsde or args.entropy_guided:
                         pred_label, pred_val = preds_edit_y[b]
 
-                        obj3d = wandb.Object3D({
-                            "type": "lidar/beta",
-                            "points": np.concatenate((x_edit_y[b].cpu().numpy().reshape(-1, 3),
-                                rgbs[b]), axis=1),
-                            "boxes": np.array(
-                                [
-                                    {
-                                        "corners": (np.array([
-                                            [-1, -1, -1],
-                                            [-1, 1, -1],
-                                            [-1, -1, 1],
-                                            [1, -1, -1],
-                                            [1, 1, -1],
-                                            [-1, 1, 1],
-                                            [1, -1, 1],
-                                            [1, 1, 1]
-                                        ])*args.scale*(1 if args.scale_mode !=
-                                        'unit_std' else 3)).tolist(),
-                                        "label": f'{labels[b]} {pred_label} {pred_val:.2f}',
-                                        "color": [123, 321, 111], # ???
-                                    }
-                                ]
-                            ),
-                        })
-                        wandb.log({f'edit_y {iter}': obj3d}, step=b, commit=False)
+                        #obj3d = wandb.Object3D({
+                        #    "type": "lidar/beta",
+                        #    "points": np.concatenate((x_edit_y[b].cpu().numpy().reshape(-1, 3),
+                        #        rgbs[b]), axis=1),
+                        #    "boxes": np.array(
+                        #        [
+                        #            {
+                        #                "corners": (np.array([
+                        #                    [-1, -1, -1],
+                        #                    [-1, 1, -1],
+                        #                    [-1, -1, 1],
+                        #                    [1, -1, -1],
+                        #                    [1, 1, -1],
+                        #                    [-1, 1, 1],
+                        #                    [1, -1, 1],
+                        #                    [1, 1, 1]
+                        #                ])*args.scale*(1 if args.scale_mode !=
+                        #                'unit_std' else 3)).tolist(),
+                        #                "label": f'{labels[b]} {pred_label} {pred_val:.2f}',
+                        #                "color": [123, 321, 111], # ???
+                        #            }
+                        #        ]
+                        #    ),
+                        #})
+                        #wandb.log({f'edit_y {iter}': obj3d}, step=b, commit=False)
 
                         obj3d = wandb.Object3D({
                             "type": "lidar/beta",

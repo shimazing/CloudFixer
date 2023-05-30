@@ -12,7 +12,7 @@ import time
 import pickle
 from train_test import train_epoch, test
 from data.dataloader_Norm import ScanNet, ModelNet, ShapeNet, label_to_idx, NUM_POINTS
-from data.dataloader_Norm import ShapeNetCore
+from data.dataloader_Norm import ShapeNetCore, ModelNet40C
 from utils_GAST import pc_utils_Norm, log
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data import DataLoader
@@ -116,6 +116,11 @@ parser.add_argument('--lr_gamma', default=1, type=float)
 parser.add_argument('--cls_uniform', default=True, type=eval)
 args = parser.parse_args()
 
+if args.dataset.startswith('modelnet40'):
+    args.n_cls = 40
+else:
+    args.n_cls = 10
+
 zero_mean = not args.no_zero_mean
 
 io = log.IOStream(args)
@@ -218,6 +223,11 @@ if args.n_nodes == 1024:
             dataset_val = ScanNet(io, './data', 'val', jitter=args.jitter,
                     scale=args.scale, scale_mode=args.scale_mode,
                     zero_mean=zero_mean)
+        elif args.dataset.startswith('modelnet40'):
+            dataset_ = ModelNet40C(split='train', corruption='original',
+                    num_classes=args.n_cls, random_scale=args.random_scale)
+            dataset_val = ModelNet40C(split='val', corruption='original',
+                    num_classes=args.n_cls, random_scale=False)
         train_dataset_sampler, val_dataset_sampler = None, None #split_set(dataset_)
         train_loader = DataLoader(dataset_, batch_size=args.batch_size,
                 sampler=None if not args.cls_uniform else ImbalancedDatasetSampler(dataset_), #train_dataset_sampler,

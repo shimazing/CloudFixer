@@ -216,18 +216,31 @@ def calc_t_emb(ts, t_emb_dim=128):
     return t_emb
 
 
-def knn(x, k, mask=None):
+def knn(x, k=20, mask=None, return_dist=False):
     # mask : [B, N]
     # x : [B, C=3, N]
     inner = -2 * torch.matmul(x.transpose(2, 1), x)
     xx = torch.sum(x ** 2, dim=1, keepdim=True)
     pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
+    # B x N x N
+
     if mask is not None:
         B_ind, N_ind = (~mask).nonzero(as_tuple=True)
-        pairwise_distance[B_ind, N_ind] = np.inf
-        pairwise_distance[B_ind, :, N_ind] = np.inf
+        pairwise_distance[B_ind, N_ind] = -np.inf
+        pairwise_distance[B_ind, :, N_ind] = -np.inf
     # (batch_size, num_points, k)
     idx = pairwise_distance.topk(k=k, dim=-1)[1]
+    if return_dist:
+        B = x.shape[0]
+        N = x.shape[2]
+        dist =  -pairwise_distance[torch.arange(B)[:, None, None],
+                            torch.arange(N)[None, :, None],
+                idx] + 1e-8
+        is_valid = mask[torch.arange(B)[:, None, None], idx]
+        dist[~is_valid] = 0
+        n_valid = is_valid.float().sum(dim=-1)
+        return idx, (dist.sum(dim=-1) / (n_valid).clamp(min=1)).detach().clone()
+
     return idx
 
 

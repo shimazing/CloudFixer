@@ -1,34 +1,103 @@
 #lambda_s=50####
-corruption=background
-array=(0)
-for lambda_s in "${array[@]}"
+#for corruption in background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling
+#for corruption in gaussian
+#for corruption in gaussian impulse lidar # server03
+#for corruption in rotation shear uniform upsampling # server41
+#for corruption in distortion_rbf distortion_rbf_inv # server41
+#for corruption in lidar
+
+#for corruption in original # server03
+#for corruption in lidar
+#for corruption in occlusion shear upsampling # server20
+#for corruption in lidar impulse #server03
+#for corruption in background
+#for corruption in background cutout density density_inc uniform # server41
+#for corruption in rotation distortion distortion_rbf distortion_rbf_inv gaussian  # server43
+#for corruption in occlusion shear upsampling # server20
+#for corruption in lidar occlusion # server20
+#for corruption in distortion # server20
+#for corruption in background impulse gaussian # server41 0,1,2,3
+#for corruption in cutout # server03
+#for corruption in lidar # server 43
+#for corruption in background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling
+#for corruption in impulse lidar occlusion rotation # server20
+#for corruption in shear uniform upsampling # server03
+#for corruption in background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian # server43
+#for corruption in density_inc distortion distortion_rbf # server43
+#for corruption in distortion_rbf_inv gaussian # server41
+#for corruption in background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling
+for corruption in background
 do
-CUDA_VISIBLE_DEVICES=1,2,3,0 python3 main_sdedit.py \
+for seed in 2
+do
+classifier=dgcnn
+matching_t=0.8
+t_min=0.02
+steps=400
+array=(0)
+l1=10
+l1_lb=1
+l2=0
+wd=0
+lr=0.2
+severity=5
+optim_end_factor=0.05
+mode=vis
+weighted_reg=True
+pow=1
+optim=adamax
+subsample=700
+pre_trans=1
+n_reverse_steps=1
+denoising_thrs=100
+trans=False
+if [ "vis" == "$mode" ]; then
+    batch_size=64
+else
+    batch_size=64
+fi
+
+if [ "1" == "$pre_trans" ]; then
+    exp_name=${classifier}_${corruption}_${severity}_lr${lr}_ef${optim_end_factor}_matching_t${matching_t}_${t_min}_${steps}iters_betas_0.9_0.999_wd_0_pow${pow}weighted${weighted_reg}_l1_${l1}_${l1_lb}_cosaneal_l2_${l2}_wMask_wd${wd}_${optim}_schedule_t_tlb_lr_linearLR_sub${subsample}_wRotation0.2_denoisingThrs${denoising_thrs}_trans${trans}_seed${seed}
+    pre_trans=--pre_trans
+else
+    exp_name=${classifier}_${corruption}_${severity}
+    pre_trans=""
+fi
+
+#for lambda_s in "${array[@]}"
+#do
+CUDA_VISIBLE_DEVICES=0,1,2,3 python3 main_sdedit.py \
+    --t_min ${t_min} \
+    --save_itmd 50 \
+    --classifier ${classifier} \
+    --learn_trans ${trans} \
+    --denoising_thrs ${denoising_thrs} \
+    --random_seed ${seed} \
+    ${pre_trans} \
+    --pow ${pow} \
+    --optim_end_factor ${optim_end_factor} \
     --diffusion_steps 500 \
     --diffusion_noise_schedule polynomial_2 \
-    --batch_size 32 \
+    --batch_size ${batch_size} \
     --scale 1 \
     --scale_mode unit_std \
     --cls_scale_mode unit_norm \
-    --dataset modelnet40c_${corruption}_5 \
+    --dataset modelnet40c_${corruption}_${severity} \
     --self_ensemble \
     --K 1 \
     --t 0.4 \
     --t_thrs 0.0 \
-    --random_seed 2 \
-    --exp_name \
-    ${corruption}_5_lr1e-2_matching_t0.9_400iters_betas_0.9_0.999_wd_0_l1_0 \
+    --exp_name ${exp_name} \
     --domain_cls '' \
     --no_zero_mean \
-    --lambda_s $lambda_s \
+    --lambda_s 0 \
     --lambda_ent 0 \
     --lambda_i 0 \
     --temperature 2.5 \
     --bn bn \
     --gn False \
-    --classifier \
-    'outputs/latent_classifier_onlyOri_modelnet40c_fc_normFalse_gnFalsebn/best.pt' \
-    --mode vis \
+    --mode ${mode} \
     --radius 0.5 \
     --model transformer \
     --resume \
@@ -36,22 +105,25 @@ CUDA_VISIBLE_DEVICES=1,2,3,0 python3 main_sdedit.py \
     --n_subsample 512 \
     --keep_sub True \
     --jitter False \
-    --n_reverse_steps 1 \
+    --n_reverse_steps ${n_reverse_steps} \
     --n_iters_per_update 1 \
     --accum 3 \
-    --ddim \
-    --lr 1e-2 \
-    --n_update 400 \
-    --weight_decay 0.0 \
-    --matching_t 0.9 \
-    --l1 0.0 \
+    --lr ${lr} \
+    --n_update ${steps} \
+    --weight_decay ${wd} \
+    --matching_t ${matching_t} \
+    --l1 ${l1} \
+    --l1_lb ${l1_lb} \
+    --l2 ${l2} \
     --beta1 0.9 \
     --beta2 0.999 \
-    --optim adamw \
-    --subsample 1024 \
-    --pre_trans \
+    --optim ${optim} \
+    --subsample ${subsample} \
+    --ddim \
+    --weighted_reg ${weighted_reg} \
+    #--classifier \
+    #'outputs/latent_classifier_onlyOri_modelnet40c_fc_normFalse_gnFalsebn/best.pt' \
     #--activate_mask \
-    #--no_wandb \
     #${corruption}_5_lr5e-2_400steps_t0.02-0.42 \
     #outputs/unit_std_modelnet40_transformer_polynomial_2_500steps_nozeromean_2e-4LRExponentialDecay0.9995_clsUniformFalse/generative_model_ema_last.npy \
     #--latent_trans \
@@ -85,6 +157,8 @@ CUDA_VISIBLE_DEVICES=1,2,3,0 python3 main_sdedit.py \
 #        'outputs/latent_classifier_0.4_fc_normFalse_shapenet2scannet_withDMTrue_dmpvd_clTrue256lam1.0_temperature0.1_inputTransFalse_rotationAugTrue_timecondTrue_gnTrue/last.pt'\
 #            'outputs/latent_classifier_0.4_fc_normFalse_shapenet2scannet_withDMFalse_dmpvd_clTrue256lam1.0_temperature0.1_inputTransTrue_rotationAugTrue/50.pt' \
 done
+done
+
 
 
 #array=(0 100 200 400 800 1600)

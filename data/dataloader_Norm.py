@@ -23,6 +23,13 @@ try:
 except:
     pass
 
+
+try:
+    from generate_c import deformation, noise, part
+    from generate_c import background_noise,cutout
+except:
+    pass
+
 eps = 10e-4
 NUM_POINTS = 1024
 #NUM_POINTS = 1500
@@ -175,10 +182,13 @@ class ModelNet40C(Dataset):
     def __init__(self, split='test', test_data_path='data/modelnet40_c/',
             corruption='background', severity=5, num_classes=40,
             random_scale=False, random_rotation=True, random_trans=False,
-            rotate=True, subsample=1024, aug=False):
+            rotate=True, subsample=1024, aug=False, corrupt_ori=False,
+            mixed_corruption=False):
         if corruption != 'original':
             assert split == 'test'
         self.split = split
+        self.corrupt_ori = corrupt_ori
+        self.mixed_corruption = mixed_corruption
         self.aug = aug
         self.data_path = {
             "train": 'data/modelnet40_ply_hdf5_2048/',
@@ -186,13 +196,15 @@ class ModelNet40C(Dataset):
             "test":  test_data_path
         }[self.split]
         self.corruption = corruption
-        self.severity = severity
+        if self.corrupt_ori:
+            corruption = 'original'
+        self.severity = int(severity)
         self.random_scale = random_scale
         self.random_rotation = random_rotation
         if corruption == 'original' and split != 'test':
             self.data, self.label = load_modelnet_h5(partition=split)
         else:
-            self.data, self.label = load_data(self.data_path, self.corruption,
+            self.data, self.label = load_data(self.data_path, corruption,
                 self.severity, num_classes=num_classes)
         # self.num_points = num_points
         self.partition =  split
@@ -203,8 +215,22 @@ class ModelNet40C(Dataset):
 
     def __getitem__(self, item):
         pointcloud = self.data[item][:, :3]
-        #print("ori len", len(pointcloud))
         norm_curv = self.data[item][:, 3:]
+
+        if self.mixed_corruption:
+            pointcloud = background_noise(cutout(pointcloud, self.severity),
+                    self.severity)
+        elif self.corrupt_ori:
+            t1, t2 = random.sample([deformation, noise, part], 2)
+            f1 = random.choice(t1)
+            f2 = random.choice(t2)
+            #pointcloud = f1(f2(pointcloud, self.severity), self.severity)
+            pointcloud = f1(pointcloud, int(self.severity))
+            #f2(pointcloud, self.severity), self.severity)
+
+        #print("mean", pointcloud.mean(axis=0))
+        #print("norm", (pointcloud * pointcloud).sum(-1).max())
+        #input()
 
         if len(pointcloud) > self.subsample: # and 'occlusion' in self.corruption:
             #print(len(pointcloud))
@@ -219,7 +245,8 @@ class ModelNet40C(Dataset):
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
 
-        if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
+        if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in
+                self.corruption or 'lidar' in self.corruption):
             dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
                 None, :]), 2),
                     axis=-1) < 1e-8
@@ -229,11 +256,14 @@ class ModelNet40C(Dataset):
                 row, col = row[row<col], col[row<col]
                 dup = np.unique(col)
                 mask[dup] = 0
+                pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
             valid, = mask.flatten().nonzero()
             #print("filter dup", len(valid))
 
         label = self.label[item]
         pc_ori = pointcloud.copy()
+        ind = np.arange(len(pointcloud))
+        N = len(pointcloud)
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
             pointcloud = self.rotate_pc(pointcloud)
@@ -251,18 +281,21 @@ class ModelNet40C(Dataset):
                         3).astype(pointcloud.dtype)), axis=0)
         else:
             #while 'lidar' not in self.corruption and len(pointcloud) < NUM_POINTS:
-            while len(pointcloud) < NUM_POINTS:
-                chosen = np.arange(N) #int(len(pointcloud)))
-                np.random.shuffle(chosen)
-                chosen = chosen[:NUM_POINTS - len(pointcloud)]
-                pointcloud = np.concatenate((
-                    pointcloud,
-                    pointcloud[chosen] #:NUM_POINTS - len(pointcloud)]
-                ), axis=0)
-                norm_curv = np.concatenate((
-                    norm_curv,
-                    norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
-                ), axis=0)
+            if self.subsample < 2048:
+                while len(pointcloud) < NUM_POINTS:
+                    chosen = np.arange(N) #int(len(pointcloud)))
+                    np.random.shuffle(chosen)
+                    chosen = chosen[:NUM_POINTS - len(pointcloud)]
+                    pointcloud = np.concatenate((
+                        pointcloud,
+                        pointcloud[chosen] #:NUM_POINTS - len(pointcloud)]
+                    ), axis=0)
+                    ind = np.concatenate((ind, chosen), axis=0)
+                    assert len(pointcloud) == len(ind)
+                    norm_curv = np.concatenate((
+                        norm_curv,
+                        norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
+                    ), axis=0)
         #if pointcloud.shape[0] > NUM_POINTS:
         #    pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
         #    pc_ori = np.swapaxes(np.expand_dims(pc_ori, 0), 1, 2)
@@ -280,7 +313,7 @@ class ModelNet40C(Dataset):
                     self.random_trans)
             pointcloud += random_trans
             return (pointcloud, label, random_trans)
-        return (pointcloud, label, self.rotate_pc(pointcloud, True), mask)
+        return (pointcloud, label, self.rotate_pc(pointcloud, True), mask, ind)
 
     def __len__(self):
         return self.data.shape[0]
@@ -366,6 +399,7 @@ class ScanNet(Dataset):
     def __init__(self, io, dataroot='data', partition='train', random_rotation=True,
             jitter=True, scale=1, scale_mode='unit_std', random_scale=False,
             zero_mean=True, elastic_distortion=False, self_distillation=False,
+            subsample=1024,
             **kwargs):
         self.self_distillation = self_distillation
         if elastic_distortion:
@@ -383,6 +417,7 @@ class ScanNet(Dataset):
         self.num_examples = self.data.shape[0]
         io.cprint("number of " + partition + " examples in scannet" + ": " + str(self.data.shape[0]))
         self.data = list(self.data)
+        self.subsample = subsample
 
         self.zero_mean = zero_mean
 
@@ -442,12 +477,15 @@ class ScanNet(Dataset):
         #    None, :]), 2),
         #        axis=-1) < 1e-8
         #dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-        #mask = np.ones(len(pointcloud))
+        #mask = np.ones(max(NUM_POINTS, len(pointcloud)))
+        #ind = np.arange(len(pointcloud))
         #if np.any(dup_points):
+        #    print("dup")
         #    row, col = dup_points.nonzero()
         #    row, col = row[row<col], col[row<col]
         #    dup = np.unique(col)
         #    mask[dup] = 0
+        #    ind[col] = row
         #valid, = mask.nonzero()
         #mask = mask.astype(bool)
         #pointcloud = pointcloud[mask]
@@ -456,12 +494,18 @@ class ScanNet(Dataset):
         # Rotate ScanNet by -90 degrees
         pointcloud = self.rotate_pc(pointcloud)
         # sample according to farthest point sampling
-        if pointcloud.shape[0] > NUM_POINTS:
+        if pointcloud.shape[0] > self.subsample:
             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
             norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud, norm_curv, NUM_POINTS)
+            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
+                    norm_curv, self.subsample)
             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
             norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+        N = len(pointcloud)
+        mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
+        mask[N:] = 0
+        ind = np.arange(len(pointcloud))
 
         if self.scale_mode != 'unit_norm':
             pointcloud = self.scale * scale(pointcloud, self.scale_mode)
@@ -481,6 +525,7 @@ class ScanNet(Dataset):
                 pointcloud,
                 pointcloud[chosen] #:NUM_POINTS - len(pointcloud)]
             ), axis=0)
+            ind = np.concatenate((ind, chosen), axis=0)
             norm_curv = np.concatenate((
                 norm_curv,
                 norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
@@ -521,7 +566,7 @@ class ScanNet(Dataset):
                     np.array(item_))
 
         return (pointcloud, label, norm_curv, min(ori_len, NUM_POINTS),
-                ori_pointcloud)
+                ori_pointcloud, mask, ind)
 
     def __len__(self):
         if self.partition == 'train':
@@ -543,7 +588,8 @@ class ModelNet(Dataset):
     def __init__(self, io, dataroot='./data', partition='train',
             random_rotation=True, jitter=True, scale=1, scale_mode='unit_std',
             random_scale=False, zero_mean=True, random_remove=False,
-            elastic_distortion=False, self_distillation=False, p_keep=0.7):
+            elastic_distortion=False, self_distillation=False, p_keep=0.7,
+            subsample=1024):
         self.self_distillation = self_distillation
         self.p_keep = p_keep
         if elastic_distortion:
@@ -559,6 +605,7 @@ class ModelNet(Dataset):
         self.scale_mode = scale_mode
         self.pc_list = []
         self.lbl_list = []
+        self.subsample = subsample
         DATA_DIR = os.path.join(dataroot, "PointDA_data", "modelnet") #_norm_curv")
         self.zero_mean = zero_mean
         #DATA_DIR = 'data/PointDA_data/modelnet' #_norm_curv_angle'
@@ -618,12 +665,19 @@ class ModelNet(Dataset):
                 if self.random_remove:
                     pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
         # sample according to farthest point sampling
-        if pointcloud.shape[0] > NUM_POINTS:
+        if pointcloud.shape[0] > self.subsample: #NUM_POINTS:
             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
             norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud, norm_curv, NUM_POINTS)
+            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
+                    norm_curv, self.subsample)
             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
             norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+        N = len(pointcloud)
+        mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
+        mask[N:] = 0
+        ind = np.arange(len(pointcloud))
+
         if self.random_remove:
             if pointcloud_rm.shape[0] > NUM_POINTS:
                 pointcloud_rm = np.swapaxes(np.expand_dims(pointcloud_rm, 0), 1, 2)
@@ -646,6 +700,8 @@ class ModelNet(Dataset):
                 norm_curv,
                 norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
             ), axis=0)
+            ind = np.concatenate((ind, chosen), axis=0)
+            assert len(pointcloud) == len(ind)
         if self.random_remove:
             N = len(pointcloud_rm)
             while len(pointcloud_rm) < NUM_POINTS:
@@ -704,7 +760,7 @@ class ModelNet(Dataset):
         if self.random_remove:
             return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm,
                     mean_rm, std_rm)
-        return (pointcloud, label, norm_curv, NUM_POINTS)
+        return (pointcloud, label, norm_curv, NUM_POINTS, mask, ind)
 
     def __len__(self):
         if self.partition == 'train':
@@ -721,7 +777,8 @@ class ShapeNet(Dataset):
     def __init__(self, io, dataroot='data', partition='train', random_rotation=True,
             scale=1, val=False, jitter=True, scale_mode='unit_std',
             random_scale=False, zero_mean=True, random_remove=False,
-            elastic_distortion=False, self_distillation=False, p_keep=0.7):
+            elastic_distortion=False, self_distillation=False, p_keep=0.7,
+            subsample=1024):
         self.p_keep = p_keep
         self.self_distillation = self_distillation
         if elastic_distortion:
@@ -737,6 +794,7 @@ class ShapeNet(Dataset):
         self.scale = scale
         self.scale_mode = scale_mode
         self.zero_mean = zero_mean
+        self.subsample = subsample
         DATA_DIR = os.path.join(dataroot, "PointDA_data", "shapenet") #_norm_curv")
         #DATA_DIR = 'data/PointDA_data/shapenet' #_norm_curv_angle'
 
@@ -806,10 +864,11 @@ class ShapeNet(Dataset):
         if self.random_remove:
             pointcloud_rm = self.rotate_pc(pointcloud_rm, label)
         # sample according to farthest point sampling
-        if pointcloud.shape[0] > NUM_POINTS:
+        if pointcloud.shape[0] > self.subsample:
             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
             norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud, norm_curv, NUM_POINTS)
+            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
+                    norm_curv, self.subsample)
             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
             norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
         if self.random_remove:
@@ -822,6 +881,9 @@ class ShapeNet(Dataset):
                 norm_curv_rm = np.swapaxes(norm_curv_rm.squeeze(), 1, 0).astype('float32')
 
         N = len(pointcloud)
+        mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
+        mask[N:] = 0
+        ind = np.arange(len(pointcloud))
         while len(pointcloud) < NUM_POINTS:
             chosen = np.arange(N) #int(len(pointcloud)))
             np.random.shuffle(chosen)
@@ -830,6 +892,8 @@ class ShapeNet(Dataset):
                 pointcloud,
                 pointcloud[chosen] #:NUM_POINTS - len(pointcloud)]
             ), axis=0)
+            ind = np.concatenate((ind, chosen), axis=0)
+            assert len(pointcloud) == len(ind)
             norm_curv = np.concatenate((
                 norm_curv,
                 norm_curv[chosen] #:NUM_POINTS - len(norm_curv)]
@@ -893,7 +957,7 @@ class ShapeNet(Dataset):
         if self.random_remove:
             return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm,
                     mean_rm, std_rm)
-        return (pointcloud, label, norm_curv, NUM_POINTS)
+        return (pointcloud, label, norm_curv, NUM_POINTS, mask, ind)
 
     def __len__(self):
         if self.partition == 'train':

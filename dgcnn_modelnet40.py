@@ -1,7 +1,7 @@
 import torch.nn as nn
 import torch.nn.functional as F
+
 from dgcnn.pytorch.model import DGCNN as DGCNN_original
-#from all_utils import DATASET_NUM_CLASS
 
 
 def min_max_normalize(pc):
@@ -18,16 +18,16 @@ def min_max_normalize(pc):
 
     return new_pc
 
-class DGCNN(nn.Module):
 
+
+class DGCNN(nn.Module):
     def __init__(self, task='cls', dataset='modelnet40'):
         super().__init__()
         self.task = task
         self.dataset = dataset
 
         if task == "cls":
-            num_classes = 40 #DATASET_NUM_CLASS[dataset]
-            # default arguments
+            num_classes = 40
             class Args:
                 def __init__(self):
                     self.k = 20
@@ -36,15 +36,11 @@ class DGCNN(nn.Module):
                     self.leaky_relu = 1
             args = Args()
             self.model = DGCNN_original(args, output_channels=num_classes)
-            #self.load_state_dict(torch.load('outputs/dgcnn_modelnet40_best_test.pth')['model_state'])
-
         else:
             assert False
 
-    def forward(self, pc): #, cls=None):
-        # normalize pc here!
-        #pc = min_max_normalize(pc)
-        #pc = pc.to(next(self.parameters()).device)
+    def forward(self, pc):
+        # pc: (B, N, C)
         pc = pc.permute(0, 2, 1).contiguous()
         logit = self.model(pc)
         out = {'cls': logit}

@@ -1,8 +1,3 @@
-"""
-Adapted from: https://github.com/openai/openai/blob/55363aa496049423c37124b440e9e30366db3ed6/orc/orc/diffusion/vit.py
-"""
-
-
 import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Callable, Union
 
@@ -12,8 +7,6 @@ import torch.nn as nn
 """
 Adapted from: https://github.com/openai/guided-diffusion/blob/22e0df8183507e13a7813f8d38d51b072ca1e67c/guided_diffusion/nn.py#L124
 """
-
-
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

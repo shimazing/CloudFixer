@@ -1,8 +1,10 @@
-import torch
-import numpy as np
 import os
 import glob
 import random
+
+import numpy as np
+import torch
+
 
 def save_xyz_file(path, positions, id_from=0,
         name='pointcloud', node_mask=None, n_nodes=1024):
@@ -47,8 +49,7 @@ def load_xyz_files(path, shuffle=True):
     return files
 
 
-def visualize(path, max_num=25, wandb=None,
-        postfix='', scale=1):
+def visualize(path, max_num=25, wandb=None, postfix=''):
     files = load_xyz_files(path)[0:max_num]
     for file in files:
         positions = load_xyz(file)
@@ -74,7 +75,7 @@ def visualize(path, max_num=25, wandb=None,
                                 [-1, 1, 1],
                                 [1, -1, 1],
                                 [1, 1, 1]
-                                ])*scale).tolist(),
+                                ])*3).tolist(),
                             "label": "Box",
                             "color": [123, 321, 111], # ???
                         }

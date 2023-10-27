@@ -82,7 +82,7 @@ def main():
     if args.dataset.startswith('modelnet40'):
         dataset_ = ModelNet40C(args, partition='train')
         dataset_val = ModelNet40C(args, partition='val')
-    elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
+    elif args.dataset in ['modelnet', 'shapenet', 'scannet']:
         dataset_ = PointDA10(args=args, partition='train')
         dataset_val = PointDA10(args=args, partition='val')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:

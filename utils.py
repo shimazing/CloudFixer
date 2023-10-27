@@ -1,6 +1,6 @@
-import numpy as np
-import getpass
 import os
+
+import numpy as np
 import torch
 import pytorch3d as p3d
 
@@ -8,7 +8,6 @@ RADIUS = 0.5 * 3
 MIN_POINTS = 20
 KL_SCALER = 10.0
 NREGIONS = 3
-
 
 
 def draw_from_gaussian(mean, num_points):
@@ -146,6 +145,7 @@ def uniform_2_sphere(num: int = None):
 
     return np.stack((x, y, z), axis=-1)
 
+
 def remove(points, p_keep=0.7):
     rand_xyz = uniform_2_sphere()
     centroid = np.mean(points[:, :3], axis=0)
@@ -158,6 +158,7 @@ def remove(points, p_keep=0.7):
         mask = dist_from_plane > np.percentile(dist_from_plane, (1.0 - p_keep) * 100)
 
     return points[mask, :]
+
 
 def region_mean(num_regions=3, rng=3):
     """
@@ -195,41 +196,8 @@ def assign_region_to_point(X, device, NREGIONS=3, rng=3):
         Y = Y + n * n * ((X_clip[:, 0] > -rng + (i+1)*d).float())
         Y = Y + n * ((X_clip[:, 1] > -rng + (i+1)*d).float())
         Y = Y + ((X_clip[:, 2] > -rng + (i+1)*d).float())
-    #+ (X_clip[:, 0] >
-    #    -rng+2*d).float()) # x
-    #Y += n * ((X_clip[:, 1] > -rng + d).float() + (X_clip[:, 1] >
-    #    -rng+2*d).long()) # y
-    #Y += ((X_clip[:, 2] > -rng + d).long() + (X_clip[:, 2] > -rng+2*d).float()) # z
     return Y
-    #batch_size, _, num_points = X.shape
-    #Y = torch.zeros((batch_size, num_points), device=device, dtype=torch.long)  # label matrix  [B, N]
 
-    ## The code below partitions all points in the shape to voxels.
-    ## At each iteration find per axis the lower threshold and the upper threshold values
-    ## of the range according to n (e.g., if n=3, then: -1, -1/3, 1/3, 1 - there are 3 ranges)
-    ## and save points in the corresponding voxel if they fall in the examined range for all axis.
-
-    #region_id = 0
-    #for x in range(n):
-    #    for y in range(n):
-    #        for z in range(n):
-    #            # lt= lower threshold, ut = upper threshold
-    #            x_axis_lt = -1*rng + x * d < X_clip[:, 0, :]  # [B, 1, N]
-    #            x_axis_ut = X_clip[:, 0, :] < -1*rng + (x + 1) * d  # [B, 1, N]
-    #            y_axis_lt = -1*rng + y * d < X_clip[:, 1, :]  # [B, 1, N]
-    #            y_axis_ut = X_clip[:, 1, :] < -1*rng + (y + 1) * d  # [B, 1, N]
-    #            z_axis_lt = -1*rng + z * d < X_clip[:, 2, :]  # [B, 1, N]
-    #            z_axis_ut = X_clip[:, 2, :] < -1*rng + (z + 1) * d  # [B, 1, N]
-    #            # get a mask indicating for each coordinate of each point of each shape whether
-    #            # it falls inside the current inspected ranges
-    #            in_range = torch.cat([x_axis_lt, x_axis_ut, y_axis_lt, y_axis_ut,
-    #                                  z_axis_lt, z_axis_ut], dim=1).view(batch_size, 6, -1)  # [B, 6, N]
-    #            # per each point decide if it falls in the current region only if in all
-    #            # ranges the value is 1 (i.e., it falls inside all the inspected ranges)
-    #            mask, _ = torch.min(in_range, dim=1)  # [B, N]
-    #            Y[mask] = region_id  # label each point with the region id
-    #            region_id += 1
-    #return Y
 
 def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rng=4,
         drop_rate=0.5):
@@ -318,9 +286,9 @@ def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rn
 
     #return X, def_label, curv_conf
 
+
 def random_radius_drop(X, radius):
     max_norm = X.norm(dim=2).max(dim=1).values
-
 
 
 # Folders
@@ -338,7 +306,8 @@ def create_folders(args):
 
 # Model checkpoints
 def save_model(model, path):
-    torch.save(model.state_dict(), path, map_location='cpu')
+    torch.save(model.state_dict(), path)
+
 
 def load_model(model, path):
     model.load_state_dict(torch.load(path), map_location='cpu')
@@ -449,20 +418,8 @@ def random_rotation(x):
     return x.contiguous()
 
 
-# Other utilities
-#def get_wandb_username(username):
-#    if username == 'cvignac':
-#        return 'cvignac'
-#    current_user = getpass.getuser()
-#    if current_user == 'victor' or current_user == 'garciasa':
-#        return 'vgsatorras'
-#    else:
-#        return username
-
 
 if __name__ == "__main__":
-
-
     ## Test random_rotation
     bs = 2
     n_nodes = 16
@@ -470,4 +427,4 @@ if __name__ == "__main__":
     x = torch.randn(bs, n_nodes, n_dims)
     print(x)
     x = random_rotation(x)
-    #print(x)
+    print(x)

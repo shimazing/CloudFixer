@@ -51,7 +51,7 @@ class ModelNet40C(Dataset):
         self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
         if self.corruption == 'original' and partition != 'test':
-            self.pc_list, self.label_list = self.load_modelnet40(dataroot=args.dataset_dir, partition=partition)
+            self.pc_list, self.label_list = self.load_modelnet40(args.dataset_dir, partition=partition)
         else:
             self.pc_list, self.label_list = self.load_modelnet40_c(args.dataset_dir, self.corruption, self.severity)
 
@@ -263,7 +263,7 @@ class PointDA10(Dataset):
         return pc_list[idx_list], label_list[idx_list]
 
 
-    def load_scannet(self, partition, dataroot='data'):
+    def load_scannet(self, partition, dataset_dir='data'):
         """
         Input:
             partition - train/test
@@ -271,7 +271,7 @@ class PointDA10(Dataset):
             data,label arrays
         """
         all_data, all_label = [], []
-        for h5_name in sorted(glob.glob(os.path.join(dataroot, f'{partition}_*.h5'))):
+        for h5_name in sorted(glob.glob(os.path.join(dataset_dir, f'{partition}_*.h5'))):
             f = h5py.File(h5_name, 'r')
             data = f['data'][:]
             label = f['label'][:]
@@ -339,6 +339,7 @@ class PointDA10(Dataset):
             np.random.shuffle(chosen)
             chosen = chosen[:NUM_POINTS - len(pointcloud)]
             pointcloud = np.concatenate((pointcloud, pointcloud[chosen]), axis=0)
+            ind = np.concatenate((ind, chosen), axis=0)
             norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
 
         if self.random_remove:
@@ -428,11 +429,9 @@ class GraspNet10(Dataset):
         else:
             self.random_scale, self.random_rotation, self.self_distillation = False, False, False
 
-        self.label_to_idx = {label:idx for idx, label in enumerate(['bathtub', 'bed', 'bookshelf', 'cabinet', 'chair', 'lamp', 'monitor', 'plant', 'sofa', 'table'])} # TODO: is this correct? (we need visualization)
+        self.label_to_idx = {label:idx for idx, label in enumerate(['bathtub', 'bed', 'bookshelf', 'cabinet', 'chair', 'lamp', 'monitor', 'plant', 'sofa', 'table'])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
         self.pc_list, self.label_list = self.get_data(args, partition)
-
-        print(f"self.pc_list: {self.pc_list}")
 
         # print dataset statistics
         unique, counts = np.unique(self.label_list, return_counts=True)

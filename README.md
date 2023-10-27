@@ -1,6 +1,6 @@
 # CloudFixer: Test-Time Adaptation for 3D Point Clouds via Diffusion-Guided Domain Translation
 
-4### Environmental Setup
+### Environmental Setup
 - Download  and preprocess data by following https://github.com/zou-longkun/GAST in ./data/
 - Env setting
 ```

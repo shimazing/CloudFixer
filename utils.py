@@ -179,6 +179,7 @@ def region_mean(num_regions=3, rng=3):
     lookup = np.array(lookup)  # n**3 x 3
     return lookup
 
+
 def assign_region_to_point(X, device, NREGIONS=3, rng=3):
     """
     Input:
@@ -251,40 +252,6 @@ def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rn
         empty = (1-sorted_mask).sum(dim=1)
 
     return X, mask, drop_region, mean, std
-
-
-# 예측을 기반으로 다시 PC를 원래대로 돌리려면 ?
-# dropped 된 곳에 noise를 생성하고 이것으로 zero centering을 위해 옮겨주기?
-# mean, std 예측한걸로 기존 point를 옮겨주고, drop region으로 예측된 부분에
-# point를 추가
-
-
-# drop된 곳 기반으로 빠진 mean 계산하
-# 아니면 같은 network로 기존의 mean, std 도 예측해주기로..!
-# 그 다음 mean, std, prediction 한 drop region 을 =
-
-
-    #curv_conf = torch.ones(X.shape[0]).to(device)
-    #region_ids = np.random.permutation(n ** 3)
-    #region_ids = torch.from_numpy(region_ids).to(device)
-    #def_label = torch.zeros(regions.size(0)).long().to(device)  # binary mask of deformed points
-
-    #for b in range(X.shape[0]):
-    #    for i in region_ids:
-    #        ind = regions[b, :] == i  # [N]
-    #        # if there are enough points in the region
-    #        if torch.sum(ind) >= pc_utils.MIN_POINTS:
-    #            region = lookup[i].cpu().numpy()  # current region average point
-    #            def_label[b] = i
-    #            num_points = int(torch.sum(ind).cpu().numpy())
-    #            rnd_pts = pc_utils.draw_from_gaussian(region, num_points)  # generate region deformation points
-    #            # rnd_ind = random.sample(range(0, X.shape[2]), num_points)
-    #            # X[b, :, ind] = X[b, :, rnd_ind]
-    #            curv_conf[b] = norm_curv[b, ind, -1].abs().sum() / norm_curv[b, :, -1].abs().sum()
-    #            X[b, :3, ind] = torch.tensor(rnd_pts, dtype=torch.float).to(device)  # replace with region deformation points
-    #            break  # move to the next shape in the batch
-
-    #return X, def_label, curv_conf
 
 
 def random_radius_drop(X, radius):

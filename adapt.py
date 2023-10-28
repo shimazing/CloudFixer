@@ -16,6 +16,7 @@ from dgcnn_modelnet40 import DGCNN as DGCNN_modelnet40
 import utils
 from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, rotate_shape_tensor
 import log
+from visualizer import visualize, visualize_pointcloud, visualize_pointcloud_batch, write_pc, visualize_point_clouds_3d, visualize_point_clouds_3d_list, plot_points
 
 
 parser = argparse.ArgumentParser(description='CloudFixer')
@@ -388,7 +389,6 @@ def main():
     np.random.seed(random_seed)
     random.seed(random_seed)
 
-
     if 'eval' in args.mode:
         with torch.no_grad():
             count = 0
@@ -457,41 +457,44 @@ def main():
                         x, itmd, itmd_zt = pre_trans(x, mask, ind)
                     else:
                         x = pre_trans(x, mask, ind)
-                try:
-                    ## Save ##
-                    import open3d as o3d
-                    print(args.save_itmd)
-                    os.makedirs(f'exps/{args.exp_name}/vis', exist_ok=True)
-                    if args.save_itmd > 0 and args.pre_trans:
-                        for j, (x_itmd, zt_itmd) in enumerate(zip(itmd, itmd_zt)):
-                            for i, (pc_data, pc_zt) in enumerate(zip(x_itmd, zt_itmd)):
-                                pcd = o3d.geometry.PointCloud()
-                                pcd.points = \
-                                    o3d.utility.Vector3dVector(pc_data.cpu().numpy())
-                                pcd_name = \
-                                    f"exps/{args.exp_name}/vis/pc_{i}_itmd_{j}.ply"
-                                o3d.io.write_point_cloud(pcd_name, pcd)
-                                print(pcd_name)
 
-                                pcd = o3d.geometry.PointCloud()
-                                pcd.points = \
-                                    o3d.utility.Vector3dVector(pc_zt.cpu().numpy())
-                                pcd_name = \
-                                    f"exps/{args.exp_name}/vis/zt_{i}_itmd_{j}.ply"
-                                o3d.io.write_point_cloud(pcd_name, pcd)
-                                print(pcd_name)
-                        print("saved itmd")
+                from visualizer import pts2png
+                pts2png(x, [f"imgs/hello_{i}.png" for i in range(len(x))], do_standardize=1)
 
-                    for i, pc_data in enumerate(x): #enumerate(zip(x,src_label)):
-                        pcd = o3d.geometry.PointCloud()
-                        pcd.points = o3d.utility.Vector3dVector(pc_data.cpu().numpy())
-                        pcd_name = f"exps/{args.exp_name}/vis/pc_{i}_final.ply"
-                        o3d.io.write_point_cloud(pcd_name, pcd)
-                        print(pcd_name)
-                    print("--finish--")
-                except Exception as e:
-                    print(e)
-                    print("Unable toimport open3d")
+                ## Save ##
+                import open3d as o3d
+                print(args.save_itmd)
+                os.makedirs(f'exps/{args.exp_name}/vis', exist_ok=True)
+                if args.save_itmd > 0 and args.pre_trans:
+                    for j, (x_itmd, zt_itmd) in enumerate(zip(itmd, itmd_zt)):
+                        for i, (pc_data, pc_zt) in enumerate(zip(x_itmd, zt_itmd)):
+                            pcd = o3d.geometry.PointCloud()
+                            pcd.points = \
+                                o3d.utility.Vector3dVector(pc_data.cpu().numpy())
+                            pcd_name = \
+                                f"exps/{args.exp_name}/vis/pc_{i}_itmd_{j}.ply"
+                            o3d.io.write_point_cloud(pcd_name, pcd)
+                            print(pcd_name)
+
+                            pcd = o3d.geometry.PointCloud()
+                            pcd.points = \
+                                o3d.utility.Vector3dVector(pc_zt.cpu().numpy())
+                            pcd_name = \
+                                f"exps/{args.exp_name}/vis/zt_{i}_itmd_{j}.ply"
+                            o3d.io.write_point_cloud(pcd_name, pcd)
+                            print(pcd_name)
+                    print("saved itmd")
+
+                for i, pc_data in enumerate(x): #enumerate(zip(x,src_label)):
+                    pcd = o3d.geometry.PointCloud()
+                    pcd.points = o3d.utility.Vector3dVector(pc_data.cpu().numpy())
+                    pcd_name = f"exps/{args.exp_name}/vis/pc_{i}_final.ply"
+                    o3d.io.write_point_cloud(pcd_name, pcd)
+                    print(pcd_name)
+                print("--finish--")
+                # except Exception as e:
+                #     print(e)
+                #     print("Unable to import open3d")
                 rgbs_wMask = get_color(x.cpu().numpy(),
                         mask=mask.bool().squeeze(-1).cpu().numpy())
                 rgbs = get_color(x.cpu().numpy())

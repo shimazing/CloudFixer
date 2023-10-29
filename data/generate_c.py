@@ -4,7 +4,6 @@ import os
 import h5py
 import json
 import numpy as np
-from numpy import random
 from convert import *
 import distortion
 from occlusion import *

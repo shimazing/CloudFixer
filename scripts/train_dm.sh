@@ -1,7 +1,8 @@
-random_seed=0
-test_epochs=100
+# logging
 wandb_usr=drumpt
 DATASET_ROOT_DIR=../datasets
+test_epochs=100
+random_seed=0
 
 
 train_dm_modelnet40() {

@@ -258,20 +258,17 @@ def random_radius_drop(X, radius):
     max_norm = X.norm(dim=2).max(dim=1).values
 
 
-# Folders
 def create_folders(args):
     try:
         os.makedirs('outputs')
     except OSError:
         pass
-
     try:
         os.makedirs('outputs/' + args.exp_name)
     except OSError:
         pass
 
 
-# Model checkpoints
 def save_model(model, path):
     torch.save(model.state_dict(), path)
 

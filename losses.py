@@ -104,8 +104,10 @@ def sum_except_batch(x):
 def compute_loss_and_nll(args, generative_model, x):
     bs, n_nodes, n_dims = x.size()
     if args.probabilistic_model == 'diffusion':
+        print(f"generative_model: {generative_model}")
         nll = generative_model(x)
         # Average over batch.
+        print(f"nll: {nll}")
         nll = nll.mean(0)
     else:
         raise ValueError(args.probabilistic_model)

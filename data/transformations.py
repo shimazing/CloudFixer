@@ -1,6 +1,5 @@
-#https://github.com/CVLAB-Unibo/Feature-Distillation-for-3D-UDA/blob/f593f8909c19553d5a1d895f23b637210f584edb/datasets/transformations.py
 import numpy as np
-import torch
+
 
 def normal_pc(pc):
     """
@@ -11,10 +10,9 @@ def normal_pc(pc):
     pc_mean = pc.mean(axis=0)
     pc = pc - pc_mean
     pc_L_max = np.max(np.sqrt(np.sum(abs(pc ** 2), axis=-1)))
-    pc = pc/pc_L_max
-
-
+    pc = pc / pc_L_max
     return pc
+
 
 def random_rotate_one_axis(X, axis):
     """

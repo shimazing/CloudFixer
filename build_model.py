@@ -20,7 +20,7 @@ def get_model(args, device):
             noise_precision=args.diffusion_noise_precision,
             loss_type=args.diffusion_loss_type,
         )
-        return vdm #, nodes_dist
+        return vdm
     else:
         raise ValueError(args.probabilistic_model)
 

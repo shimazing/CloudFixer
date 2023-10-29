@@ -1,4 +1,7 @@
 **/__pycache__/
-wandb/
-outputs/
+
 exps/
+wandb/
+
+outputs/
+imgs/

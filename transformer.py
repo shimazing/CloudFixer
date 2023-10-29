@@ -373,7 +373,8 @@ def model_from_config(config: Dict[str, Any], device: torch.device) -> nn.Module
     #     return CLIPImageGridUpsamplePointDiffusionTransformer(device=device, dtype=torch.float32, **config)
     # elif name == "CrossAttentionPointCloudSDFModel":
     #     return CrossAttentionPointCloudSDFModel(device=device, dtype=torch.float32, **config)
-    raise ValueError(f"unknown model name: {name}")
+    else:
+        raise ValueError(f"unknown model name: {name}")
 
 
 def timestep_embedding(timesteps, dim, max_period=10000):

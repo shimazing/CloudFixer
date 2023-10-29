@@ -1,4 +1,3 @@
-import os
 import random
 import argparse
 import wandb
@@ -43,7 +42,7 @@ parser.add_argument('--online', type=bool, default=True, help='True = wandb onli
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
-parser.add_argument('--resume', type=str,
+parser.add_argument('--diffusion_dir', type=str,
         default='outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy')
 parser.add_argument('--out_path', type=str, default='./exps')
 parser.add_argument('--knn', type=int, default=20)
@@ -54,8 +53,8 @@ parser.add_argument('--cls_scale_mode', type=str, default='unit_norm')
 parser.add_argument('--mode', nargs='+', type=str, default=['eval'])
 parser.add_argument('--dataset', type=str, default='modelnet40c_background_5')
 parser.add_argument('--dataset_dir', type=str, default='../datasets/modelnet40_c/')
-parser.add_argument('--classifier', type=str,
-        default='outputs/dgcnn_modelnet40_best_test.pth')
+parser.add_argument('--classifier', type=str, default='DGCNN')
+parser.add_argument('--classifier_dir', type=str, default='outputs/dgcnn_modelnet40_best_test.pth')
 parser.add_argument('--random_seed', default=0, type=int)
 parser.add_argument('--pre_trans', action='store_true')
 parser.add_argument('--weighted_reg', type=eval, default=False)
@@ -112,22 +111,18 @@ wandb.init(**kwargs)
 wandb.save('*.txt')
 
 model = get_model(args, device)
-if args.resume is not None:
-    model.load_state_dict(torch.load(args.resume, map_location='cpu'))
+if args.diffusion_dir is not None:
+    model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
 model = model.to(device)
 model.eval()
 model_dp = torch.nn.DataParallel(model)
 
 # TODO: add other classifiers with different datasets
-# if args.dataset.startswith('modelnet40'):
-#     classifier = DGCNN_modelnet40()
-#     classifier.load_state_dict(torch.load(args.classifier, map_location='cpu')['model_state'])
-#     classifier = torch.nn.DataParallel(classifier)
-#     classifier.to(device).eval()
-#     print("load classifier_modelnet40")
-# TODO: add other classifiers with different datasets
-classifier = DGCNN_modelnet40()
-classifier.load_state_dict(torch.load(args.classifier, map_location='cpu')['model_state'])
+if args.classifier == "DGCNN":
+    classifier = DGCNN_modelnet40()
+else:
+    raise ValueError('UNDEFINED CLASSIFIER')
+classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu')['model_state'])
 classifier = torch.nn.DataParallel(classifier)
 classifier.to(device).eval()
 

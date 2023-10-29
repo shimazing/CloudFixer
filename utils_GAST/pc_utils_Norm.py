@@ -326,7 +326,6 @@ def scale_to_unit_cube(x):
     centroid = np.mean(x, axis=0)
     x -= centroid
     furthest_distance = np.max(np.sqrt(np.sum(x ** 2, axis=-1)))
-    #print(furthest_distance)
     x /= furthest_distance
     return x
 

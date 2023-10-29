@@ -289,7 +289,7 @@ class PointDA10(Dataset):
         norm_curv = pointcloud_norm_curv[:, 3:]
         label = np.copy(self.label_list[item])
 
-        # shpenet is rotated such that the up direction is the y axis in all shapes except plant
+        # shapenet is rotated such that the up direction is the y axis in all shapes except plant
         # scannet is rotated such that the up direction is the y axis
         if (self.dataset == "shapenet" and label.item(0) != self.label_to_idx["plant"]) or self.dataset == "scannet":
             pointcloud = rotate_pc(pointcloud)
@@ -665,7 +665,6 @@ def remove(points, norm_curv, p_keep=0.5):
         mask = dist_from_plane > 0
     else:
         mask = dist_from_plane > np.percentile(dist_from_plane, (1.0 - p_keep) * 100)
-
     return points[mask, :], norm_curv[mask]
 
 
@@ -674,13 +673,11 @@ def scale(pc, scale_mode):
     if scale_mode == 'unit_std':
         pc /= np.std(pc)
     elif scale_mode == 'unit_val':
-        #pc /= pc.abs().max()
-        pc /= np.amax(np.abs(pc)) # .absolute().max()
+        pc /= np.amax(np.abs(pc))
     elif scale_mode == 'unit_norm':
         pc = scale_to_unit_cube(pc)
     else:
         raise ValueError('UNDEFINED SCALE MODE')
-
     return pc
 
 
@@ -702,5 +699,5 @@ def translate_pointcloud(pointcloud):
 
 def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
     N, C = pointcloud.shape
-    pointcloud += np.clip(sigma * np.random.randn(N, C), -1*clip, clip)
+    pointcloud += np.clip(sigma * np.random.randn(N, C), -clip, clip)
     return pointcloud

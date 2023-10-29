@@ -1,54 +1,117 @@
 import math
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Callable, Union
+from typing import Any, Dict, List, Iterable, Sequence, Tuple, Callable, Union
 
 import torch
 import torch.nn as nn
 
+
 """
 Adapted from: https://github.com/openai/guided-diffusion/blob/22e0df8183507e13a7813f8d38d51b072ca1e67c/guided_diffusion/nn.py#L124
+Adapted from: https://github.com/openai/point-e/blob/fc8a607c08a3ea804cc82bf1ef8628f88a3a5d2f/point_e/models/configs.py#L8
 """
 
 
-def timestep_embedding(timesteps, dim, max_period=10000):
-    """
-    Create sinusoidal timestep embeddings.
-    :param timesteps: a 1-D Tensor of N indices, one per batch element.
-                      These may be fractional.
-    :param dim: the dimension of the output.
-    :param max_period: controls the minimum frequency of the embeddings.
-    :return: an [N x dim] Tensor of positional embeddings.
-    """
-    half = dim // 2
-    freqs = torch.exp(
-        -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
-    ).to(device=timesteps.device)
-    args = timesteps[:, None].to(timesteps.dtype) * freqs[None]
-    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
-    if dim % 2:
-        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
-    return embedding
+MODEL_CONFIGS = {
+    "base40M-imagevec": {
+        "cond_drop_prob": 0.1,
+        "heads": 8,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 12,
+        "n_ctx": 1024,
+        "name": "CLIPImagePointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "token_cond": True,
+        "width": 512,
+    },
+    "base40M-textvec": {
+        "cond_drop_prob": 0.1,
+        "heads": 8,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 12,
+        "n_ctx": 1024,
+        "name": "CLIPImagePointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "token_cond": True,
+        "width": 512,
+    },
+    "base40M-uncond": {
+        "heads": 8,
+        "init_scale": 0.25,
+        "input_channels": 3, #6, EDIT
+        "layers": 12,
+        "n_ctx": 1024,
+        "name": "PointDiffusionTransformer",
+        "output_channels": 3, #12, # EDIT
+        "time_token_cond": True,
+        "width": 512,
+    },
+    "base40M": {
+        "cond_drop_prob": 0.1,
+        "heads": 8,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 12,
+        "n_ctx": 1024,
+        "name": "CLIPImageGridPointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "width": 512,
+    },
+    "base300M": {
+        "cond_drop_prob": 0.1,
+        "heads": 16,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 24,
+        "n_ctx": 1024,
+        "name": "CLIPImageGridPointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "width": 1024,
+    },
+    "base1B": {
+        "cond_drop_prob": 0.1,
+        "heads": 32,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 24,
+        "n_ctx": 1024,
+        "name": "CLIPImageGridPointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "width": 2048,
+    },
+    "upsample": {
+        "channel_biases": [0.0, 0.0, 0.0, -1.0, -1.0, -1.0],
+        "channel_scales": [2.0, 2.0, 2.0, 0.007843137255, 0.007843137255, 0.007843137255],
+        "cond_ctx": 1024,
+        "cond_drop_prob": 0.1,
+        "heads": 8,
+        "init_scale": 0.25,
+        "input_channels": 6,
+        "layers": 12,
+        "n_ctx": 3072,
+        "name": "CLIPImageGridUpsamplePointDiffusionTransformer",
+        "output_channels": 12,
+        "time_token_cond": True,
+        "width": 512,
+    },
+    "sdf": {
+        "decoder_heads": 4,
+        "decoder_layers": 4,
+        "encoder_heads": 4,
+        "encoder_layers": 8,
+        "init_scale": 0.25,
+        "n_ctx": 4096,
+        "name": "CrossAttentionPointCloudSDFModel",
+        "width": 256,
+    },
+}
 
-
-def checkpoint(
-    func: Callable[..., Union[torch.Tensor, Sequence[torch.Tensor]]],
-    inputs: Sequence[torch.Tensor],
-    params: Iterable[torch.Tensor],
-    flag: bool,
-):
-    """
-    Evaluate a function without caching intermediate activations, allowing for
-    reduced memory at the expense of extra compute in the backward pass.
-    :param func: the function to evaluate.
-    :param inputs: the argument sequence to pass to `func`.
-    :param params: a sequence of parameters `func` depends on but does not
-                   explicitly take as arguments.
-    :param flag: if False, disable gradient checkpointing.
-    """
-    if flag:
-        args = tuple(inputs) + tuple(params)
-        return CheckpointFunction.apply(func, len(inputs), *args)
-    else:
-        return func(*inputs)
 
 
 class CheckpointFunction(torch.autograd.Function):
@@ -82,11 +145,6 @@ class CheckpointFunction(torch.autograd.Function):
         return (None, None) + input_grads
 
 
-def init_linear(l, stddev):
-    nn.init.normal_(l.weight, std=stddev)
-    if l.bias is not None:
-        nn.init.constant_(l.bias, 0.0)
-
 
 class MultiheadAttention(nn.Module):
     def __init__(
@@ -116,6 +174,7 @@ class MultiheadAttention(nn.Module):
         return x
 
 
+
 class MLP(nn.Module):
     def __init__(self, *, device: torch.device, dtype: torch.dtype, width: int, init_scale: float):
         super().__init__()
@@ -128,6 +187,7 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.c_proj(self.gelu(self.c_fc(x)))
+
 
 
 class QKVMultiheadAttention(nn.Module):
@@ -150,6 +210,7 @@ class QKVMultiheadAttention(nn.Module):
         wdtype = weight.dtype
         weight = torch.softmax(weight.float(), dim=-1).type(wdtype)
         return torch.einsum("bhts,bshc->bthc", weight, v).reshape(bs, n_ctx, -1)
+
 
 
 class ResidualAttentionBlock(nn.Module):
@@ -181,6 +242,7 @@ class ResidualAttentionBlock(nn.Module):
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
         return x
+
 
 
 class Transformer(nn.Module):
@@ -218,6 +280,7 @@ class Transformer(nn.Module):
         for block in self.resblocks:
             x = block(x)
         return x
+
 
 
 class PointDiffusionTransformer(nn.Module):
@@ -292,3 +355,70 @@ class PointDiffusionTransformer(nn.Module):
             h = h[:, sum(h.shape[1] for h in extra_tokens) :]
         h = self.output_proj(h)
         return h.permute(0, 2, 1)
+
+
+
+def model_from_config(config: Dict[str, Any], device: torch.device) -> nn.Module:
+    config = config.copy()
+    name = config.pop("name")
+    if name == "PointDiffusionTransformer":
+        return PointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+    # elif name == "CLIPImagePointDiffusionTransformer":
+    #     return CLIPImagePointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+    # elif name == "CLIPImageGridPointDiffusionTransformer":
+    #     return CLIPImageGridPointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+    # elif name == "UpsamplePointDiffusionTransformer":
+    #     return UpsamplePointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+    # elif name == "CLIPImageGridUpsamplePointDiffusionTransformer":
+    #     return CLIPImageGridUpsamplePointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+    # elif name == "CrossAttentionPointCloudSDFModel":
+    #     return CrossAttentionPointCloudSDFModel(device=device, dtype=torch.float32, **config)
+    raise ValueError(f"unknown model name: {name}")
+
+
+def timestep_embedding(timesteps, dim, max_period=10000):
+    """
+    Create sinusoidal timestep embeddings.
+    :param timesteps: a 1-D Tensor of N indices, one per batch element.
+                      These may be fractional.
+    :param dim: the dimension of the output.
+    :param max_period: controls the minimum frequency of the embeddings.
+    :return: an [N x dim] Tensor of positional embeddings.
+    """
+    half = dim // 2
+    freqs = torch.exp(
+        -math.log(max_period) * torch.arange(start=0, end=half, dtype=torch.float32) / half
+    ).to(device=timesteps.device)
+    args = timesteps[:, None].to(timesteps.dtype) * freqs[None]
+    embedding = torch.cat([torch.cos(args), torch.sin(args)], dim=-1)
+    if dim % 2:
+        embedding = torch.cat([embedding, torch.zeros_like(embedding[:, :1])], dim=-1)
+    return embedding
+
+
+def checkpoint(
+    func: Callable[..., Union[torch.Tensor, Sequence[torch.Tensor]]],
+    inputs: Sequence[torch.Tensor],
+    params: Iterable[torch.Tensor],
+    flag: bool,
+):
+    """
+    Evaluate a function without caching intermediate activations, allowing for
+    reduced memory at the expense of extra compute in the backward pass.
+    :param func: the function to evaluate.
+    :param inputs: the argument sequence to pass to `func`.
+    :param params: a sequence of parameters `func` depends on but does not
+                   explicitly take as arguments.
+    :param flag: if False, disable gradient checkpointing.
+    """
+    if flag:
+        args = tuple(inputs) + tuple(params)
+        return CheckpointFunction.apply(func, len(inputs), *args)
+    else:
+        return func(*inputs)
+
+
+def init_linear(l, stddev):
+    nn.init.normal_(l.weight, std=stddev)
+    if l.bias is not None:
+        nn.init.constant_(l.bias, 0.0)

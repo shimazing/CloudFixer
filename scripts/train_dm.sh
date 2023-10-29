@@ -1,7 +1,7 @@
 random_seed=0
 test_epochs=100
 wandb_usr=drumpt
-DATASET_ROOT_DIR=../nfs-client/datasets
+DATASET_ROOT_DIR=../datasets
 
 
 train_dm_modelnet40() {
@@ -204,10 +204,10 @@ train_dm_realsense() {
 }
 
 
-# train_dm_modelnet40
+train_dm_modelnet40
 # train_dm_modelnet
 # train_dm_shapenet
 # train_dm_scannet
 # train_dm_synthetic
 # train_dm_kinect
-train_dm_realsense
+# train_dm_realsense

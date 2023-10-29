@@ -20,7 +20,7 @@ subsample=700
 pre_trans=0
 seed=2
 denoising_thrs=100
-batch_size=32
+batch_size=4
 
 if [ "1" == "$pre_trans" ]; then
     exp_name=${classifier}_${corruption}_${severity}_lr${lr}_ef${optim_end_factor}_t_${t_max}_${t_min}_${steps}iters_betas_0.9_0.999_wd_0_pow${pow}weighted${weighted_reg}_lam_${lam_h}_${lam_l}_cosaneal_wd${wd}_${optim}_schedule_t_tlb_lr_linearLR_sub${subsample}_wRotation0.02_denoisingThrs${denoising_thrs}_trans${trans}_seed${seed}
@@ -30,7 +30,7 @@ else
     pre_trans=""
 fi
 
-CUDA_VISIBLE_DEVICES=2,3 python3 adapt.py \
+python3 adapt.py \
     --t_min ${t_min} \
     --t_max ${t_max} \
     --save_itmd 0 \

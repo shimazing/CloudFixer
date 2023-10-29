@@ -16,7 +16,7 @@ from dgcnn_modelnet40 import DGCNN as DGCNN_modelnet40
 import utils
 from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, rotate_shape_tensor
 import log
-from visualizer import visualize, visualize_pointcloud, visualize_pointcloud_batch, write_pc, visualize_point_clouds_3d, visualize_point_clouds_3d_list, plot_points
+from visualizer import visualize_pclist
 
 
 parser = argparse.ArgumentParser(description='CloudFixer')
@@ -125,13 +125,11 @@ model_dp = torch.nn.DataParallel(model)
 #     classifier = torch.nn.DataParallel(classifier)
 #     classifier.to(device).eval()
 #     print("load classifier_modelnet40")
-# TODO: add other classifiers with different datasets (change this)
+# TODO: add other classifiers with different datasets
 classifier = DGCNN_modelnet40()
 classifier.load_state_dict(torch.load(args.classifier, map_location='cpu')['model_state'])
 classifier = torch.nn.DataParallel(classifier)
 classifier.to(device).eval()
-print("load classifier_modelnet40")
-
 
 
 def knn(x, k=args.knn, mask=None, return_dist=False):
@@ -182,6 +180,7 @@ def split_set(dataset, domain='scannet', set_type="source"):
     train_sampler = SubsetRandomSampler(train_indices)
     valid_sampler = SubsetRandomSampler(val_indices)
     return train_sampler, valid_sampler
+
 
 
 class SpecifyGradient(torch.autograd.Function):
@@ -379,7 +378,7 @@ def get_color(coords, corners=np.array([
     return rgb
 
 
-def main():
+def adapt(args):
     random_seed = args.random_seed
     torch.manual_seed(random_seed)
     torch.cuda.manual_seed(random_seed)
@@ -389,64 +388,64 @@ def main():
     np.random.seed(random_seed)
     random.seed(random_seed)
 
-    if 'eval' in args.mode:
-        with torch.no_grad():
-            count = 0
-            correct_count = [0]
-            label_batch_list = []
-            for iter_idx, data in tqdm(enumerate(test_loader)):
-                x_ori = scale_to_unit_cube_torch(data[2].to(device))
-                mask = data[3].to(device)
-                ind = data[4].to(device) # ori ind for duplicated point
-                print("get ori")
-                labels = data[1].to(device).flatten()
+    with torch.no_grad():
+        count = 0
+        correct_count = [0]
+        label_batch_list = []
+        for iter_idx, data in tqdm(enumerate(test_loader)):
+            x_ori = scale_to_unit_cube_torch(data[2].to(device))
+            mask = data[3].to(device)
+            ind = data[4].to(device) # ori ind for duplicated point
+            print("get ori")
+            labels = data[1].to(device).flatten()
 
-                # is_ori : batch_size x 1024
-                x = data[0].to(device)
-                if args.pre_trans:
-                    x = pre_trans(x, mask, ind)
-                count += len(x)
-                t = args.t * x.new_ones((x.shape[0], 1), device=x.device)
-                node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-                gamma_t = model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
+            # is_ori : batch_size x 1024
+            x = data[0].to(device)
+            if args.pre_trans:
+                x = pre_trans(x, mask, ind)
+            count += len(x)
+            t = args.t * x.new_ones((x.shape[0], 1), device=x.device)
+            node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
+            gamma_t = model.inflate_batch_array(model.gamma(t), x)
+            alpha_t = model.alpha(gamma_t, x)
+            sigma_t = model.sigma(gamma_t, x)
 
-                t0 = torch.zeros_like(t)
-                gamma_t0 = model.inflate_batch_array(model.gamma(t0), x)
-                alpha_t0 = model.alpha(gamma_t0, x)
-                sigma_t0 = model.sigma(gamma_t0, x)
-                noise_t0 = model.sample_noise(n_samples=x.size(0),
-                        n_nodes=x.size(1),
-                        node_mask=node_mask,
-                        )
+            t0 = torch.zeros_like(t)
+            gamma_t0 = model.inflate_batch_array(model.gamma(t0), x)
+            alpha_t0 = model.alpha(gamma_t0, x)
+            sigma_t0 = model.sigma(gamma_t0, x)
+            noise_t0 = model.sample_noise(n_samples=x.size(0),
+                    n_nodes=x.size(1),
+                    node_mask=node_mask,
+                    )
 
-                labels_list = [labels]
-                x_edit_list = [x]
-                if args.cls_scale_mode == 'unit_norm':
-                    print("scaling")
-                    x_edit_list = \
-                        [rotate_shape_tensor(
-                            scale_to_unit_cube_torch(x.clone().detach()),
-                                'x', np.pi/2) for x in
-                                    x_edit_list] # undo scaling
-                for k, x_edit in enumerate(x_edit_list):
-                    logits = classifier(x_edit)
-                    preds = logits["cls"].max(dim=1)[1] # argmax
-                    ori_preds = preds
-                    ori_probs = logits["cls"].softmax(dim=-1)
+            labels_list = [labels]
+            x_edit_list = [x]
+            if args.cls_scale_mode == 'unit_norm':
+                print("scaling")
+                x_edit_list = \
+                    [rotate_shape_tensor(
+                        scale_to_unit_cube_torch(x.clone().detach()),
+                            'x', np.pi/2) for x in
+                                x_edit_list] # undo scaling
+            for k, x_edit in enumerate(x_edit_list):
+                logits = classifier(x_edit)
+                preds = logits["cls"].max(dim=1)[1] # argmax
+                ori_preds = preds
+                ori_probs = logits["cls"].softmax(dim=-1)
 
-                    correct_count[k] += (preds == labels).long().sum().item()
+                correct_count[k] += (preds == labels).long().sum().item()
 
-                io.cprint("ACC")
-                for ck, cc in enumerate(correct_count):
-                    io.cprint(f'{ck} {cc/max(count, 1)*100}')
-        io.cprint(args)
+            io.cprint("ACC")
+            for ck, cc in enumerate(correct_count):
+                io.cprint(f'{ck} {cc/max(count, 1)*100}')
+    io.cprint(args)
 
+
+def vis(args):
     if 'vis' in args.mode:
-        print("I'm here!")
         with torch.no_grad():
-            for iter_idx, data in enumerate(test_loader_vis):
+            for _, data in enumerate(test_loader_vis):
                 labels = [test_dataset.idx_to_label[int(d)] for d in data[1]]
                 print("GT", labels)
                 x = data[0].to(device)
@@ -458,61 +457,21 @@ def main():
                     else:
                         x = pre_trans(x, mask, ind)
 
-                from visualizer import pts2png
-                pts2png(x, [f"imgs/hello_{i}.png" for i in range(len(x))], do_standardize=1)
+                file_list = [f"imgs/batch_{i}.png" for i in range(len(x))]
+                visualize_pclist(x, file_list, colorm=[24,107,239]) # specify color with colorm
 
-                ## Save ##
-                import open3d as o3d
-                print(args.save_itmd)
-                os.makedirs(f'exps/{args.exp_name}/vis', exist_ok=True)
-                if args.save_itmd > 0 and args.pre_trans:
-                    for j, (x_itmd, zt_itmd) in enumerate(zip(itmd, itmd_zt)):
-                        for i, (pc_data, pc_zt) in enumerate(zip(x_itmd, zt_itmd)):
-                            pcd = o3d.geometry.PointCloud()
-                            pcd.points = \
-                                o3d.utility.Vector3dVector(pc_data.cpu().numpy())
-                            pcd_name = \
-                                f"exps/{args.exp_name}/vis/pc_{i}_itmd_{j}.ply"
-                            o3d.io.write_point_cloud(pcd_name, pcd)
-                            print(pcd_name)
-
-                            pcd = o3d.geometry.PointCloud()
-                            pcd.points = \
-                                o3d.utility.Vector3dVector(pc_zt.cpu().numpy())
-                            pcd_name = \
-                                f"exps/{args.exp_name}/vis/zt_{i}_itmd_{j}.ply"
-                            o3d.io.write_point_cloud(pcd_name, pcd)
-                            print(pcd_name)
-                    print("saved itmd")
-
-                for i, pc_data in enumerate(x): #enumerate(zip(x,src_label)):
-                    pcd = o3d.geometry.PointCloud()
-                    pcd.points = o3d.utility.Vector3dVector(pc_data.cpu().numpy())
-                    pcd_name = f"exps/{args.exp_name}/vis/pc_{i}_final.ply"
-                    o3d.io.write_point_cloud(pcd_name, pcd)
-                    print(pcd_name)
-                print("--finish--")
-                # except Exception as e:
-                #     print(e)
-                #     print("Unable to import open3d")
                 rgbs_wMask = get_color(x.cpu().numpy(),
                         mask=mask.bool().squeeze(-1).cpu().numpy())
                 rgbs = get_color(x.cpu().numpy())
-
                 t = args.t * x.new_ones((x.shape[0], 1), device=x.device) # 0~1
                 node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
                 gamma_t = model.inflate_batch_array(model.gamma(t), x)
-                alpha_t = model.alpha(gamma_t, x)
-                sigma_t = model.sigma(gamma_t, x)
 
                 x_ori = x.detach()
                 if args.cls_scale_mode == 'unit_norm':
-                    logits = \
-                        classifier(rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach()),
-                            'x', np.pi/2))
+                    logits = classifier(rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach()), 'x', np.pi/2))
                 else:
-                    logits = classifier(x_ori.clone().detach().permute(0, 2, 1),
-                            ts=x_ori.new_zeros(len(x_ori)), activate_DefRec=False)
+                    logits = classifier(x_ori.clone().detach().permute(0, 2, 1), ts=x_ori.new_zeros(len(x_ori)), activate_DefRec=False)
                 preds = logits["cls"].max(dim=1)[1]
                 preds_val = logits["cls"].softmax(-1).max(dim=1)[0]
                 preds_label = [test_dataset.idx_to_label[int(d)] for d in preds]
@@ -576,4 +535,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if 'eval' in args.mode:
+        adapt(args)
+    if 'vis' in args.mode:
+        vis(args)

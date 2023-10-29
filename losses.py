@@ -1,27 +1,6 @@
 import torch
 import torch.nn as nn
 
-import numpy as np
-import torch.nn.functional as F
-
-
-def softmax_entropy(x, dim=-1):
-    return -(x.softmax(dim) * x.log_softmax(dim)).sum(dim).mean()
-
-
-def sum_except_batch(x):
-    return x.view(x.size(0), -1).sum(dim=-1)
-
-
-def compute_loss_and_nll(args, generative_model, x):
-    bs, n_nodes, n_dims = x.size()
-    if args.probabilistic_model == 'diffusion':
-        nll = generative_model(x)
-        # Average over batch.
-        nll = nll.mean(0)
-    else:
-        raise ValueError(args.probabilistic_model)
-    return nll
 
 
 class InfoNCELoss(nn.Module):
@@ -112,3 +91,22 @@ class InfoNCELoss(nn.Module):
         loss = loss.view(anchor_count, batch_size).mean()
 
         return loss
+
+
+def softmax_entropy(x, dim=-1):
+    return -(x.softmax(dim) * x.log_softmax(dim)).sum(dim).mean()
+
+
+def sum_except_batch(x):
+    return x.view(x.size(0), -1).sum(dim=-1)
+
+
+def compute_loss_and_nll(args, generative_model, x):
+    bs, n_nodes, n_dims = x.size()
+    if args.probabilistic_model == 'diffusion':
+        nll = generative_model(x)
+        # Average over batch.
+        nll = nll.mean(0)
+    else:
+        raise ValueError(args.probabilistic_model)
+    return nll

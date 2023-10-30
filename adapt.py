@@ -9,10 +9,10 @@ from torch.utils.data import DataLoader
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 from build_model import get_model
 from classification_model import models
-from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, rotate_shape_tensor
-from utils import *
-import log
 from visualizer import visualize_pclist
+from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, rotate_shape_tensor
+from utils_GAST import log
+from utils import *
 
 
 @torch.enable_grad()

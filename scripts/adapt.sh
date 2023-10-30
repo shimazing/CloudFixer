@@ -103,10 +103,11 @@ adapt_poc() { # for modelnetc_background_5
 
     # common hyperparameters
     SEEDS=2 # "0 1 2"
-    batch_size=32
+    batch_size=16
 
     # dm hyperparameters
-    pre_trans=1
+    # pre_trans=1
+    pre_trans=0
     t_min=0.02
     t_max=0.8
     denoising_thrs=100

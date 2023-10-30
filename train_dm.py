@@ -1,7 +1,6 @@
 import time
 import os
 import copy
-import random
 import argparse
 import pickle
 import wandb
@@ -11,8 +10,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
-from diffusion import diffusion
-from diffusion import utils as flow_utils
+from diffusion_model import diffusion, utils as flow_utils
 from build_model import get_optim, get_model
 import utils
 import losses
@@ -304,14 +302,7 @@ def main():
         model_ema = model
         model_ema_dp = model_dp
 
-    random_seed = args.random_seed
-    torch.manual_seed(random_seed)
-    torch.cuda.manual_seed(random_seed)
-    torch.cuda.manual_seed_all(random_seed)
-    #torch.backends.cudnn.deterministic = True
-    #torch.backends.cudnn.benchmark = False
-    np.random.seed(random_seed)
-    random.seed(random_seed)
+    utils.set_seed(args.random_seed)
 
     best_nll_val = float('inf')
     for epoch in range(args.start_epoch, args.n_epochs):

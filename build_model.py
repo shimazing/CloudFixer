@@ -1,6 +1,6 @@
 import torch
 
-from diffusion.diffusion import DiffusionModel
+from diffusion_model.diffusion import DiffusionModel
 from transformer import MODEL_CONFIGS, model_from_config
 
 

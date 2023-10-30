@@ -1,8 +1,8 @@
 import os
+import random
 
 import numpy as np
 import torch
-import pytorch3d as p3d
 
 RADIUS = 0.5 * 3
 MIN_POINTS = 20
@@ -319,6 +319,16 @@ def gradient_clipping(flow, gradnorm_queue):
     return grad_norm
 
 
+def set_seed(random_seed):
+    torch.manual_seed(random_seed)
+    torch.cuda.manual_seed(random_seed)
+    torch.cuda.manual_seed_all(random_seed)
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
+    np.random.seed(random_seed)
+    random.seed(random_seed)
+
+
 # Rotation data augmntation
 def random_rotation(x):
     bs, n_nodes, n_dims = x.size()
@@ -378,9 +388,90 @@ def random_rotation(x):
         x = x.transpose(1, 2)
     else:
         raise Exception("Not implemented Error")
-
     return x.contiguous()
 
+
+def normalize_vector(v):
+    batch = v.shape[0]
+    v_mag = torch.sqrt(v.pow(2).sum(1))# batch
+    gpu = v_mag.get_device()
+    if gpu < 0:
+        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(torch.device('cpu'))
+    else:
+        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(torch.device('cuda:%d' % gpu))
+    v_mag = torch.max(v_mag, eps)
+    v_mag = v_mag.view(batch,1).expand(batch,v.shape[1])
+    v = v/v_mag
+    return v
+
+
+def cross_product(u, v):
+    batch = u.shape[0]
+ 
+    i = u[:,1]*v[:,2] - u[:,2]*v[:,1]
+    j = u[:,2]*v[:,0] - u[:,0]*v[:,2]
+    k = u[:,0]*v[:,1] - u[:,1]*v[:,0]
+    out = torch.cat((i.view(batch,1), j.view(batch,1), k.view(batch,1)),1) #batch*3
+    return out
+
+
+def compute_rotation_matrix_from_ortho6d(poses):
+    x_raw = poses[:,0:3] #batch*3
+    y_raw = poses[:,3:6] #batch*3
+
+    x = normalize_vector(x_raw) #batch*3
+    z = cross_product(x,y_raw) #batch*3
+    z = normalize_vector(z) #batch*3
+    y = cross_product(z,x) #batch*3
+
+    x = x.view(-1,3,1)
+    y = y.view(-1,3,1)
+    z = z.view(-1,3,1)
+    matrix = torch.cat((x,y,z), 2) #batch*3*3
+    return matrix
+
+
+def softmax(x):
+    max = np.max(x,axis=-1,keepdims=True) #returns max of each row and keeps same dims
+    e_x = np.exp(x - max) #subtracts each row with its max value
+    sum = np.sum(e_x,axis=-1,keepdims=True) #returns sum of each row and keeps same dims
+    f_x = e_x / sum
+    return f_x
+
+
+def get_color(coords, corners=np.array([
+                                    [-1, -1, -1],
+                                    [-1, 1, -1],
+                                    [-1, -1, 1],
+                                    [1, -1, -1],
+                                    [1, 1, -1],
+                                    [-1, 1, 1],
+                                    [1, -1, 1],
+                                    [1, 1, 1]
+                                ]) * 3,
+            mask=None,
+    ): # Visualization
+    coords = np.array(coords) # batch x n_points x 3
+    corners = np.array(corners) # n_corners x 3
+    colors = np.array([
+        [255, 0, 0],
+        [255, 127, 0],
+        [255, 255, 0],
+        [0, 255, 0],
+        [0, 255, 255],
+        [0, 0, 255],
+        [75, 0, 130],
+        [143, 0, 255],
+    ])
+
+    dist = np.linalg.norm(coords[:, :, None, :] - corners[None, None, :, :], axis=-1)
+    weight = softmax(-dist)[:, :, :, None] #batch x NUM_POINTS x n_corners x 1
+    rgb = (weight * colors).sum(2).astype(int) # NUM_POINTS x 3
+    if mask is not None:
+        # mask : B x N
+        # rgb : B x N x 3 (RGB)
+        rgb[(~mask).nonzero()] = np.array([255, 255, 255])
+    return rgb
 
 
 if __name__ == "__main__":

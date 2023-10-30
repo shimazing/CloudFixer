@@ -170,7 +170,7 @@ class ModelNet40C(Dataset):
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
                 norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
-        return (pointcloud, label, rotate_pc(pointcloud, reverse=True), mask, ind)
+        return (pointcloud, label, mask, ind)
 
 
     def __len__(self):
@@ -397,13 +397,13 @@ class PointDA10(Dataset):
                 random_scale = np.random.uniform(0.9, 1.1)
                 pointcloud_rm = random_scale * pointcloud_rm
 
-        if self.self_distillation:
-            return (pointcloud, label, norm_curv, pointcloud_aug, np.array(item))
+        # if self.self_distillation:
+        #     return (pointcloud, label, pointcloud_aug, np.array(item))
 
-        if self.random_remove:
-            return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm, mean_rm, std_rm)
+        # if self.random_remove:
+        #     return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm, mean_rm, std_rm)
 
-        return (pointcloud, label, norm_curv, NUM_POINTS, mask, ind)
+        return (pointcloud, label, mask, ind)
 
 
     def __len__(self):
@@ -508,7 +508,7 @@ class GraspNet10(Dataset):
             else:
                 pointcloud_aug = random_scale * pointcloud_aug
 
-        return (pointcloud, label, NUM_POINTS, mask, ind)
+        return (pointcloud, label, mask, ind)
 
 
     def __len__(self):

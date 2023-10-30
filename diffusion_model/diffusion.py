@@ -1,14 +1,14 @@
-###############################################################################
-# This code is based on https://github.com/ehoogeboom/e3_diffusion_for_molecules
-###############################################################################
 import math
 
 import numpy as np
 import torch
 from torch.nn import functional as F
 
-from transformer import PointDiffusionTransformer
+from diffusion_model.transformer import PointDiffusionTransformer
 
+###############################################################################
+# This code is based on https://github.com/ehoogeboom/e3_diffusion_for_molecules
+###############################################################################
 
 # Defining some useful util functions.
 def expm1(x: torch.Tensor) -> torch.Tensor:

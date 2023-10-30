@@ -17,7 +17,7 @@ adapt_modelnet40_c() {
 
     # common hyperparameters
     SEEDS=2 # "0 1 2"
-    batch_size=32
+    batch_size=16
 
     # dm hyperparameters
     pre_trans=1
@@ -46,7 +46,7 @@ adapt_modelnet40_c() {
     for random_seed in ${SEEDS}; do
         for corruption in ${CORRUPTION_LIST}; do
             for severity in ${SEVERITY_LIST}; do
-                python3 adapt.py \
+                CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
                     --t_min ${t_min} \
                     --t_max ${t_max} \
                     --save_itmd 0 \
@@ -172,5 +172,5 @@ adapt_poc() { # for modelnetc_background_5
 }
 
 
-# adapt_modelnet40_c
-adapt_poc
+adapt_modelnet40_c
+# adapt_poc

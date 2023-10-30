@@ -20,12 +20,12 @@
 # from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 # from build_model import get_optim, get_model
 # from train_test import train_epoch, test
-# from utils_GAST import pc_utils_Norm, log
+# from utils import pc_utils_Norm, log
 # from torch.utils.data import DataLoader
 # from torch.utils.data.sampler import SubsetRandomSampler
 # # from Models_Norm import PointNet, DGCNN
 # import utils
-# from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch
+# from utils.pc_utils_Norm import scale_to_unit_cube_torch
 # # from pointnet2_ops import pointnet2_utils
 
 

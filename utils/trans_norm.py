@@ -1,9 +1,10 @@
-import torch.nn as nn
+import itertools
+
+import torch
 import torch.nn.functional as F
 from torch.nn.modules.module import Module
 from torch.nn.parameter import Parameter
-import torch
-import itertools
+
 
 class _TransNorm(Module):
 

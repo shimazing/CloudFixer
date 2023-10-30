@@ -4,10 +4,10 @@ import copy
 import torch
 import os
 import sklearn.metrics as metrics
-try:
-    from data.dataloader_Norm import label_to_idx
-except:
-    pass
+# try:
+#     from data.dataloader_Norm import label_to_idx
+# except:
+#     pass
 
 
 class IOStream():
@@ -41,10 +41,10 @@ class IOStream():
             torch.save(model.state_dict(), path)
         return best_model
 
-    def save_conf_mat(self, conf_matrix, fname, domain_set):
-        df = pd.DataFrame(conf_matrix, columns=list(label_to_idx.keys()), index=list(label_to_idx.keys()))
-        fname = domain_set + "_" + fname
-        df.to_csv(self.path + "/" + fname)
+    # def save_conf_mat(self, conf_matrix, fname, domain_set):
+    #     df = pd.DataFrame(conf_matrix, columns=list(label_to_idx.keys()), index=list(label_to_idx.keys()))
+    #     fname = domain_set + "_" + fname
+    #     df.to_csv(self.path + "/" + fname)
 
     def print_progress(self, domain_set, partition, epoch, print_losses, true=None, pred=None):
         outstr = "%s - %s %d" % (partition, domain_set, epoch)

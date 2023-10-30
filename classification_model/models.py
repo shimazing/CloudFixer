@@ -1,12 +1,3 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-@Author: Yue Wang
-@Contact: yuewangx@mit.edu
-@File: model.py
-@Time: 2018/10/13 6:35 PM
-"""
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -33,6 +24,7 @@ class PointNet(nn.Module):
         self.linear2 = nn.Linear(512, output_channels)
 
     def forward(self, x):
+        x = x.permute(0, 2, 1).contiguous() # TODO: may remove this
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
         x = F.relu(self.bn3(self.conv3(x)))

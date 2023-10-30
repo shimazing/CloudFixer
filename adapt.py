@@ -7,12 +7,11 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
-from build_model import get_model
+from diffusion_model.build_model import get_model
 from classification_model import models
-from visualizer import visualize_pclist
-from utils_GAST.pc_utils_Norm import scale_to_unit_cube_torch, rotate_shape_tensor
-from utils_GAST import log
-from utils import *
+from utils import log, visualizer as vis
+from utils.pc_utils_norm import scale_to_unit_cube_torch, rotate_shape_tensor
+from utils.utils import *
 
 
 @torch.enable_grad()
@@ -43,9 +42,12 @@ def pre_trans(args, x, mask, ind, verbose=True):
             return idx, (dist.sum(dim=-1) / (n_valid-1).clamp(min=1)).detach().clone()
         return idx
 
-    def matching_loss(x, step, t=None, w=None):
+    def matching_loss(model, x, step, t=None):
         if t is None:
             t = (args.t_min * min(1, step/args.denoising_thrs) + (1 - min(1, step/args.denoising_thrs)) * max(args.t_min, args.t_max - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
+
+        if isinstance(model, torch.nn.DataParallel):
+            model = model.module
 
         gamma_t = model.inflate_batch_array(model.gamma(t), x)
         alpha_t = model.alpha(gamma_t, x)
@@ -107,7 +109,7 @@ def pre_trans(args, x, mask, ind, verbose=True):
         if (step+1) >= args.denoising_thrs:
             y = y @ rot
         L21_norm = (torch.norm(delta, 2, dim=-1) * weight).sum(dim=1).mean() # B x N
-        matching, zt = matching_loss(y, step+1)
+        matching, zt = matching_loss(model, y, step+1)
         if args.save_itmd > 0 and step % args.szave_itmd == 0:
             itmd.append(y.clone().detach().cpu())
             itmd_zt.append(zt.clone().detach().cpu())
@@ -173,7 +175,7 @@ def vis(args):
             x = pre_trans(x, mask, ind)
 
         # new visualization code: you can specify color with colorm
-        visualize_pclist(x, [f"imgs/batch_{i}.png" for i in range(len(x))], colorm=[24,107,239])
+        vis.visualize_pclist(x, [f"imgs/batch_{i}.png" for i in range(len(x))], colorm=[24,107,239])
 
         rgbs_wMask = get_color(x.cpu().numpy(),
                 mask=mask.bool().squeeze(-1).cpu().numpy())
@@ -342,9 +344,8 @@ if __name__ == "__main__":
     model = get_model(args, device)
     if args.diffusion_dir is not None:
         model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-    model = model.to(device)
     model = torch.nn.DataParallel(model)
-    model.eval()
+    model = model.to(device).eval()
 
     # TODO: add other classifiers with different datasets
     if args.classifier == "DGCNN":

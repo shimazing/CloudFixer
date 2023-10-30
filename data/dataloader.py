@@ -12,7 +12,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from utils_GAST.pc_utils_Norm import (farthest_point_sample_np, scale_to_unit_cube, rotate_shape, random_rotate_one_axis)
+from utils.pc_utils_norm import (farthest_point_sample_np, scale_to_unit_cube, rotate_shape, random_rotate_one_axis)
 try:
     from generate_c import deformation, noise, part
 except:

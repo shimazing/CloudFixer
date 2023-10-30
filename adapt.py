@@ -9,10 +9,16 @@ from torch.utils.data import DataLoader
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 from diffusion_model.build_model import get_model
 from classification_model import models
-from utils import log
-from utils.visualizer import visualize_pclist
-from utils.pc_utils_norm import scale_to_unit_cube_torch, rotate_shape_tensor
+from utils import logging
 from utils.utils import *
+from utils.pc_utils_norm import *
+from utils.visualizer import visualize_pclist
+from utils.tta_utils import *
+
+
+def forward_and_adapt(args, model, x):
+    pass
+
 
 
 @torch.enable_grad()
@@ -136,8 +142,6 @@ def pre_trans(args, x, mask, ind, verbose=True):
 
 
 def adapt(args):
-    set_seed(args.random_seed)
-
     count = 0
     correct_count = [0]
     for iter_idx, data in tqdm(enumerate(test_loader)):
@@ -315,7 +319,7 @@ if __name__ == "__main__":
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if args.cuda else "cpu")
 
-    io = log.IOStream(args)
+    set_seed(args.random_seed) # set seed
 
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
@@ -328,10 +332,10 @@ if __name__ == "__main__":
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=args.num_workers)
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
 
+    # logging
+    io = logging.IOStream(args)
     io.cprint(args)
     create_folders(args)
-
-    # Wandb config
     if args.no_wandb:
         mode = 'disabled'
     else:

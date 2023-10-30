@@ -9,7 +9,8 @@ from torch.utils.data import DataLoader
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 from diffusion_model.build_model import get_model
 from classification_model import models
-from utils import log, visualizer as vis
+from utils import log
+from utils.visualizer import visualize_pclist
 from utils.pc_utils_norm import scale_to_unit_cube_torch, rotate_shape_tensor
 from utils.utils import *
 
@@ -165,7 +166,7 @@ def adapt(args):
 
 @torch.no_grad()
 def vis(args):
-    for _, data in enumerate(test_loader_vis):
+    for batch_idx, data in enumerate(test_loader_vis):
         x = data[0].to(device)
         labels = [test_dataset.idx_to_label[int(d)] for d in data[1]]
         print("GT", labels)
@@ -175,7 +176,7 @@ def vis(args):
             x = pre_trans(x, mask, ind)
 
         # new visualization code: you can specify color with colorm
-        vis.visualize_pclist(x, [f"imgs/batch_{i}.png" for i in range(len(x))], colorm=[24,107,239])
+        visualize_pclist(x, [f"imgs/batch_{batch_idx}_{i}.png" for i in range(len(x))], colorm=[24,107,239])
 
         rgbs_wMask = get_color(x.cpu().numpy(),
                 mask=mask.bool().squeeze(-1).cpu().numpy())

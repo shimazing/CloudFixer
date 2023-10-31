@@ -464,7 +464,7 @@ def scale_to_unit_cube_torch(x, only_mean=False, no_mean=False):
     if not only_mean:
         furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
             keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
-        #print(furthest_distance)
+        # print(furthest_distance)
         x = x / furthest_distance
     return x
 

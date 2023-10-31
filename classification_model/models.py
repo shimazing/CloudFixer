@@ -1,6 +1,9 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from utils.pc_utils_norm import *
 
 
 
@@ -81,8 +84,12 @@ class DGCNN(nn.Module):
         self.linear3 = nn.Linear(256, output_channels)
 
     def forward(self, x):
+        if self.args.cls_scale_mode == 'unit_norm': # TODO: many modify this (only for modelnet40 dataset)
+            x = rotate_shape_tensor(scale_to_unit_cube_torch(x), 'x', np.pi/2)
+
         batch_size = x.size(0)
-        x = x.permute(0, 2, 1).contiguous() # TODO: may remove this
+        x = x.permute(0, 2, 1).contiguous()
+
         x = get_graph_feature(x, k=self.k)
         x = self.conv1(x)
         x1 = x.max(dim=-1, keepdim=False)[0]

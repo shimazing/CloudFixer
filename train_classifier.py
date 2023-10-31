@@ -4,16 +4,11 @@
 # except ModuleNotFoundError:
 #     pass
 
-# import time
-# import pickle
-# import copy
 # import argparse
 # import wandb
-# from os.path import join
 # from tqdm import tqdm
 
 # import numpy as np
-# import pandas as pd
 # import torch
 # import torch.nn as nn
 
@@ -23,10 +18,7 @@
 # from utils import pc_utils_Norm, log
 # from torch.utils.data import DataLoader
 # from torch.utils.data.sampler import SubsetRandomSampler
-# # from Models_Norm import PointNet, DGCNN
 # import utils
-# from utils.pc_utils_Norm import scale_to_unit_cube_torch
-# # from pointnet2_ops import pointnet2_utils
 
 
 
@@ -685,6 +677,8 @@
 #                             f"outputs/domain_classifier_DGCNN_shape_{tgt_data}_{random_remove}{p_keep}_ori{use_ori}_fullt_fcnorm{args.fc_norm}.pt")
 #                 torch.save(classifier.state_dict(),
 #                         f"outputs/domain_classifier_DGCNN_shape_{tgt_data}_{random_remove}{p_keep}_ori{use_ori}_fullt_fcnorm{args.fc_norm}_last.pt")
+
+
 
 # if __name__ == "__main__":
 #     main()

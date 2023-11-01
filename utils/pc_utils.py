@@ -272,6 +272,14 @@ def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
     return centroids, centroids_vals, centroids_norm_curv_vals
 
 
+def rotate_pc(pointcloud, reverse=False):
+    if reverse:
+        pointcloud = rotate_shape(pointcloud, 'x', np.pi / 2)
+    else:
+        pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
+    return pointcloud
+
+
 def rotate_shape(x, axis, angle):
     """
     Input:
@@ -402,8 +410,9 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
         A jittered shape
     """
     N, C = pointcloud.shape
-    pointcloud += np.clip(sigma * np.random.randn(N, C), -1*clip, clip)
+    pointcloud += np.clip(sigma * np.random.randn(N, C), -clip, clip)
     return pointcloud.astype('float32')
+
 
 def jitter_pointcloud_adaptive(pointcloud):
     """
@@ -430,6 +439,19 @@ def jitter_pointcloud_adaptive(pointcloud):
     # pointcloud += np.clip(min_distances_expdim * np.random.randn(N, C), -1 * min_distances_expdim, min_distances_expdim) # normal sampling
     pointcloud += np.clip(min_distances_expdim * (np.random.rand(N, C) * 2. - 1.), -1 * min_distances_expdim, min_distances_expdim) # uniform sampling
     return pointcloud.astype('float32')
+
+
+def scale(pc, scale_mode):
+    pc = pc - pc.mean(0, keepdims=True)
+    if scale_mode == 'unit_std':
+        pc /= np.std(pc)
+    elif scale_mode == 'unit_val':
+        pc /= np.amax(np.abs(pc))
+    elif scale_mode == 'unit_norm':
+        pc = scale_to_unit_cube(pc)
+    else:
+        raise ValueError('UNDEFINED SCALE MODE')
+    return pc
 
 
 def scale_to_unit_cube(x):

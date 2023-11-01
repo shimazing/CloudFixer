@@ -14,9 +14,9 @@ from diffusion_model.build_model import get_model
 from classification_model import models
 from utils import logging
 from utils.utils import *
-from utils.pc_utils_norm import *
-from utils.visualizer import visualize_pclist
+from utils.pc_utils import *
 from utils.tta_utils import *
+from utils.visualizer import visualize_pclist
 
 
 def parse_arguments():
@@ -108,22 +108,6 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     optimizer.zero_grad()
 
     # model adaptation
-    if 'pl' in args.method:
-        logits = classifier(x)
-        pseudo_label = torch.argmax(logits, dim=-1)
-        loss = F.cross_entropy(logits, pseudo_label)
-        loss.backward(retain_graph=True)
-    if 'tent' in args.method:
-        classifier.train()
-        logits = classifier(x)
-        loss = softmax_entropy(logits).mean()
-        loss.backward()
-        classifier.eval()
-    if 'shot' in args.method:
-        # TODO: do we need classifier.train()?
-        logits = classifier(x)
-        loss = softmax_diversity_regularizer(logits).mean()
-        loss.backward()
     if 'sar' in args.method:
         logits = classifier(x)
         entropy_first = softmax_entropy(logits)
@@ -143,14 +127,33 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
         EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
         return classifier, x
+    if 'pl' in args.method:
+        logits = classifier(x)
+        pseudo_label = torch.argmax(logits, dim=-1)
+        loss = F.cross_entropy(logits, pseudo_label)
+        loss.backward(retain_graph=True)
+    if 'tent' in args.method:
+        classifier.train()
+        logits = classifier(x)
+        loss = softmax_entropy(logits).mean()
+        loss.backward()
+        classifier.eval()
+    if 'shot' in args.method:
+        # TODO: do we need classifier.train()?
+        logits = classifier(x)
+        loss = softmax_diversity_regularizer(logits).mean()
+        loss.backward()
     if 'dua' in args.method:
         classifier.train()
         logits = classifier(x)
         classifier.eval()
 
-    # output adaptation
-
     optimizer.step()
+
+    # output adaptation
+    if 'lame' in args.method: # TODO: implement this!
+        pass
+
     return classifier, x
 
 
@@ -374,6 +377,7 @@ def main(args):
 
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    return accuracy_score(all_gt_list, all_pred_after_list)
 
 
 @torch.no_grad()

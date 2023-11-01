@@ -15,7 +15,7 @@
 # from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 # from build_model import get_optim, get_model
 # from train_test import train_epoch, test
-# from utils import pc_utils_Norm, log
+# from utils import uc_utils, log
 # from torch.utils.data import DataLoader
 # from torch.utils.data.sampler import SubsetRandomSampler
 # import utils

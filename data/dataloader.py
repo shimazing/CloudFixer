@@ -12,7 +12,18 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from utils.pc_utils_norm import (farthest_point_sample_np, scale_to_unit_cube, rotate_shape, random_rotate_one_axis)
+from utils.pc_utils import (
+    farthest_point_sample_np,
+    scale,
+    scale_to_unit_cube,
+    rotate_pc,
+    # rotate_shape,
+    translate_pointcloud,
+    jitter_pointcloud,
+    random_rotate_one_axis,
+    # uniform_2_sphere,
+    remove,
+)
 # try:
 #     from generate_c import deformation, noise, part
 # except:
@@ -656,77 +667,3 @@ class ElasticDistortion:
         return "{}(apply_distorsion={}, granularity={}, magnitude={})".format(
             self.__class__.__name__, self._apply_distorsion, self._granularity, self._magnitude,
         )
-
-
-def uniform_2_sphere(num: int = None):
-    """Uniform sampling on a 2-sphere
-    Source: https://gist.github.com/andrewbolster/10274979
-    Args:
-        num: Number of vectors to sample (or None if single)
-    Returns:
-        Random Vector (np.ndarray) of size (num, 3) with norm 1.
-        If num is None returned value will have size (3,)
-    """
-    if num is not None:
-        phi = np.random.uniform(0.0, 2 * np.pi, num)
-        cos_theta = np.random.uniform(-1.0, 1.0, num)
-    else:
-        phi = np.random.uniform(0.0, 2 * np.pi)
-        cos_theta = np.random.uniform(-1.0, 1.0)
-
-    theta = np.arccos(cos_theta)
-    x = np.sin(theta) * np.cos(phi)
-    y = np.sin(theta) * np.sin(phi)
-    z = np.cos(theta)
-    return np.stack((x, y, z), axis=-1)
-
-
-def remove(points, norm_curv, p_keep=0.5):
-    #p_keep = p_keep + np.random.rand(1) * (1-p_keep) # random sample
-    if isinstance(p_keep, tuple):
-        p_keep = p_keep[0] + np.random.rand(1) * (p_keep[1] - p_keep[0])
-    rand_xyz = uniform_2_sphere()
-    centroid = np.mean(points[:, :3], axis=0)
-    points_centered = points[:, :3] - centroid
-
-    dist_from_plane = np.dot(points_centered, rand_xyz)
-    if p_keep == 0.5:
-        mask = dist_from_plane > 0
-    else:
-        mask = dist_from_plane > np.percentile(dist_from_plane, (1.0 - p_keep) * 100)
-    return points[mask, :], norm_curv[mask]
-
-
-def scale(pc, scale_mode):
-    pc = pc - pc.mean(0, keepdims=True)
-    if scale_mode == 'unit_std':
-        pc /= np.std(pc)
-    elif scale_mode == 'unit_val':
-        pc /= np.amax(np.abs(pc))
-    elif scale_mode == 'unit_norm':
-        pc = scale_to_unit_cube(pc)
-    else:
-        raise ValueError('UNDEFINED SCALE MODE')
-    return pc
-
-
-def rotate_pc(pointcloud, reverse=False):
-    if reverse:
-        pointcloud = rotate_shape(pointcloud, 'x', np.pi / 2)
-    else:
-        pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
-    return pointcloud
-
-
-def translate_pointcloud(pointcloud):
-    xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
-    xyz2 = np.random.uniform(low=-0.5, high=0.5, size=[3])
-
-    translated_pointcloud = np.add(np.multiply(pointcloud, xyz1), xyz2).astype('float32')
-    return translated_pointcloud
-
-
-def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
-    N, C = pointcloud.shape
-    pointcloud += np.clip(sigma * np.random.randn(N, C), -clip, clip)
-    return pointcloud

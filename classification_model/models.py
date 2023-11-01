@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from utils.pc_utils_norm import *
+from utils.pc_utils import *
 
 
 

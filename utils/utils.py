@@ -5,7 +5,7 @@ import copy
 import numpy as np
 import torch
 
-from utils.pc_utils_norm import *
+from utils.pc_utils import *
 
 
 

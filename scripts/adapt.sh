@@ -1,11 +1,11 @@
 adapt_test() {
     # dataset
     DATASET_ROOT_DIR=../datasets
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
-    adv_attack=True
-    # adv_attack=False
-    corruption="original"
+    corruption=occlusion
     severity=5
+    dataset=modelnet40c_${corruption}_${severity}
+    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
+    adv_attack=False # True, False
 
     # classifier
     classifier=DGCNN
@@ -18,10 +18,26 @@ adapt_test() {
     wandb_usr=drumpt
     exp_name=${classifier}_${corruption}_${severity}
 
-    # common hyperparameters
-    method=test_method
+    # method & common hyperparameters
+    # method=dua
     SEEDS=2 # "0 1 2"
-    batch_size=16
+    batch_size=64
+    method=sar
+
+    # tta hyperparameters
+    episodic=True
+    num_steps=1
+    test_optim=AdamW
+    test_lr=1e-4
+    params_to_adapt="LN BN"
+
+    # hyperparameters for shot
+    # method=shot
+    # episodic=True
+    # num_steps=1
+    # test_optim=AdamW
+    # test_lr=1e-4
+    # params_to_adapt="all"
 
     # dm hyperparameters
     t_min=0.02
@@ -51,13 +67,18 @@ adapt_test() {
             --batch_size ${batch_size} \
             --scale_mode unit_std \
             --cls_scale_mode unit_norm \
-            --dataset modelnet40c_${corruption}_${severity} \
+            --dataset ${dataset} \
             --dataset_dir ${dataset_dir} \
             --classifier ${classifier} \
             --classifier_dir ${classifier_dir} \
             --diffusion_dir ${diffusion_dir} \
             --method ${method} \
             --adv_attack ${adv_attack} \
+            --episodic ${episodic} \
+            --test_optim ${test_optim} \
+            --num_steps ${num_steps} \
+            --test_lr ${test_lr} \
+            --params_to_adapt ${params_to_adapt} \
             --exp_name ${exp_name} \
             --mode eval \
             --model transformer \
@@ -157,5 +178,5 @@ adapt_modelnet40_c() {
 }
 
 
-# adapt_modelnet40_c
 adapt_test
+# adapt_modelnet40_c

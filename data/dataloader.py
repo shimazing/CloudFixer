@@ -13,10 +13,10 @@ import torch
 from torch.utils.data import Dataset
 
 from utils.pc_utils_norm import (farthest_point_sample_np, scale_to_unit_cube, rotate_shape, random_rotate_one_axis)
-try:
-    from generate_c import deformation, noise, part
-except:
-    pass
+# try:
+#     from generate_c import deformation, noise, part
+# except:
+#     pass
 
 NUM_POINTS = 1024
 
@@ -28,14 +28,29 @@ class ModelNet40C(Dataset):
         self.dataset = args.dataset
         self.partition = partition
         
-        self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
-        if self.corrupt_ori:
-            self.corruption = 'original'
-        else:
-            self.corruption = args.corruption if hasattr(args, 'corruption') else 'original'
+        # self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
+        self.corruption = args.dataset.split("_")[1]
         if self.corruption != 'original':
             assert partition == 'test'
-        self.severity = args.severity if hasattr(args, 'severity') else 5
+            self.severity = args.dataset.split("_")[2]
+
+        # if self.corrupt_ori:
+        #     self.corruption = 'original'
+        # else:
+        #     try:
+        #         self.corruption = args.dataset.split("_")[1]
+        #     except:
+        #         self.corruption = 'original'
+
+        # if self.corruption != 'original':
+        #     assert partition == 'test'
+        # try:
+        #     self.severity = args.dataset.split("_")[2]
+        # except:
+        #     self.severity = 5
+
+        # print(f"self.severity: {self.severity}")
+
         self.rotate = args.rotate if hasattr(args, 'rotate') else True
 
         # augmentation
@@ -119,10 +134,10 @@ class ModelNet40C(Dataset):
         norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
 
-        if self.corrupt_ori:
-            t1 = random.sample([deformation, noise, part], 1)
-            f1 = random.choice(t1)
-            pointcloud = f1(pointcloud, int(self.severity))
+        # if self.corrupt_ori:
+        #     t1 = random.sample([deformation, noise, part], 1)
+        #     f1 = random.choice(t1)
+        #     pointcloud = f1(pointcloud, int(self.severity))
 
         if len(pointcloud) > self.subsample:
             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
@@ -136,7 +151,10 @@ class ModelNet40C(Dataset):
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
 
-        if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
+        # print(f"pointcloud.shape 1: {pointcloud.shape}")
+
+        # if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
+        if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
             # remove duplicated points
             dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:, None, :]), 2), axis=-1) < 1e-8
             dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
@@ -147,20 +165,28 @@ class ModelNet40C(Dataset):
                 mask[dup] = 0
                 pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
 
+        # print(f"pointcloud.shape 2: {pointcloud.shape}")
+
         ind = np.arange(len(pointcloud))
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
             pointcloud = rotate_pc(pointcloud)
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
+
+        # print(f"pointcloud.shape 3: {pointcloud.shape}")
+
         if self.aug:
             pointcloud = translate_pointcloud(pointcloud)
         if self.random_scale:
             random_scale = np.random.uniform(0.9, 1.1)
             pointcloud = random_scale * pointcloud
+
+        # print(f"pointcloud.shape 4: {pointcloud.shape}")
+
         if self.subsample < 2048:
             while len(pointcloud) < NUM_POINTS:
-                chosen = np.arange(N)
+                chosen = np.arange(len(pointcloud))
                 np.random.shuffle(chosen)
                 chosen = chosen[:NUM_POINTS - len(pointcloud)]
                 pointcloud = np.concatenate((
@@ -170,6 +196,9 @@ class ModelNet40C(Dataset):
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
                 norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
+
+        # print(f"pointcloud.shape 5: {pointcloud.shape}")
+
         return (pointcloud, label, mask, ind)
 
 

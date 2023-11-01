@@ -1,4 +1,5 @@
 import argparse
+from copy import deepcopy
 import wandb
 from tqdm import tqdm
 
@@ -48,9 +49,10 @@ def parse_arguments():
 
     # tta hyperparameters
     parser.add_argument('--episodic', type=eval, default=True)
-    parser.add_argument('--num_steps', type=float, default=1)
+    parser.add_argument('--test_optim', type=str, default='AdamW')
+    parser.add_argument('--num_steps', type=int, default=1)
     parser.add_argument('--test_lr', type=float, default=1e-4)
-    parser.add_argument('--params_to_adapt', type=str, default='all')
+    parser.add_argument('--params_to_adapt', nargs='+', type=str, default=['all'])
 
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
@@ -84,7 +86,7 @@ def parse_arguments():
     parser.add_argument('--subsample', type=int, default=1024)
     parser.add_argument('--pow', type=int, default=1)
     parser.add_argument('--denoising_thrs', type=int, default=100)
-    parser.add_argument('--corrupt_ori', type=eval, default=False)
+    # parser.add_argument('--corrupt_ori', type=eval, default=False)
     parser.add_argument('--save_itmd', type=int, default=0)
     args = parser.parse_args()
     if 'eval' in args.mode:
@@ -94,11 +96,61 @@ def parse_arguments():
     return args
 
 
-def forward_and_adapt(args, classifier, model, x, mask, ind):
+def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
+    global EMA
+
+    # input adaptation
     if 'pre_trans' in args.method:
-        x = pre_trans(args, model, x, mask, ind)
-    elif 'back_to_the_source' in args.method:
-        x = x # TODO: implement this!
+        x = pre_trans(args, diffusion_model, x, mask, ind)
+    elif 'back_to_the_source' in args.method: # TODO: implement this!
+        pass
+
+    optimizer.zero_grad()
+
+    # model adaptation
+    if 'pl' in args.method:
+        logits = classifier(x)
+        pseudo_label = torch.argmax(logits, dim=-1)
+        loss = F.cross_entropy(logits, pseudo_label)
+        loss.backward(retain_graph=True)
+    if 'tent' in args.method:
+        classifier.train()
+        logits = classifier(x)
+        loss = softmax_entropy(logits).mean()
+        loss.backward()
+        classifier.eval()
+    if 'shot' in args.method:
+        # TODO: do we need classifier.train()?
+        logits = classifier(x)
+        loss = softmax_diversity_regularizer(logits).mean()
+        loss.backward()
+    if 'sar' in args.method:
+        logits = classifier(x)
+        entropy_first = softmax_entropy(logits)
+        filter_id = torch.where(entropy_first < 0.4 * np.log(logits.shape[-1]))
+        entropy_first = entropy_first[filter_id]
+        loss = entropy_first.mean()
+        loss.backward()
+        optimizer.first_step(zero_grad=True)
+
+        new_logits = classifier(x)
+        entropy_second = softmax_entropy(new_logits)
+        entropy_second = entropy_second[filter_id]
+        filter_id = torch.where(entropy_second < 0.4 * np.log(logits.shape[-1]))
+        loss_second = entropy_second[filter_id].mean()
+        loss_second.backward()
+        optimizer.second_step(zero_grad=True)
+
+        EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
+        return classifier, x
+    if 'dua' in args.method:
+        classifier.train()
+        logits = classifier(x)
+        classifier.eval()
+
+    # output adaptation
+
+    optimizer.step()
     return classifier, x
 
 
@@ -241,6 +293,7 @@ def main(args):
     wandb.save('*.txt')
 
     ########## load dataset ##########
+    print(f"args.dataset: {args.dataset}")
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
     elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
@@ -276,7 +329,24 @@ def main(args):
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
     classifier = torch.nn.DataParallel(classifier)
-    classifier.to(device).eval()
+    classifier = classifier.to(device).eval()
+
+    global EMA
+    EMA = None
+
+    original_classifier = deepcopy(classifier)
+    original_classifier.eval().requires_grad_(False)
+    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    optimizer = setup_optimizer(args, params)
+    original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
+
+    print(f"args.method: {args.method}")
+    print(f"args.adv_attack: {args.adv_attack}")
+    print(f"args.episodic: {args.episodic}")
+    print(f"args.num_steps: {args.num_steps}")
+    print(f"args.test_lr: {args.test_lr}")
+    print(f"args.test_optim: {args.test_optim}")
+    print(f"args.params_to_adapt: {args.params_to_adapt}")
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for _, data in tqdm(enumerate(test_loader)):
@@ -289,11 +359,15 @@ def main(args):
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
 
+        # reset source model and optimizer
+        if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
+            classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
+
         logits_before = classifier(x)
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         for _ in range(1, args.num_steps + 1):
-            classifier, x = forward_and_adapt(args, classifier, model, x, mask, ind)
+            classifier, x = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
 
         logits_after = classifier(x)
         all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())

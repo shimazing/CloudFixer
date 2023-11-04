@@ -26,7 +26,14 @@ class PointNet(nn.Module):
         self.dp1 = nn.Dropout()
         self.linear2 = nn.Linear(512, output_channels)
 
+
     def forward(self, x):
+        x = self.get_feature(x)
+        x = self.linear2(self.dp1(F.relu(x)))
+        return x
+
+
+    def get_feature(self, x):
         x = x.permute(0, 2, 1).contiguous() # TODO: may remove this
         x = F.relu(self.bn1(self.conv1(x)))
         x = F.relu(self.bn2(self.conv2(x)))
@@ -34,10 +41,8 @@ class PointNet(nn.Module):
         x = F.relu(self.bn4(self.conv4(x)))
         x = F.relu(self.bn5(self.conv5(x)))
         x = F.adaptive_max_pool1d(x, 1).squeeze()
-        x = F.relu(self.bn6(self.linear1(x)))
-        x = self.dp1(x)
-        x = self.linear2(x)
-        return x
+        x = self.bn6(self.linear1(x))
+        return x        
 
 
 class DGCNN(nn.Module):
@@ -83,7 +88,17 @@ class DGCNN(nn.Module):
         self.dp2 = nn.Dropout(p=args.dropout)
         self.linear3 = nn.Linear(256, output_channels)
 
+
     def forward(self, x):
+        if self.leaky_relu:
+            act = lambda y: F.leaky_relu(y, negative_slope=0.2)
+        else:
+            act = F.relu
+
+        x = self.linear3(self.dp2(act(self.get_feature(x))))
+        return x
+
+    def get_feature(self, x):
         if self.args.cls_scale_mode == 'unit_norm': # TODO: many modify this (only for modelnet40 dataset)
             x = rotate_shape_tensor(scale_to_unit_cube_torch(x), 'x', np.pi/2)
 
@@ -120,10 +135,9 @@ class DGCNN(nn.Module):
 
         x = act(self.bn6(self.linear1(x)))
         x = self.dp1(x)
-        x = act(self.bn7(self.linear2(x)))
-        x = self.dp2(x)
-        x = self.linear3(x)
+        x = self.bn7(self.linear2(x))
         return x
+
 
 
 def knn(x, k):

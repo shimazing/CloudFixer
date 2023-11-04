@@ -4,8 +4,10 @@ visualize() {
 
     # dataset
     DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_background_5
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
+    # dataset=modelnet40c_background_5
+    # dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
+    dataset=realsense
+    dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds/
     corruption=background
     severity=5
 
@@ -18,7 +20,7 @@ visualize() {
 
     # common hyperparameters
     random_seed=2
-    batch_size=4
+    batch_size=16
 
     # dm hyperparameters
     pre_trans=0
@@ -36,13 +38,13 @@ visualize() {
     subsample=700
     weighted_reg=True
 
-    if [ "1" == "$pre_trans" ]; then
-        exp_name=${classifier}_${corruption}_${severity}_lr${lr}_ef${optim_end_factor}_t_${t_max}_${t_min}_${steps}iters_betas_0.9_0.999_wd_0_pow${pow}weighted${weighted_reg}_lam_${lam_h}_${lam_l}_cosaneal_wd${wd}_${optim}_schedule_t_tlb_lr_linearLR_sub${subsample}_wRotation0.02_denoisingThrs${denoising_thrs}_trans${trans}_seed${seed}
-        pre_trans=--pre_trans
-    else
-        exp_name=${classifier}_${corruption}_${severity}
-        pre_trans=""
-    fi
+    # if [ "1" == "$pre_trans" ]; then
+    #     exp_name=${classifier}_${corruption}_${severity}_lr${lr}_ef${optim_end_factor}_t_${t_max}_${t_min}_${steps}iters_betas_0.9_0.999_wd_0_pow${pow}weighted${weighted_reg}_lam_${lam_h}_${lam_l}_cosaneal_wd${wd}_${optim}_schedule_t_tlb_lr_linearLR_sub${subsample}_wRotation0.02_denoisingThrs${denoising_thrs}_trans${trans}_seed${seed}
+    #     pre_trans=--pre_trans
+    # else
+    #     exp_name=${classifier}_${corruption}_${severity}
+    #     pre_trans=""
+    # fi
 
     python3 adapt.py \
         --t_min ${t_min} \
@@ -50,19 +52,18 @@ visualize() {
         --save_itmd 0 \
         --denoising_thrs ${denoising_thrs} \
         --random_seed ${random_seed} \
-        ${pre_trans} \
         --pow ${pow} \
         --diffusion_steps 500 \
         --diffusion_noise_schedule polynomial_2 \
         --batch_size ${batch_size} \
         --scale_mode unit_std \
         --cls_scale_mode unit_norm \
-        --dataset modelnet40c_${corruption}_${severity} \
+        --dataset ${dataset} \
         --dataset_dir ${dataset_dir} \
         --classifier ${classifier} \
         --classifier_dir ${classifier_dir} \
         --diffusion_dir ${diffusion_dir} \
-        --exp_name ${exp_name} \
+        --exp_name ${classifier}_${corruption}_${severity} \
         --mode vis \
         --model transformer \
         --lr ${lr} \

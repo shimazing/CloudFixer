@@ -17,12 +17,12 @@ from utils.pc_utils import (
     scale,
     scale_to_unit_cube,
     rotate_pc,
-    # rotate_shape,
     translate_pointcloud,
     jitter_pointcloud,
     random_rotate_one_axis,
-    # uniform_2_sphere,
     remove,
+    # rotate_shape,
+    # uniform_2_sphere,
 )
 # try:
 #     from generate_c import deformation, noise, part
@@ -40,10 +40,10 @@ class ModelNet40C(Dataset):
         self.partition = partition
         
         # self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
-        self.corruption = args.dataset.split("_")[1]
+        self.corruption = "_".join(args.dataset.split("_")[1:-1])
         if self.corruption != 'original':
             assert partition == 'test'
-            self.severity = args.dataset.split("_")[2]
+            self.severity = args.dataset.split("_")[-1]
 
         # if self.corrupt_ori:
         #     self.corruption = 'original'
@@ -76,7 +76,7 @@ class ModelNet40C(Dataset):
 
         self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
-        if self.corruption == 'original' and partition != 'test':
+        if self.corruption == 'original':
             self.pc_list, self.label_list = self.load_modelnet40(args.dataset_dir, partition=partition)
         else:
             self.pc_list, self.label_list = self.load_modelnet40_c(args.dataset_dir, self.corruption, self.severity)

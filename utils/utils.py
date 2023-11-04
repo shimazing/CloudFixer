@@ -90,13 +90,24 @@ def softmax(x):
     return f_x
 
 
+def get_augmented_input(x, num_augs=4):
+    assert num_augs >= 1
+    device = x.device
+    augs = [
+        lambda x: random_rotate_one_axis(x, axis='z'),
+        jitter_pointcloud,
+        remove,
+        translate_pointcloud,
+    ]
+    selected_augs = np.random.choice(augs, num_augs - 1, replace=True)
+    return torch.stack([torch.tensor(selected_aug(x.cpu().numpy())).to(device) for selected_aug in selected_augs], dim=0)
+
+
 def projected_gradient_descent(args, model, x, y, loss_fn, num_steps, step_size, step_norm, eps, eps_norm, y_target=None):
     rep_model = copy.deepcopy(model)
     rep_model.eval().to(x.device)
 
     x_adv = x.clone().detach().requires_grad_(True).to(x.device)
-    # if args.cls_scale_mode == 'unit_norm':
-    #     x_adv = rotate_shape_tensor(scale_to_unit_cube_torch(x.clone().detach().to(x.device)), 'x', np.pi/2)
     x_init = x_adv.clone().detach()
     targeted = y_target is not None
     num_channels = x.shape[1]
@@ -129,11 +140,4 @@ def projected_gradient_descent(args, model, x, y, loss_fn, num_steps, step_size,
             scaling_factor[mask] = eps
             delta *= eps / scaling_factor.view(-1, 1, 1)
             x_adv = x + delta
-
-    # # unit_std normalization
-    # x_adv = x_adv - x_adv.mean(dim=1, keepdim=True)
-    # x_adv = x_adv / x_adv.view(x_adv.shape[0], -1).std(dim=1)[:, None, None]
-
-    # if args.cls_scale_mode == 'unit_norm':
-    #     x_adv = rotate_shape_tensor(x_adv, 'x', -np.pi/2)
     return x_adv.clone().detach()

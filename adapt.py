@@ -1,13 +1,15 @@
 import argparse
 from copy import deepcopy
-import wandb
 from tqdm import tqdm
+import wandb
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
+# import optuna
+# from optuna.samplers import RandomSampler
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 from diffusion_model.build_model import get_model
@@ -21,7 +23,7 @@ from utils.visualizer import visualize_pclist
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description='CloudFixer')
-    parser.add_argument('--mode', nargs='+', type=str, default=['eval'])
+    parser.add_argument('--mode', nargs='+', type=str, required=True)
     parser.add_argument('--no-cuda', action='store_true', default=False, help='enables CUDA training')
 
     # experiments
@@ -53,7 +55,9 @@ def parse_arguments():
     parser.add_argument('--num_steps', type=int, default=1)
     parser.add_argument('--test_lr', type=float, default=1e-4)
     parser.add_argument('--params_to_adapt', nargs='+', type=str, default=['all'])
-
+    parser.add_argument('--affinity', type=str, required=False, default='rbf') # for LAME
+    parser.add_argument('--lame_knn', type=int, required=False, default=5) # for LAME
+    parser.add_argument('--num_augs', type=int, required=False, default=4) # for MEMO
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
     parser.add_argument('--probabilistic_model', type=str, default='diffusion', help='diffusion')
@@ -94,67 +98,6 @@ def parse_arguments():
         args.save_itmd = 0
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     return args
-
-
-def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
-    global EMA
-
-    # input adaptation
-    if 'pre_trans' in args.method:
-        x = pre_trans(args, diffusion_model, x, mask, ind)
-    elif 'back_to_the_source' in args.method: # TODO: implement this!
-        pass
-
-    optimizer.zero_grad()
-
-    # model adaptation
-    if 'sar' in args.method:
-        logits = classifier(x)
-        entropy_first = softmax_entropy(logits)
-        filter_id = torch.where(entropy_first < 0.4 * np.log(logits.shape[-1]))
-        entropy_first = entropy_first[filter_id]
-        loss = entropy_first.mean()
-        loss.backward()
-        optimizer.first_step(zero_grad=True)
-
-        new_logits = classifier(x)
-        entropy_second = softmax_entropy(new_logits)
-        entropy_second = entropy_second[filter_id]
-        filter_id = torch.where(entropy_second < 0.4 * np.log(logits.shape[-1]))
-        loss_second = entropy_second[filter_id].mean()
-        loss_second.backward()
-        optimizer.second_step(zero_grad=True)
-
-        EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
-        return classifier, x
-    if 'pl' in args.method:
-        logits = classifier(x)
-        pseudo_label = torch.argmax(logits, dim=-1)
-        loss = F.cross_entropy(logits, pseudo_label)
-        loss.backward(retain_graph=True)
-    if 'tent' in args.method:
-        classifier.train()
-        logits = classifier(x)
-        loss = softmax_entropy(logits).mean()
-        loss.backward()
-        classifier.eval()
-    if 'shot' in args.method:
-        # TODO: do we need classifier.train()?
-        logits = classifier(x)
-        loss = softmax_diversity_regularizer(logits).mean()
-        loss.backward()
-    if 'dua' in args.method:
-        classifier.train()
-        logits = classifier(x)
-        classifier.eval()
-
-    optimizer.step()
-
-    # output adaptation
-    if 'lame' in args.method: # TODO: implement this!
-        pass
-
-    return classifier, x
 
 
 @torch.enable_grad()
@@ -277,6 +220,65 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     return y
 
 
+def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
+    global EMA
+
+    # input adaptation
+    if 'pre_trans' in args.method:
+        x = pre_trans(args, diffusion_model, x, mask, ind)
+    elif 'dda' in args.method: # TODO: implement this!
+        pass
+
+    optimizer.zero_grad()
+    # model adaptation
+    if 'tent' in args.method:
+        logits = classifier(x)
+        loss = softmax_entropy(logits).mean()
+        loss.backward()
+    if 'shot' in args.method:
+        # TODO: do we need classifier.train()?
+        # 1. train()은 해주는 것 같고, 2. fc layer를 제외한 feature extractor만 학습시킨다. 3. em, diversity regularization, pseudo-labeling 세가지를 쓴다
+        # 4. pseudo
+
+        logits = classifier(x)
+        loss = softmax_diversity_regularizer(logits).mean()
+        loss.backward()
+    if 'memo' in args.method:
+        x_aug = get_augmented_input(x, args.num_augs)
+        logits = classifier(x_aug)
+        loss = softmax_entropy(logits)
+        loss.backward()
+    if 'pl' in args.method:
+        logits = classifier(x)
+        pseudo_label = torch.argmax(logits, dim=-1)
+        loss = F.cross_entropy(logits, pseudo_label)
+        loss.backward()
+    if 'sar' in args.method:
+        logits = classifier(x)
+        entropy_first = softmax_entropy(logits)
+        filter_id = torch.where(entropy_first < 0.4 * np.log(logits.shape[-1]))
+        entropy_first = entropy_first[filter_id]
+        loss = entropy_first.mean()
+        loss.backward()
+        optimizer.first_step(zero_grad=True)
+
+        new_logits = classifier(x)
+        entropy_second = softmax_entropy(new_logits)
+        entropy_second = entropy_second[filter_id]
+        filter_id = torch.where(entropy_second < 0.4 * np.log(logits.shape[-1]))
+        loss_second = entropy_second[filter_id].mean()
+        loss_second.backward()
+        optimizer.second_step(zero_grad=True)
+
+        EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
+        return classifier, x
+    if 'dua' or 'bn_stats' in args.method:
+        logits = classifier(x)
+    optimizer.step()
+
+    return classifier, x
+
+
 def main(args):
     device = torch.device("cuda" if args.cuda else "cpu")
     set_seed(args.random_seed) # set seed
@@ -296,7 +298,6 @@ def main(args):
     wandb.save('*.txt')
 
     ########## load dataset ##########
-    print(f"args.dataset: {args.dataset}")
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
     elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
@@ -308,7 +309,7 @@ def main(args):
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
-    if 'pre_trans' in args.method or 'back_to_the_source' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method:
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
@@ -339,24 +340,20 @@ def main(args):
 
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
+    classifier = configure_model(args, classifier)
     params, _ = collect_params(classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
-    print(f"args.method: {args.method}")
-    print(f"args.adv_attack: {args.adv_attack}")
-    print(f"args.episodic: {args.episodic}")
-    print(f"args.num_steps: {args.num_steps}")
-    print(f"args.test_lr: {args.test_lr}")
-    print(f"args.test_optim: {args.test_optim}")
-    print(f"args.params_to_adapt: {args.params_to_adapt}")
-
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
-    for _, data in tqdm(enumerate(test_loader)):
+    for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         mask = data[2].to(device)
         ind = data[3].to(device) # original indices for duplicated point
+
+        # if iter_idx >= 1:
+        #     break
 
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
@@ -366,18 +363,61 @@ def main(args):
         if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
-        logits_before = classifier(x)
+        logits_before = original_classifier(x)
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         for _ in range(1, args.num_steps + 1):
             classifier, x = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
 
-        logits_after = classifier(x)
+        # output adaptation
+        if 'lame' in args.method:
+            import utils.tta_utils as lame
+            logits_after = lame.batch_evaluation(args, classifier, x)
+        elif classifier.training:
+            classifier.eval()
+            logits_after = classifier(x)
+            classifier.train()
+        else:
+            logits_after = classifier(x)            
         all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     return accuracy_score(all_gt_list, all_pred_after_list)
+
+
+def tune_tta_hparams(args):
+    if 'tent' in args.method:
+        args.episodic=False
+        args.test_optim="AdamW"
+        args.params_to_adapt="LN BN GN"
+        args.batch_size=64
+
+        test_lr_list = [1e-4, 1e-3, 1e-2]
+        num_steps_list = [1, 3, 5, 10]
+
+        import itertools, random
+        hparam_space = list(itertools.product(test_lr_list, num_steps_list))
+        random.shuffle(hparam_space)
+
+
+        io = logging.IOStream(args)
+        io.cprint(args)
+        io.cprint(f"hyperparameter search: {hparam_space}")
+        create_folders(args)
+
+        best_acc, best_hparam = 0, None
+        for hparam in hparam_space:
+            args.test_lr, args.num_steps = hparam
+            io.cprint(f"hparam: {hparam}")
+            test_acc = main(args)
+            io.cprint(f"test_acc: {test_acc}")
+            if test_acc > best_acc:
+                io.cprint(f"new best acc!: {test_acc}")
+                best_acc = test_acc
+            best_hparam = hparam
+        io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
+
 
 
 @torch.no_grad()
@@ -410,7 +450,7 @@ def vis(args):
         raise ValueError('UNDEFINED DATASET')
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
 
-    if 'pre_trans' in args.method or 'back_to_the_source' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method:
         ########## load diffusion model ##########
         model = get_model(args, device)
         if args.diffusion_dir is not None:
@@ -422,40 +462,40 @@ def vis(args):
 
     ########## load classifier ##########
     # TODO: add other architectures and different datasets
-    if args.classifier == "DGCNN":
-        class Args:
-            def __init__(self):
-                self.k = 20
-                self.emb_dims = 1024
-                self.dropout = 0.5
-                self.leaky_relu = 1
-                self.cls_scale_mode = args.cls_scale_mode
-        classifier = models.DGCNN(args=Args(), output_channels=len(np.unique(test_dataset.label_list)))
-    else:
-        raise ValueError('UNDEFINED CLASSIFIER')
-    classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = torch.nn.DataParallel(classifier)
-    classifier.to(device).eval()
+    # if args.classifier == "DGCNN":
+    #     class Args:
+    #         def __init__(self):
+    #             self.k = 20
+    #             self.emb_dims = 1024
+    #             self.dropout = 0.5
+    #             self.leaky_relu = 1
+    #             self.cls_scale_mode = args.cls_scale_mode
+    #     classifier = models.DGCNN(args=Args(), output_channels=len(np.unique(test_dataset.label_list)))
+    # else:
+    #     raise ValueError('UNDEFINED CLASSIFIER')
+    # classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+    # classifier = torch.nn.DataParallel(classifier)
+    # classifier.to(device).eval()
 
     for batch_idx, data in enumerate(test_loader_vis):
         x = data[0].to(device)
         labels = [test_dataset.idx_to_label[int(d)] for d in data[1]]
-        io.cprint("ground truth labels", labels)
+        io.cprint(f"ground truth labels: {labels}")
         mask = data[2].to(device)
         ind = data[3].to(device)
 
         # new visualization code: you can specify color with colorm
-        visualize_pclist(x, [f"imgs/batch_{batch_idx}_{i}.png" for i in range(len(x))], colorm=[24,107,239])
+        # visualize_pclist(x, [f"imgs/batch_{batch_idx}_{i}.png" for i in range(len(x))], colorm=[24,107,239])
 
         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
         rgbs = get_color(x.cpu().numpy())
 
         x_ori = x.detach()
-        logits = classifier(x)
-        preds = logits.max(dim=1)[1]
-        preds_val = logits.softmax(-1).max(dim=1)[0]
-        preds_label = [test_dataset.idx_to_label[int(d)] for d in preds]
-        io.cprint("original labels", preds_label)
+        # logits = classifier(x)
+        # preds = logits.max(dim=1)[1]
+        # preds_val = logits.softmax(-1).max(dim=1)[0]
+        # preds_label = [test_dataset.idx_to_label[int(d)] for d in preds]
+        # io.cprint("original labels", preds_label)
         for b in range(len(x_ori)):
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
@@ -476,7 +516,8 @@ def vis(args):
                                 [1, 1, 1]
                             ])* 3
                             ).tolist(),
-                            "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]}',
                             "color": [123, 321, 111], # ???
                         }
                     ]
@@ -502,8 +543,9 @@ def vis(args):
                                 [1, -1, 1],
                                 [1, 1, 1]
                             ])*3).tolist(),
-                            "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
-                            "color": [123, 321, 111], # ???
+                            # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]}',
+                            "color": [123, 321, 111],
                         }
                     ]
                 ),
@@ -520,3 +562,5 @@ if __name__ == "__main__":
         main(args)
     if 'vis' in args.mode:
         vis(args)
+    if 'hparam_tune' in args.mode:
+        tune_tta_hparams(args)

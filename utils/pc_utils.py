@@ -300,6 +300,7 @@ def rotate_shape(x, axis, angle):
     else:
         return x.dot(R_z).astype('float32')
 
+
 def rotate_shape_tensor(x, axis, angle):
     """
     Input:

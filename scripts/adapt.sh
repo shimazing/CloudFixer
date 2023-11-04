@@ -1,10 +1,11 @@
-adapt_test() {
+hparam_tune() {
     # dataset
     DATASET_ROOT_DIR=../datasets
-    corruption=occlusion
-    severity=5
-    dataset=modelnet40c_${corruption}_${severity}
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
+    # corruption=occlusion
+    # severity=5
+    # dataset=modelnet40c_${corruption}_${severity}
+    dataset=modelnet40c_original
+    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
     adv_attack=False # True, False
 
     # classifier
@@ -16,20 +17,46 @@ adapt_test() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=${classifier}_${corruption}_${severity}
-
-    # method & common hyperparameters
-    # method=dua
+    exp_name=hparam_search_${classifier}_${corruption}_${severity}
     SEEDS=2 # "0 1 2"
-    batch_size=64
-    method=sar
 
     # tta hyperparameters
-    episodic=True
-    num_steps=1
+    # method & common hyperparameters
+    # method=dua
+    # batch_size=64
+
+    # hyperparameters to tune for tent
+    method=tent
+    episodic=False
     test_optim=AdamW
-    test_lr=1e-4
-    params_to_adapt="LN BN"
+    params_to_adapt="LN BN GN"
+    batch_size=64
+    ### hyperparameters to tune for tent
+    test_lr=1e-4 # 1e-4 1e-3 1e-2
+    num_steps=10 # 1 3 5 10
+
+    # hyperparameters for lame
+    # method=lame
+    # episodic=False # placeholder
+    # test_optim=AdamW # placeholder
+    # test_lr=1e-4 # palceholder
+    # params_to_adapt="LN BN GN" # placeholder
+    # num_steps=0 # meaningless
+    # batch_size=16 # important
+    # ### hyperparameters to tune for lame
+    affinity=rbf # rbf, kNN, linear
+    lame_knn=5 # 1, 3, 5
+
+    # hyperparameters for memo
+    # method=memo
+    # episodic=False
+    # test_optim=AdamW
+    # params_to_adapt="all"
+    # batch_size=1
+    # ### hyperparameters to tune for memo
+    # test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
+    # num_steps=1 # "1, 2"
+    # num_augs=4 # "4 8 16"
 
     # hyperparameters for shot
     # method=shot
@@ -79,8 +106,10 @@ adapt_test() {
             --num_steps ${num_steps} \
             --test_lr ${test_lr} \
             --params_to_adapt ${params_to_adapt} \
+            --affinity ${affinity} \
+            --lame_knn ${lame_knn} \
             --exp_name ${exp_name} \
-            --mode eval \
+            --mode hparam_tune \
             --model transformer \
             --lr ${lr} \
             --n_update ${steps} \
@@ -102,7 +131,8 @@ adapt_modelnet40_c() {
     # dataset
     DATASET_ROOT_DIR=../datasets
     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="density_inc distortion_rbf distortion_rbf_inv"
     SEVERITY_LIST=5
 
     # classifier
@@ -114,14 +144,21 @@ adapt_modelnet40_c() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=${classifier}_${corruption}_${severity}
-
-    # common hyperparameters
     SEEDS=2 # "0 1 2"
-    batch_size=16
+
+    # tta hyperparameters
+    method=tent
+    episodic=False
+    test_optim=AdamW
+    params_to_adapt="LN BN GN"
+    batch_size=64
+    test_lr=1e-4 # 1e-4 1e-3 1e-2
+    num_steps=10 # 1 3 5 10
+    affinity=rbf # rbf, kNN, linear
+    lame_knn=5 # 1, 3, 5
 
     # dm hyperparameters
-    method=pre_trans
+    # method=pre_trans
     t_min=0.02
     t_max=0.8
     denoising_thrs=100
@@ -157,7 +194,12 @@ adapt_modelnet40_c() {
                     --classifier ${classifier} \
                     --classifier_dir ${classifier_dir} \
                     --diffusion_dir ${diffusion_dir} \
-                    --exp_name ${exp_name} \
+                    --exp_name modelnet40c_${corruption}_${severity}_${classifier}_${corruption}_${severity}_${random_seed}_${method} \
+                    --episodic ${episodic} \
+                    --test_optim ${test_optim} \
+                    --params_to_adapt ${params_to_adapt} \
+                    --test_lr ${test_lr} \
+                    --num_steps ${num_steps} \
                     --mode eval \
                     --model transformer \
                     --lr ${lr} \
@@ -178,5 +220,6 @@ adapt_modelnet40_c() {
 }
 
 
-adapt_test
-# adapt_modelnet40_c
+# adapt_test
+# hparam_tune
+adapt_modelnet40_c

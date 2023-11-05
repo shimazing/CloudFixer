@@ -40,7 +40,7 @@ class ModelNet40C(Dataset):
         self.partition = partition
         
         # self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
-        self.corruption = "_".join(args.dataset.split("_")[1:-1])
+        self.corruption = "_".join(args.dataset.split("_")[1:-1]) if len(args.dataset.split("_")) >= 3 else "_".join(args.dataset.split("_")[1:])
         if self.corruption != 'original':
             assert partition == 'test'
             self.severity = args.dataset.split("_")[-1]

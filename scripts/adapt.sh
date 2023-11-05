@@ -15,37 +15,33 @@ hparam_tune() {
     # diffusion model
     diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
 
-    # logging
-    wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}
-    SEEDS=2 # "0 1 2"
-
     # tta hyperparameters
     # method & common hyperparameters
     # method=dua
     # batch_size=64
 
     # hyperparameters to tune for tent
-    method=tent
-    episodic=False
-    test_optim=AdamW
-    params_to_adapt="LN BN GN"
-    batch_size=64
-    ### hyperparameters to tune for tent
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=10 # 1 3 5 10
+    # method=tent
+    # episodic=False
+    # test_optim=AdamW
+    # params_to_adapt="LN BN GN"
+    # batch_size=64
+    # ### hyperparameters to tune for tent
+    # test_lr=1e-4 # 1e-4 1e-3 1e-2
+    # num_steps=10 # 1 3 5 10
 
     # hyperparameters for lame
-    # method=lame
-    # episodic=False # placeholder
-    # test_optim=AdamW # placeholder
-    # test_lr=1e-4 # palceholder
-    # params_to_adapt="LN BN GN" # placeholder
-    # num_steps=0 # meaningless
-    # batch_size=16 # important
-    # ### hyperparameters to tune for lame
+    method=lame
+    episodic=False # placeholder
+    test_optim=AdamW # placeholder
+    test_lr=1e-4 # palceholder
+    params_to_adapt="LN BN GN" # placeholder
+    num_steps=0 # placeholder
+    batch_size=16 # important
+    ### hyperparameters to tune for lame
     affinity=rbf # rbf, kNN, linear
-    lame_knn=5 # 1, 3, 5
+    lame_knn=3 # 1, 3, 5, 10
+    lame_max_steps=1 # 1, 10, 100
 
     # hyperparameters for memo
     # method=memo
@@ -66,6 +62,13 @@ hparam_tune() {
     # test_lr=1e-4
     # params_to_adapt="all"
 
+    # hyperparameters for dua
+
+    # hyperparameters for bn_stats
+    
+
+    # hyperparameters for bn_stats
+
     # dm hyperparameters
     t_min=0.02
     t_max=0.8
@@ -80,6 +83,11 @@ hparam_tune() {
     optim_end_factor=0.05
     subsample=700
     weighted_reg=True
+
+    # logging
+    wandb_usr=drumpt
+    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
         python3 adapt.py \
@@ -108,6 +116,7 @@ hparam_tune() {
             --params_to_adapt ${params_to_adapt} \
             --affinity ${affinity} \
             --lame_knn ${lame_knn} \
+            --lame_max_steps ${lame_max_steps} \
             --exp_name ${exp_name} \
             --mode hparam_tune \
             --model transformer \
@@ -131,8 +140,8 @@ adapt_modelnet40_c() {
     # dataset
     DATASET_ROOT_DIR=../datasets
     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c/
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    CORRUPTION_LIST="density_inc distortion_rbf distortion_rbf_inv"
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="density_inc distortion_rbf distortion_rbf_inv"
     SEVERITY_LIST=5
 
     # classifier
@@ -147,15 +156,28 @@ adapt_modelnet40_c() {
     SEEDS=2 # "0 1 2"
 
     # tta hyperparameters
-    method=tent
-    episodic=False
-    test_optim=AdamW
-    params_to_adapt="LN BN GN"
-    batch_size=64
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=10 # 1 3 5 10
+    # method=tent
+    # episodic=False
+    # test_optim=AdamW
+    # params_to_adapt="LN BN GN"
+    # batch_size=64
+    # test_lr=1e-4 # 1e-4 1e-3 1e-2
+    # num_steps=10 # 1 3 5 10
+    # affinity=rbf # rbf, kNN, linear
+    # lame_knn=3 # 1, 3, 5
+    # lame_max_steps=1
+
+    method=lame
+    episodic=False # placeholder
+    test_optim=AdamW # placeholder
+    test_lr=1e-4 # palceholder
+    params_to_adapt="LN BN GN" # placeholder
+    num_steps=0 # placeholder
+    batch_size=16 # important
+    ### hyperparameters to tune for lame
     affinity=rbf # rbf, kNN, linear
-    lame_knn=5 # 1, 3, 5
+    lame_knn=3 # 1, 3, 5, 10
+    lame_max_steps=1 # 1, 10, 100
 
     # dm hyperparameters
     # method=pre_trans
@@ -200,6 +222,9 @@ adapt_modelnet40_c() {
                     --params_to_adapt ${params_to_adapt} \
                     --test_lr ${test_lr} \
                     --num_steps ${num_steps} \
+                    --affinity ${affinity} \
+                    --lame_knn ${lame_knn} \
+                    --lame_max_steps ${lame_max_steps} \
                     --mode eval \
                     --model transformer \
                     --lr ${lr} \

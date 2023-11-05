@@ -195,5 +195,5 @@ def batch_evaluation(args, model, x):
     feats = F.normalize(model.module.get_feature(x) if isinstance(model, torch.nn.DataParallel) else model.get_feature(x), p=2, dim=-1)
     affinity = eval(f'{args.affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
-    Y = laplacian_optimization(unary, kernel, max_steps=1)
+    Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
     return Y

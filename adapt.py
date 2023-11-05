@@ -57,6 +57,7 @@ def parse_arguments():
     parser.add_argument('--params_to_adapt', nargs='+', type=str, default=['all'])
     parser.add_argument('--affinity', type=str, required=False, default='rbf') # for LAME
     parser.add_argument('--lame_knn', type=int, required=False, default=5) # for LAME
+    parser.add_argument('--lame_max_steps', type=int, required=False, default=1) # for LAME
     parser.add_argument('--num_augs', type=int, required=False, default=4) # for MEMO
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
@@ -352,9 +353,6 @@ def main(args):
         mask = data[2].to(device)
         ind = data[3].to(device) # original indices for duplicated point
 
-        # if iter_idx >= 1:
-        #     break
-
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
@@ -387,37 +385,40 @@ def main(args):
 
 
 def tune_tta_hparams(args):
+    import itertools, random
+    
     if 'tent' in args.method:
-        args.episodic=False
-        args.test_optim="AdamW"
-        args.params_to_adapt="LN BN GN"
-        args.batch_size=64
-
         test_lr_list = [1e-4, 1e-3, 1e-2]
         num_steps_list = [1, 3, 5, 10]
+        hparams_to_search_str = ['test_lr', 'num_steps']
+        hparams_to_search = [test_lr_list, num_steps_list]
+    if 'lame' in args.method:
+        affinity_list = ['rbf', 'kNN', 'linear']
+        lame_knn_list = [1, 3, 5, 10]
+        lame_max_steps_list = [1, 10, 100]
+        hparams_to_search_str = ['affinity', 'lame_knn', 'lame_max_steps']
+        hparams_to_search = [affinity_list, lame_knn_list, lame_max_steps_list]
+    hparam_space = list(itertools.product(*hparams_to_search))
+    random.shuffle(hparam_space)
 
-        import itertools, random
-        hparam_space = list(itertools.product(test_lr_list, num_steps_list))
-        random.shuffle(hparam_space)
+    io = logging.IOStream(args)
+    io.cprint(args)
+    io.cprint(f"hyperparameter search: {hparam_space}")
+    create_folders(args)
 
-
-        io = logging.IOStream(args)
-        io.cprint(args)
-        io.cprint(f"hyperparameter search: {hparam_space}")
-        create_folders(args)
-
-        best_acc, best_hparam = 0, None
-        for hparam in hparam_space:
-            args.test_lr, args.num_steps = hparam
-            io.cprint(f"hparam: {hparam}")
-            test_acc = main(args)
-            io.cprint(f"test_acc: {test_acc}")
-            if test_acc > best_acc:
-                io.cprint(f"new best acc!: {test_acc}")
-                best_acc = test_acc
-            best_hparam = hparam
-        io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
-
+    best_acc, best_hparam = 0, None
+    for hparam_comb in hparam_space[:min(len(hparam_space), 100)]:
+        for hparam_str, hparam in zip(hparams_to_search_str, hparam_comb):
+            setattr(args, hparam_str, hparam)
+        io.cprint(f"hparams_to_search_str: {hparams_to_search_str}")
+        io.cprint(f"hparam: {hparam_comb}")
+        test_acc = main(args)
+        io.cprint(f"test_acc: {test_acc}")
+        if test_acc > best_acc:
+            io.cprint(f"new best acc!: {test_acc}")
+            best_acc = test_acc
+        best_hparam = hparam_comb
+    io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
 
 
 @torch.no_grad()

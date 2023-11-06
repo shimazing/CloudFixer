@@ -55,10 +55,19 @@ def parse_arguments():
     parser.add_argument('--num_steps', type=int, default=1)
     parser.add_argument('--test_lr', type=float, default=1e-4)
     parser.add_argument('--params_to_adapt', nargs='+', type=str, default=['all'])
-    parser.add_argument('--affinity', type=str, required=False, default='rbf') # for LAME
+    parser.add_argument('--lame_affinity', type=str, required=False, default='rbf') # for LAME
     parser.add_argument('--lame_knn', type=int, required=False, default=5) # for LAME
     parser.add_argument('--lame_max_steps', type=int, required=False, default=1) # for LAME
-    parser.add_argument('--num_augs', type=int, required=False, default=4) # for MEMO
+    parser.add_argument('--sar_ent_threshold', type=float, default=0.4) # for SAR
+    parser.add_argument('--sar_eps_threshold', type=float, default=0.05) # for SAR
+    parser.add_argument('--memo_num_augs', type=int, required=False, default=4) # for MEMO
+    parser.add_argument('--memo_bn_momentum', type=eval, default=1/17) # for memo, dua, ...
+    parser.add_argument('--dua_mom_pre', type=float, default=0.1)
+    parser.add_argument('--dua_decay_factor', type=float, default=0.94)
+    parser.add_argument('--dua_min_mom', type=float, default=0.005)
+    parser.add_argument('--bn_stats_prior', type=float, default=0)
+    parser.add_argument('--shot_pl_loss_weight', type=float, default=0.3)
+
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
     parser.add_argument('--probabilistic_model', type=str, default='diffusion', help='diffusion')
@@ -221,43 +230,29 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     return y
 
 
+def dda(args, model, x, mask, ind, classifier):
+    return x
+
+
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
-    global EMA
+    global EMA, mom_pre
 
     # input adaptation
     if 'pre_trans' in args.method:
         x = pre_trans(args, diffusion_model, x, mask, ind)
-    elif 'dda' in args.method: # TODO: implement this!
-        pass
+    if 'dda' in args.method:
+        x = dda(args, diffusion_model, x, mask, ind, classifier)
 
-    optimizer.zero_grad()
     # model adaptation
+    optimizer.zero_grad()
     if 'tent' in args.method:
         logits = classifier(x)
         loss = softmax_entropy(logits).mean()
         loss.backward()
-    if 'shot' in args.method:
-        # TODO: do we need classifier.train()?
-        # 1. train()은 해주는 것 같고, 2. fc layer를 제외한 feature extractor만 학습시킨다. 3. em, diversity regularization, pseudo-labeling 세가지를 쓴다
-        # 4. pseudo
-
-        logits = classifier(x)
-        loss = softmax_diversity_regularizer(logits).mean()
-        loss.backward()
-    if 'memo' in args.method:
-        x_aug = get_augmented_input(x, args.num_augs)
-        logits = classifier(x_aug)
-        loss = softmax_entropy(logits)
-        loss.backward()
-    if 'pl' in args.method:
-        logits = classifier(x)
-        pseudo_label = torch.argmax(logits, dim=-1)
-        loss = F.cross_entropy(logits, pseudo_label)
-        loss.backward()
     if 'sar' in args.method:
         logits = classifier(x)
         entropy_first = softmax_entropy(logits)
-        filter_id = torch.where(entropy_first < 0.4 * np.log(logits.shape[-1]))
+        filter_id = torch.where(entropy_first < args.sar_ent_threshold * np.log(logits.shape[-1]))
         entropy_first = entropy_first[filter_id]
         loss = entropy_first.mean()
         loss.backward()
@@ -266,17 +261,58 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         new_logits = classifier(x)
         entropy_second = softmax_entropy(new_logits)
         entropy_second = entropy_second[filter_id]
-        filter_id = torch.where(entropy_second < 0.4 * np.log(logits.shape[-1]))
+        filter_id = torch.where(entropy_second < args.sar_ent_threshold * np.log(logits.shape[-1]))
         loss_second = entropy_second[filter_id].mean()
         loss_second.backward()
         optimizer.second_step(zero_grad=True)
 
         EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
         return classifier, x
-    if 'dua' or 'bn_stats' in args.method:
+    if 'pl' in args.method:
         logits = classifier(x)
-    optimizer.step()
+        pseudo_label = torch.argmax(logits, dim=-1)
+        loss = F.cross_entropy(logits, pseudo_label)
+        loss.backward()
+    if 'memo' in args.method:
+        x_aug = get_augmented_input(x, args.num_augs)
+        logits = classifier(x_aug)
+        loss = marginal_entropy(args, logits)
+        loss.backward()
+    if 'shot' in args.method:
+        # pseudo-labeling
+        feats = classifier.module.get_feature(x).detach() if isinstance(classifier, torch.nn.DataParallel) else classifier.get_feature(x).detach()
+        logits = classifier(x)
+        probs = logits.softmax(dim=-1)
+        centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
+        pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(centroids, p=2, dim=0)).argmax(dim=-1)
+        new_centroids = (feats.T @ F.one_hot(pseudo_labels, num_classes=logits.shape[-1]).float()) / pseudo_labels.sum(dim=0, keepdim=True)
+        new_pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(new_centroids, p=2, dim=0)).argmax(dim=-1)
+        pl_loss = F.cross_entropy(logits, new_pseudo_labels)
+        loss = args.shot_pl_loss_weight * pl_loss
 
+        # entropy loss
+        entropy_loss = softmax_entropy(logits).mean()
+        loss += entropy_loss
+
+        # divergence loss
+        softmax_out = F.softmax(logits, dim=-1)
+        msoftmax = softmax_out.mean(dim=0)
+        div_loss = torch.sum(msoftmax * torch.log(msoftmax + 1e-5))
+        loss += div_loss
+
+        loss.backward()
+    if 'dua' in args.method:
+        mom_new = mom_pre * args.dua_decay_factor
+        for m in classifier.modules():
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                m.train()
+                m.momentum = mom_new + args.dua_min_mom
+        mom_pre = mom_new
+        _ = classifier(x)
+    if 'bn_stats' in args.method:
+        _ = classifier(x)
+
+    optimizer.step()
     return classifier, x
 
 
@@ -336,8 +372,9 @@ def main(args):
     classifier = torch.nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
-    global EMA
+    global EMA, mom_pre
     EMA = None
+    mom_pre = args.dua_mom_pre
 
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
@@ -390,14 +427,48 @@ def tune_tta_hparams(args):
     if 'tent' in args.method:
         test_lr_list = [1e-4, 1e-3, 1e-2]
         num_steps_list = [1, 3, 5, 10]
-        hparams_to_search_str = ['test_lr', 'num_steps']
         hparams_to_search = [test_lr_list, num_steps_list]
+        hparams_to_search_str = ['test_lr', 'num_steps']
     if 'lame' in args.method:
-        affinity_list = ['rbf', 'kNN', 'linear']
+        lame_affinity_list = ['rbf', 'kNN', 'linear']
         lame_knn_list = [1, 3, 5, 10]
         lame_max_steps_list = [1, 10, 100]
-        hparams_to_search_str = ['affinity', 'lame_knn', 'lame_max_steps']
-        hparams_to_search = [affinity_list, lame_knn_list, lame_max_steps_list]
+        hparams_to_search = [lame_affinity_list, lame_knn_list, lame_max_steps_list]
+        hparams_to_search_str = ['lame_affinity', 'lame_knn', 'lame_max_steps']
+    if 'sar' in args.method:
+        test_lr_list = [1e-4, 1e-3, 1e-2]
+        num_steps_list = [1, 3, 5, 10]
+        sar_ent_threshold_list = [0.2, 0.4, 0.6, 0.8]
+        sar_eps_threshold_list = [0.01, 0.05, 0.1]
+        hparams_to_search = [test_lr_list, num_steps_list, sar_ent_threshold_list, sar_eps_threshold_list]
+        hparams_to_search_str = ['test_lr', 'num_steps', 'sar_ent_threshold', 'sar_eps_threshold']
+    if 'pl' in args.method:
+        test_lr_list = [1e-4, 1e-3, 1e-2]
+        num_steps_list = [1, 3, 5, 10]
+        hparams_to_search_str = ['test_lr', 'num_steps']
+        hparams_to_search = [test_lr_list, num_steps_list]
+    if 'memo' in args.method:
+        test_lr_list = [1e-6, 1e-5, 1e-4, 1e-3]
+        num_steps_list = [1, 2]
+        num_augs_list = [4, 16, 64]
+        hparams_to_search = [test_lr_list, num_steps_list, num_augs_list]
+        hparams_to_search_str = ['test_lr', 'num_steps', 'memo_num_augs']
+    if 'dua' in args.method:
+        num_steps_list = [1, 3, 5, 10]
+        dua_decay_factor_list = [0.9, 0.94, 0.99]
+        hparams_to_search = [num_steps_list, dua_decay_factor_list]
+        hparams_to_search_str = ['num_steps', 'dua_decay_factor']
+    if 'bn_stats' in args.method:
+        bn_stats_prior_list = [0, 0.2, 0.4, 0.6, 0.8]
+        hparams_to_search = [bn_stats_prior_list]
+        hparams_to_search_str = ['bn_stats_prior']
+    if 'shot' in args.method:
+        test_lr_list = [1e-4, 1e-3, 1e-2]
+        num_steps_list = [1, 3, 5, 10]
+        shot_pl_loss_weight_list = [0, 0.1, 0.3, 0.5, 1]
+        hparams_to_search = [test_lr_list, num_steps_list, shot_pl_loss_weight_list]
+        hparams_to_search_str = ['test_lr', 'num_steps', 'shot_pl_loss_weight']
+
     hparam_space = list(itertools.product(*hparams_to_search))
     random.shuffle(hparam_space)
 
@@ -552,7 +623,7 @@ def vis(args):
                 ),
             })
             wandb.log({f'masked pc': obj3d}, step=b, commit=False)
-        break # TODO: remove break?
+        break
     io.cprint("Visualization Done")
 
 

@@ -410,8 +410,8 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
     Return:
         A jittered shape
     """
-    N, C = pointcloud.shape
-    pointcloud += np.clip(sigma * np.random.randn(N, C), -clip, clip)
+    # N, C = pointcloud.shape
+    pointcloud += np.clip(sigma * np.random.randn(*pointcloud.shape), -clip, clip)
     return pointcloud.astype('float32')
 
 

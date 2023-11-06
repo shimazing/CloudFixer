@@ -1,5 +1,6 @@
 import copy
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -29,20 +30,60 @@ def load_model_and_optimizer(model, optimizer, scheduler, model_state, optimizer
 
 def setup_optimizer(args, params):
     if 'sar' in args.method:
-        optimizer = SAM(params=params, base_optimizer=getattr(torch.optim, args.test_optim), lr=args.test_lr)
+        optimizer = SAM(params=params, base_optimizer=getattr(torch.optim, args.test_optim), lr=args.test_lr, rho=args.sar_eps_threshold)
     else:
         optimizer = getattr(torch.optim, args.test_optim)(params, lr=args.test_lr)
     return optimizer
 
 
 def configure_model(args, model):
-    if 'tent' in args.method or 'bn_stats' in args.method:
+    if 'tent' in args.method:
         model.train()
         for m in model.modules():
-            if isinstance(m, nn.BatchNorm1d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
                 m.track_running_stats = False
                 m.running_mean = None
                 m.running_var = None
+    if 'sar' in args.method:
+        model.train()
+        model.requires_grad_(False)
+        for m in model.modules():
+            if isinstance(m, nn.BatchNorm2d):
+                m.requires_grad_(True)
+                m.track_running_stats = False
+                m.running_mean = None
+                m.running_var = None
+            if isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
+                m.requires_grad_(True)
+    if 'pl' in args.method:
+        model.train()
+    if 'memo' in args.method:
+        model.train()
+        for m in model.modules():
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                m.train()
+                m.momentum = args.memo_bn_momentum
+    if 'shot' in args.method:
+        model.train()
+        m = list(model.modules())[-1]
+        m.eval()
+        m.requires_grad_(False)
+    if 'dua' in args.method:
+        model.eval()
+        for m in model.modules():
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                m.train()
+    if 'bn_stats' in args.method:
+        model.eval()
+        for m in model.modules():
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                if not args.bn_stats_prior: # do not use source statistics
+                    m.track_running_stats = False
+                    m.running_mean = None
+                    m.running_var = None
+                else:
+                    m.track_running_stats = True
+                    m.momentum = 1 - args.bn_stats_prior
     return model
 
 
@@ -62,7 +103,7 @@ def collect_params(model, train_params):
                         params.append(p)
                         names.append(f"{nm}.{np}")
         if 'BN' in train_params:
-            if isinstance(m, nn.BatchNorm1d) or isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm3d):
+            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
                 for np, p in m.named_parameters():
                     if np in ['weight', 'bias']:
                         params.append(p)
@@ -107,6 +148,16 @@ def softmax_entropy(x, dim=-1):
 def softmax_diversity_regularizer(x): # shot
     x2 = x.softmax(-1).mean(0)  # [b, c] -> [c]
     return (x2 * safe_log(x2, ver=3)).sum()
+
+
+def marginal_entropy(args, logits):
+    per_sample_logits = []
+    for i in range(0, len(logits), args.num_augs):
+        per_sample_logits.append(logits[i:i + args.num_augs])
+    per_sample_logits = torch.stack(per_sample_logits, dim=0)
+    probs = per_sample_logits.softmax(dim=-1)
+    probs = probs.mean(dim=1)
+    return -(probs * torch.log(probs)).sum(dim=-1).mean()
 
 
 
@@ -190,10 +241,10 @@ def laplacian_optimization(unary, kernel, bound_lambda=1, max_steps=100):
 
 
 def batch_evaluation(args, model, x):
-    out = model(x)
+    out = model(x).detach()
     unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
-    feats = F.normalize(model.module.get_feature(x) if isinstance(model, torch.nn.DataParallel) else model.get_feature(x), p=2, dim=-1)
-    affinity = eval(f'{args.affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+    feats = F.normalize(model.module.get_feature(x).detach() if isinstance(model, torch.nn.DataParallel) else model.get_feature(x), p=2, dim=-1).detach()
+    affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
     return Y

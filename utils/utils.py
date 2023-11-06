@@ -96,11 +96,14 @@ def get_augmented_input(x, num_augs=4):
     augs = [
         lambda x: random_rotate_one_axis(x, axis='z'),
         jitter_pointcloud,
-        remove,
         translate_pointcloud,
+        # remove,
     ]
-    selected_augs = np.random.choice(augs, num_augs - 1, replace=True)
-    return torch.stack([torch.tensor(selected_aug(x.cpu().numpy())).to(device) for selected_aug in selected_augs], dim=0)
+    selected_augs = np.random.choice(augs, num_augs-1, replace=True)
+    return torch.cat(
+        [x] + [torch.tensor(selected_aug(x.cpu().numpy())).to(device) for selected_aug in selected_augs],
+        dim=0
+    )
 
 
 def projected_gradient_descent(args, model, x, y, loss_fn, num_steps, step_size, step_norm, eps, eps_norm, y_target=None):

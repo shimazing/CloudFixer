@@ -728,7 +728,7 @@ hparam_tune_memo() {
     shot_pl_loss_weight=0.3
     ######################################################
 
-    hyperparameters for memo
+    # hyperparameters for memo
     method=memo
     episodic=False
     test_optim=AdamW

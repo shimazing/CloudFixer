@@ -2,6 +2,7 @@ import math
 
 import numpy as np
 import torch
+import torch.nn as nn
 from torch.nn import functional as F
 
 from diffusion_model.transformer import PointDiffusionTransformer
@@ -74,6 +75,7 @@ def cosine_beta_schedule(timesteps, s=0.008, raise_to_power: float = 1):
 
     return alphas_cumprod
 
+
 def linear_schedule(timesteps, min_beta=1e-4, max_beta=0.02):
     steps = timesteps + 1
     betas = np.linspace(min_beta, max_beta, steps)
@@ -81,7 +83,6 @@ def linear_schedule(timesteps, min_beta=1e-4, max_beta=0.02):
     alphas_cumprod = np.cumprod(alphas)
 
     return alphas_cumprod
-
 
 
 def gaussian_KL(q_mu, q_sigma, p_mu, p_sigma, node_mask):
@@ -121,7 +122,8 @@ def gaussian_KL_for_dimension(q_mu, q_sigma, p_mu, p_sigma, d):
     return d * torch.log(p_sigma / q_sigma) + 0.5 * (d * q_sigma**2 + mu_norm2) / (p_sigma**2) - 0.5 * d
 
 
-class PositiveLinear(torch.nn.Module):
+
+class PositiveLinear(nn.Module):
     """Linear layer with weights forced to be positive."""
 
     def __init__(self, in_features: int, out_features: int, bias: bool = True,
@@ -154,7 +156,8 @@ class PositiveLinear(torch.nn.Module):
         return F.linear(input, positive_weight, self.bias)
 
 
-class SinusoidalPosEmb(torch.nn.Module):
+
+class SinusoidalPosEmb(nn.Module):
     def __init__(self, dim):
         super().__init__()
         self.dim = dim
@@ -171,7 +174,8 @@ class SinusoidalPosEmb(torch.nn.Module):
         return emb
 
 
-class PredefinedNoiseSchedule(torch.nn.Module):
+
+class PredefinedNoiseSchedule(nn.Module):
     """
     Predefined noise schedule. Essentially creates a lookup array for predefined (non-learned) noise schedules.
     """
@@ -212,7 +216,8 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         return self.gamma[t_int.to(self.gamma.device)]
 
 
-class GammaNetwork(torch.nn.Module):
+
+class GammaNetwork(nn.Module):
     """The gamma network models a monotonic increasing function. Construction as in the VDM paper."""
     def __init__(self):
         super().__init__()
@@ -252,11 +257,8 @@ class GammaNetwork(torch.nn.Module):
         return gamma
 
 
-#def cdf_standard_gaussian(x):
-#    return 0.5 * (1. + torch.erf(x / math.sqrt(2)))
 
-
-class DiffusionModel(torch.nn.Module):
+class DiffusionModel(nn.Module):
     """
     The E(n) Diffusion Module.
     """
@@ -610,7 +612,6 @@ class DiffusionModel(torch.nn.Module):
         gamma_s = self.gamma(s)
         gamma_t = self.gamma(t)
 
-
         sigma_s = self.sigma(gamma_s, target_tensor=zt)
         sigma_t = self.sigma(gamma_t, target_tensor=zt)
         alpha_s = self.alpha(gamma_s, target_tensor=zt)
@@ -633,7 +634,6 @@ class DiffusionModel(torch.nn.Module):
 
         zs = z0_est * alpha_s + sigma_s * eps_t
         return zs
-
 
     def sample_p_zs_given_zt(self, s, t, zt, node_mask,
             fix_noise=False, cond_fn=None, x=None, return_noise=False,
@@ -673,7 +673,6 @@ class DiffusionModel(torch.nn.Module):
             return zs, noise
         return zs
 
-
     def sample_noise(self, n_samples, n_nodes,
             node_mask, device=None):
         """
@@ -705,7 +704,6 @@ class DiffusionModel(torch.nn.Module):
         x = self.sample_p_x_given_z0(z, node_mask, fix_noise=fix_noise)
         return x
 
-
     def log_info(self):
         """
         Some info logging of the model.
@@ -718,7 +716,6 @@ class DiffusionModel(torch.nn.Module):
 
         info = {
             'log_SNR_max': log_SNR_max.item(),
-            'log_SNR_min': log_SNR_min.item()}
-        # print(info)
-
+            'log_SNR_min': log_SNR_min.item()
+        }
         return info

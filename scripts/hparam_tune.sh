@@ -1,38 +1,39 @@
+# dataset
+DATASET_ROOT_DIR=../nfs-client/datasets
+dataset=modelnet40c_original
+dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
+adv_attack=False # True, False
+
+# classifier
+classifier=DGCNN
+classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_modelnet40_best_test.pth
+
+# diffusion model
+diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+
+#################### placeholders ####################
+# lame
+lame_affinity=rbf
+lame_knn=3
+lame_max_steps=1
+# sar
+sar_ent_threshold=0.4
+sar_eps_threshold=0.05 
+# memo
+memo_num_augs=64
+memo_bn_momentum=1/17
+# dua
+dua_mom_pre=0.1
+dua_min_mom=0.005
+dua_decay_factor=0.94
+# bn_stats
+bn_stats_prior=0
+# shot
+shot_pl_loss_weight=0.3
+#################### placeholders ####################
+
+
 hparam_tune() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters to tune for tent
     # method=tent
     # episodic=False
@@ -114,19 +115,23 @@ hparam_tune() {
     # ### hyperparameters to tune for bn_stats
     # bn_stats_prior=0 # 0, 0.2, 0.4, 0.6, 0.8
 
-    # hyperparameters for shot
-    method=shot
-    episodic=True
-    test_optim=AdamW
-    params_to_adapt="all"
-    batch_size=32
-    # hyperparameters to tune for shot
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=1 # 1 3 5 10
-    shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
+    # # hyperparameters for shot
+    # method=shot
+    # episodic=True
+    # test_optim=AdamW
+    # params_to_adapt="all"
+    # batch_size=64
+    # # hyperparameters to tune for shot
+    # test_lr=1e-4 # 1e-4 1e-3 1e-2
+    # num_steps=1 # 1 3 5 10
+    # shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
 
     # hyperparameters for dda
-    
+    method=dda
+    episodic=False # placeholder
+    test_optim=AdamW # placeholder
+    params_to_adapt="all" # placeholder
+    batch_size=32
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -205,40 +210,6 @@ hparam_tune() {
 
 
 hparam_tune_tent() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters to tune for tent
     method=tent
     episodic=False
@@ -248,21 +219,6 @@ hparam_tune_tent() {
     ### hyperparameters to tune for tent
     test_lr=1e-4 # 1e-4 1e-3 1e-2
     num_steps=10 # 1 3 5 10
-
-    # hyperparameters for cloudfixer
-    t_min=0.02
-    t_max=0.8
-    denoising_thrs=100
-    pow=1
-    lam_l=1
-    lam_h=10
-    lr=0.2
-    steps=400
-    wd=0
-    optim=adamax
-    optim_end_factor=0.05
-    subsample=700
-    weighted_reg=True
 
     # logging
     wandb_usr=drumpt
@@ -326,40 +282,6 @@ hparam_tune_tent() {
 
 
 hparam_tune_lame() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters for lame
     method=lame
     episodic=False # placeholder
@@ -367,7 +289,7 @@ hparam_tune_lame() {
     test_lr=1e-4 # palceholder
     params_to_adapt="LN BN GN" # placeholder
     num_steps=0 # placeholder
-    batch_size=16 # important
+    batch_size=64 # important
     ### hyperparameters to tune for lame
     lame_affinity=rbf # rbf, kNN, linear
     lame_knn=3 # 1, 3, 5, 10
@@ -450,41 +372,7 @@ hparam_tune_lame() {
 
 
 hparam_tune_sar() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
-    hyperparameters for sar
+    # hyperparameters for sar
     method=sar
     episodic=False
     test_optim=AdamW
@@ -573,40 +461,6 @@ hparam_tune_sar() {
 
 
 hparam_tune_pl() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters for pl
     method=pl
     episodic=False
@@ -694,43 +548,9 @@ hparam_tune_pl() {
 
 
 hparam_tune_memo() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
-    hyperparameters for memo
+    # hyperparameters for memo
     method=memo
-    episodic=False
+    episodic=True
     test_optim=AdamW
     params_to_adapt="all"
     batch_size=1
@@ -817,52 +637,18 @@ hparam_tune_memo() {
 
 
 hparam_tune_dua() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
+    # hyperparameters for dua
+    method=dua
+    episodic=False
+    test_optim=AdamW # placeholder
+    params_to_adapt="LN BN GN" # placeholder
+    test_lr=1e-4 # placeholder
     dua_mom_pre=0.1
     dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
-    # hyperparameters for dua
-    # method=dua
-    # episodic=False
-    # test_optim=AdamW # placeholder
-    # params_to_adapt="LN BN GN" # placeholder
-    # test_lr=1e-4 # placeholder
-    # dua_mom_pre=0.1
-    # dua_min_mom=0.005
-    # batch_size=64
-    # ### hyperparameters to tune for dua
-    # num_steps=1 # 1, 3, 5, 10
-    # dua_decay_factor=0.94 # 0.9, 0.94, 0.99
+    batch_size=64
+    ### hyperparameters to tune for dua
+    num_steps=1 # 1, 3, 5, 10
+    dua_decay_factor=0.94 # 0.9, 0.94, 0.99
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -941,40 +727,6 @@ hparam_tune_dua() {
 
 
 hparam_tune_bn_stats() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters for bn_stats
     method=bn_stats
     episodic=False
@@ -1063,46 +815,12 @@ hparam_tune_bn_stats() {
 
 
 hparam_tune_shot() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
-
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
-
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
-
-    #################### placeholders ####################
-    # lame
-    lame_affinity=rbf
-    lame_knn=3
-    lame_max_steps=1
-    # sar
-    sar_ent_threshold=0.4
-    sar_eps_threshold=0.05 
-    # memo
-    memo_num_augs=64
-    memo_bn_momentum=1/17
-    # dua
-    dua_mom_pre=0.1
-    dua_min_mom=0.005
-    dua_decay_factor=0.94
-    # bn_stats
-    bn_stats_prior=0
-    # shot
-    shot_pl_loss_weight=0.3
-    ######################################################
-
     # hyperparameters for shot
     method=shot
-    episodic=True
+    episodic=False
     test_optim=AdamW
     params_to_adapt="all"
-    batch_size=32
+    batch_size=64
     # hyperparameters to tune for shot
     test_lr=1e-4 # 1e-4 1e-3 1e-2
     num_steps=1 # 1 3 5 10
@@ -1185,10 +903,10 @@ hparam_tune_shot() {
 
 # hparam_tune
 # hparam_tune_tent
-# hparam_tune_lame
+hparam_tune_lame
 # hparam_tune_sar
-hparam_tune_pl
+# hparam_tune_pl
 hparam_tune_memo
-hparam_tune_dua
-hparam_tune_bn_stats
+# hparam_tune_dua
+# hparam_tune_bn_stats
 hparam_tune_shot

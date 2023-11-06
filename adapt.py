@@ -231,6 +231,8 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
 
 
 def dda(args, model, x, mask, ind, classifier):
+    noise = model(x)
+    print(f"noise.shape: {noise.shape}")
     return x
 
 
@@ -274,7 +276,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         loss = F.cross_entropy(logits, pseudo_label)
         loss.backward()
     if 'memo' in args.method:
-        x_aug = get_augmented_input(x, args.num_augs)
+        x_aug = get_augmented_input(x, args.memo_num_augs)
         logits = classifier(x_aug)
         loss = marginal_entropy(args, logits)
         loss.backward()
@@ -450,8 +452,8 @@ def tune_tta_hparams(args):
     if 'memo' in args.method:
         test_lr_list = [1e-6, 1e-5, 1e-4, 1e-3]
         num_steps_list = [1, 2]
-        num_augs_list = [4, 16, 64]
-        hparams_to_search = [test_lr_list, num_steps_list, num_augs_list]
+        memo_num_augs_list = [16, 32, 64]
+        hparams_to_search = [test_lr_list, num_steps_list, memo_num_augs_list]
         hparams_to_search_str = ['test_lr', 'num_steps', 'memo_num_augs']
     if 'dua' in args.method:
         num_steps_list = [1, 3, 5, 10]

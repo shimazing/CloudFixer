@@ -152,8 +152,8 @@ def softmax_diversity_regularizer(x): # shot
 
 def marginal_entropy(args, logits):
     per_sample_logits = []
-    for i in range(0, len(logits), args.num_augs):
-        per_sample_logits.append(logits[i:i + args.num_augs])
+    for i in range(0, len(logits), args.memo_num_augs):
+        per_sample_logits.append(logits[i:i + args.memo_num_augs])
     per_sample_logits = torch.stack(per_sample_logits, dim=0)
     probs = per_sample_logits.softmax(dim=-1)
     probs = probs.mean(dim=1)

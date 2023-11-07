@@ -10,8 +10,8 @@ import torch
 from torch.utils.data import DataLoader
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
-from diffusion_model import diffusion, utils as flow_utils
-from diffusion_model.build_model import get_model, get_optim
+from diffusion import diffusion, utils as flow_utils
+from diffusion.build_model import get_model, get_optim
 from utils import losses, utils, visualizer as vis
 
 

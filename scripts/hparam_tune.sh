@@ -30,6 +30,11 @@ dua_decay_factor=0.94
 bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
+# dda
+dda_steps=150 # official: 150
+dda_guidance_weight=6 # official: 6
+dda_lpf_method=fps # mean, median, fps
+dda_lpf_scaling_factor=6 # 3, 6, 9
 #################### placeholders ####################
 
 
@@ -128,10 +133,17 @@ hparam_tune() {
 
     # hyperparameters for dda
     method=dda
+    batch_size=16
     episodic=False # placeholder
     test_optim=AdamW # placeholder
     params_to_adapt="all" # placeholder
-    batch_size=32
+    num_steps=1 # placeholder
+    test_lr=1e-4 # placeholder
+    # hyperparameters to tune for dda
+    dda_steps=10 # default: 150
+    dda_guidance_weight=4 # default: 4
+    dda_lpf_method=fps # None, mean, median, fps
+    dda_lpf_scaling_factor=6 # 3, 6, 9
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -190,8 +202,12 @@ hparam_tune() {
             --dua_decay_factor ${dua_decay_factor} \
             --bn_stats_prior ${bn_stats_prior} \
             --shot_pl_loss_weight ${shot_pl_loss_weight} \
+            --dda_steps ${dda_steps} \
+            --dda_guidance_weight ${dda_guidance_weight} \
+            --dda_lpf_method ${dda_lpf_method} \
+            --dda_lpf_scaling_factor ${dda_lpf_scaling_factor} \
             --exp_name ${exp_name} \
-            --mode hparam_tune \
+            --mode eval \
             --model transformer \
             --lr ${lr} \
             --n_update ${steps} \
@@ -901,12 +917,12 @@ hparam_tune_shot() {
     done
 }
 
-# hparam_tune
+hparam_tune
 # hparam_tune_tent
-hparam_tune_lame
+# hparam_tune_lame
 # hparam_tune_sar
 # hparam_tune_pl
-hparam_tune_memo
+# hparam_tune_memo
 # hparam_tune_dua
 # hparam_tune_bn_stats
-hparam_tune_shot
+# hparam_tune_shot

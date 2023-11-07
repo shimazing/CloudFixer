@@ -10,13 +10,14 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
-from diffusion_model.build_model import get_model
-from classification_model import models
+from diffusion.build_model import get_model
+from classifier import models
 from utils import logging
 from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
 from utils.visualizer import visualize_pclist
+from utils.chamfer_distance.chamfer_distance import ChamferDistance
 
 
 def parse_arguments():
@@ -65,6 +66,10 @@ def parse_arguments():
     parser.add_argument('--dua_min_mom', type=float, default=0.005)
     parser.add_argument('--bn_stats_prior', type=float, default=0)
     parser.add_argument('--shot_pl_loss_weight', type=float, default=0.3)
+    parser.add_argument('--dda_steps', type=int, default=150)
+    parser.add_argument('--dda_guidance_weight', type=float, default=6)
+    parser.add_argument('--dda_lpf_method', type=str, default='fps')
+    parser.add_argument('--dda_lpf_scaling_factor', type=float, default=6)
 
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
@@ -229,9 +234,46 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
 
 
 def dda(args, model, x, mask, ind, classifier):
-    noise = model(x)
-    print(f"noise.shape: {noise.shape}")
-    return x
+    # TODO: implement self-ensembling
+    chamfer_dist = ChamferDistance()
+    if isinstance(model, torch.nn.DataParallel):
+        model = model.module
+
+    t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
+    gamma_t = model.inflate_batch_array(model.gamma(t), x)
+    alpha_t = model.alpha(gamma_t, x)
+    sigma_t = model.sigma(gamma_t, x)
+
+    node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
+    eps = model.sample_noise(n_samples=x.size(0),
+        n_nodes=x.size(1),
+        node_mask=node_mask,
+    )
+    z_t = (x * alpha_t + eps * sigma_t).requires_grad_(True)
+    # z_t = x.clone().requires_grad_(True) # TODO: remove (only for experiment)
+
+    for step in tqdm(range(args.dda_steps, 0, -1)):
+        t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
+        gamma_t = model.inflate_batch_array(model.gamma(t), x)
+        alpha_t = model.alpha(gamma_t, x)
+        sigma_t = model.sigma(gamma_t, x)
+
+        t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
+        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+
+        # low-pass filtering
+        pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
+        x0_est = (z_t - sigma_t * pred_noise) / alpha_t
+        # TODO: perform low-pass fltering here for x0_est, x
+        dist1, dist2 = chamfer_dist(x0_est, x)
+        cd_loss = torch.mean(dist1) + torch.mean(dist2)
+        grad = torch.autograd.grad(
+            cd_loss,
+            z_t,
+            allow_unused=True,
+        )[0]
+        z_t = (z_t_m1 - args.dda_guidance_weight * grad).requires_grad_(True)
+    return z_t
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):

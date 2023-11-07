@@ -69,7 +69,7 @@ def parse_arguments():
     parser.add_argument('--dda_steps', type=int, default=150)
     parser.add_argument('--dda_guidance_weight', type=float, default=6)
     parser.add_argument('--dda_lpf_method', type=str, default='fps')
-    parser.add_argument('--dda_lpf_scaling_factor', type=float, default=6)
+    parser.add_argument('--dda_lpf_scale', type=float, default=4)
 
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
@@ -250,7 +250,6 @@ def dda(args, model, x, mask, ind, classifier):
         node_mask=node_mask,
     )
     z_t = (x * alpha_t + eps * sigma_t).requires_grad_(True)
-    # z_t = x.clone().requires_grad_(True) # TODO: remove (only for experiment)
 
     for step in tqdm(range(args.dda_steps, 0, -1)):
         t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
@@ -261,11 +260,10 @@ def dda(args, model, x, mask, ind, classifier):
         t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
         z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
 
-        # low-pass filtering
+        # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - sigma_t * pred_noise) / alpha_t
-        # TODO: perform low-pass fltering here for x0_est, x
-        dist1, dist2 = chamfer_dist(x0_est, x)
+        dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
             cd_loss,
@@ -283,6 +281,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     if 'pre_trans' in args.method:
         x = pre_trans(args, diffusion_model, x, mask, ind)
     if 'dda' in args.method:
+        x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind, classifier)
 
     # model adaptation
@@ -360,14 +359,19 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         optimizer.step()
 
     # output adaptation
+    is_training = classifier.training
+    if is_training:
+        classifier.eval()
+
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif classifier.training:
-        classifier.eval()
-        logits_after = classifier(x)
-        classifier.train()
+    elif 'dda' in args.method:
+        logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     else:
         logits_after = classifier(x)
+
+    if is_training:
+        classifier.train()
     return logits_after
 
 

@@ -1248,6 +1248,18 @@ def softmax(x):
     return f_x
 
 
+# TODO: perform low-pass fltering here for x0_est, x
+def low_pass_filtering(x, method, scale):
+    if not method or scale == 1:
+        return x
+    elif method == 'fps':
+        return farthest_point_sample(x, npoint=int(x.shape[1] / scale), device=x.device)[-1]
+    elif method == 'mean':
+        return x
+    elif method == 'median':
+        return x
+
+
 def get_color(coords, corners=np.array([
                                     [-1, -1, -1],
                                     [-1, 1, -1],

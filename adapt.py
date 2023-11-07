@@ -286,76 +286,89 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         x = dda(args, diffusion_model, x, mask, ind, classifier)
 
     # model adaptation
-    optimizer.zero_grad()
-    if 'tent' in args.method:
-        logits = classifier(x)
-        loss = softmax_entropy(logits).mean()
-        loss.backward()
-    if 'sar' in args.method:
-        logits = classifier(x)
-        entropy_first = softmax_entropy(logits)
-        filter_id = torch.where(entropy_first < args.sar_ent_threshold * np.log(logits.shape[-1]))
-        entropy_first = entropy_first[filter_id]
-        loss = entropy_first.mean()
-        loss.backward()
-        optimizer.first_step(zero_grad=True)
+    for _ in range(1, args.num_steps + 1):
+        # batch normalization statistics update methods
+        if 'dua' in args.method:
+            mom_new = mom_pre * args.dua_decay_factor
+            for m in classifier.modules():
+                if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                    m.train()
+                    m.momentum = mom_new + args.dua_min_mom
+            mom_pre = mom_new
+            _ = classifier(x)
+        if 'bn_stats' in args.method:
+            _ = classifier(x)
 
-        new_logits = classifier(x)
-        entropy_second = softmax_entropy(new_logits)
-        entropy_second = entropy_second[filter_id]
-        filter_id = torch.where(entropy_second < args.sar_ent_threshold * np.log(logits.shape[-1]))
-        loss_second = entropy_second[filter_id].mean()
-        loss_second.backward()
-        optimizer.second_step(zero_grad=True)
+        # model parameter adaptation
+        optimizer.zero_grad()
+        if 'tent' in args.method:
+            logits = classifier(x)
+            loss = softmax_entropy(logits).mean()
+            loss.backward()
+        if 'sar' in args.method:
+            logits = classifier(x)
+            entropy_first = softmax_entropy(logits)
+            filter_id = torch.where(entropy_first < args.sar_ent_threshold * np.log(logits.shape[-1]))
+            entropy_first = entropy_first[filter_id]
+            loss = entropy_first.mean()
+            loss.backward()
+            optimizer.first_step(zero_grad=True)
 
-        EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
-        return classifier, x
-    if 'pl' in args.method:
-        logits = classifier(x)
-        pseudo_label = torch.argmax(logits, dim=-1)
-        loss = F.cross_entropy(logits, pseudo_label)
-        loss.backward()
-    if 'memo' in args.method:
-        x_aug = get_augmented_input(x, args.memo_num_augs)
-        logits = classifier(x_aug)
-        loss = marginal_entropy(args, logits)
-        loss.backward()
-    if 'shot' in args.method:
-        # pseudo-labeling
-        feats = classifier.module.get_feature(x).detach() if isinstance(classifier, torch.nn.DataParallel) else classifier.get_feature(x).detach()
-        logits = classifier(x)
-        probs = logits.softmax(dim=-1)
-        centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
-        pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(centroids, p=2, dim=0)).argmax(dim=-1)
-        new_centroids = (feats.T @ F.one_hot(pseudo_labels, num_classes=logits.shape[-1]).float()) / pseudo_labels.sum(dim=0, keepdim=True)
-        new_pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(new_centroids, p=2, dim=0)).argmax(dim=-1)
-        pl_loss = F.cross_entropy(logits, new_pseudo_labels)
-        loss = args.shot_pl_loss_weight * pl_loss
+            new_logits = classifier(x)
+            entropy_second = softmax_entropy(new_logits)
+            entropy_second = entropy_second[filter_id]
+            filter_id = torch.where(entropy_second < args.sar_ent_threshold * np.log(logits.shape[-1]))
+            loss_second = entropy_second[filter_id].mean()
+            loss_second.backward()
+            optimizer.second_step(zero_grad=True)
 
-        # entropy loss
-        entropy_loss = softmax_entropy(logits).mean()
-        loss += entropy_loss
+            EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
+            continue # we already call optimizer.first_step and optimizer.second_step
+        if 'pl' in args.method:
+            logits = classifier(x)
+            pseudo_label = torch.argmax(logits, dim=-1)
+            loss = F.cross_entropy(logits, pseudo_label)
+            loss.backward()
+        if 'memo' in args.method:
+            x_aug = get_augmented_input(x, args.memo_num_augs)
+            logits = classifier(x_aug)
+            loss = marginal_entropy(args, logits)
+            loss.backward()
+        if 'shot' in args.method:
+            # pseudo-labeling
+            feats = classifier.module.get_feature(x).detach() if isinstance(classifier, torch.nn.DataParallel) else classifier.get_feature(x).detach()
+            logits = classifier(x)
+            probs = logits.softmax(dim=-1)
+            centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
+            pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(centroids, p=2, dim=0)).argmax(dim=-1)
+            new_centroids = (feats.T @ F.one_hot(pseudo_labels, num_classes=logits.shape[-1]).float()) / pseudo_labels.sum(dim=0, keepdim=True)
+            new_pseudo_labels = (F.normalize(feats, p=2, dim=-1) @ F.normalize(new_centroids, p=2, dim=0)).argmax(dim=-1)
+            pl_loss = F.cross_entropy(logits, new_pseudo_labels)
+            loss = args.shot_pl_loss_weight * pl_loss
 
-        # divergence loss
-        softmax_out = F.softmax(logits, dim=-1)
-        msoftmax = softmax_out.mean(dim=0)
-        div_loss = torch.sum(msoftmax * torch.log(msoftmax + 1e-5))
-        loss += div_loss
+            # entropy loss
+            entropy_loss = softmax_entropy(logits).mean()
+            loss += entropy_loss
 
-        loss.backward()
-    if 'dua' in args.method:
-        mom_new = mom_pre * args.dua_decay_factor
-        for m in classifier.modules():
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-                m.train()
-                m.momentum = mom_new + args.dua_min_mom
-        mom_pre = mom_new
-        _ = classifier(x)
-    if 'bn_stats' in args.method:
-        _ = classifier(x)
+            # divergence loss
+            softmax_out = F.softmax(logits, dim=-1)
+            msoftmax = softmax_out.mean(dim=0)
+            div_loss = torch.sum(msoftmax * torch.log(msoftmax + 1e-5))
+            loss += div_loss
 
-    optimizer.step()
-    return classifier, x
+            loss.backward()
+        optimizer.step()
+
+    # output adaptation
+    if 'lame' in args.method:
+        logits_after = batch_evaluation(args, classifier, x)
+    elif classifier.training:
+        classifier.eval()
+        logits_after = classifier(x)
+        classifier.train()
+    else:
+        logits_after = classifier(x)
+    return logits_after
 
 
 def main(args):
@@ -443,22 +456,7 @@ def main(args):
         logits_before = original_classifier(x)
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
-        # logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-
-        # TODO: fix this
-        for _ in range(1, args.num_steps + 1):
-            classifier, x = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-
-        # output adaptation
-        if 'lame' in args.method:
-            import utils.tta_utils as lame
-            logits_after = lame.batch_evaluation(args, classifier, x)
-        elif classifier.training:
-            classifier.eval()
-            logits_after = classifier(x)
-            classifier.train()
-        else:
-            logits_after = classifier(x)            
+        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
         all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")

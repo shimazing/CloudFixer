@@ -99,6 +99,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device,
     model_dp.train()
     model.train()
     nll_epoch = []
+
     n_iterations = len(loader)
     for i, data in enumerate(loader):
         x = data[0].to(device, dtype)
@@ -116,7 +117,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device,
         if (i+1) % args.accum_grad == 0:
             optim.step()
             optim.zero_grad()
-
+ 
         # Update EMA if enabled.
         if args.ema_decay > 0:
             ema.update_model_average(model_ema, model)
@@ -126,6 +127,7 @@ def train_epoch(args, loader, epoch, model, model_dp, model_ema, ema, device,
                   f"Loss {loss.item():.2f}, "
                   f"GradNorm: {grad_norm:.1f}")
         nll_epoch.append(nll.item())
+
         if (epoch % args.test_epochs == 0) and (i % args.visualize_every_batch == 0) and not (epoch == 0 and i == 0):
             start = time.time()
             sample_and_save(model_ema, args, device, epoch=epoch,

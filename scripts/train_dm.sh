@@ -1,6 +1,6 @@
 # logging
 wandb_usr=drumpt
-DATASET_ROOT_DIR=../nfs-client/datasets
+DATASET_ROOT_DIR=../datasets
 test_epochs=100
 random_seed=0
 
@@ -10,7 +10,7 @@ train_dm_modelnet40() {
     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
     n_epochs=5000
 
-    CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=0,1 python3 train_dm.py \
+    CUDA_VISIBLE_DEVICES=0,1 python3 train_dm.py \
         --model transformer \
         --dataset ${dataset} \
         --dataset_dir ${dataset_dir} \

@@ -32,9 +32,9 @@ bn_stats_prior=0
 shot_pl_loss_weight=0.3
 # dda
 dda_steps=150 # official: 150
-dda_guidance_weight=6 # official: 6
+dda_guidance_weight=6 # official: 6 (3, 6, 9)
 dda_lpf_method=fps # mean, median, fps
-dda_lpf_scaling_factor=6 # 3, 6, 9
+dda_lpf_scaling_factor=4 # 2, 4, 8
 #################### placeholders ####################
 
 
@@ -56,11 +56,11 @@ hparam_tune() {
     # test_lr=1e-4 # palceholder
     # params_to_adapt="LN BN GN" # placeholder
     # num_steps=0 # placeholder
-    # batch_size=16 # important
+    # batch_size=64 # important
     # ### hyperparameters to tune for lame
-    # lame_affinity=rbf # rbf, kNN, linear
-    # lame_knn=3 # 1, 3, 5, 10
-    # lame_max_steps=1 # 1, 10, 100
+    # lame_affinity=kNN # rbf, kNN, linear
+    # lame_knn=1 # 1, 3, 5, 10
+    # lame_max_steps=10 # 1, 10, 100
 
     # hyperparameters for sar
     # method=sar
@@ -86,15 +86,15 @@ hparam_tune() {
 
     # hyperparameters for memo
     # method=memo
-    # episodic=False
+    # episodic=True
     # test_optim=AdamW
     # params_to_adapt="all"
     # batch_size=1
     # memo_bn_momentum=1/17
     # ### hyperparameters to tune for memo
-    # test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
+    # test_lr=1e-6 # 1e-6 1e-5 1e-4 1e-3
     # num_steps=1 # "1, 2"
-    # memo_num_augs=64 # "4 16 64"
+    # memo_num_augs=32 # "16 32 64"
 
     # hyperparameters for dua
     # method=dua
@@ -917,12 +917,12 @@ hparam_tune_shot() {
     done
 }
 
-hparam_tune
+# hparam_tune
 # hparam_tune_tent
 # hparam_tune_lame
 # hparam_tune_sar
 # hparam_tune_pl
-# hparam_tune_memo
-# hparam_tune_dua
-# hparam_tune_bn_stats
-# hparam_tune_shot
+hparam_tune_dua
+hparam_tune_bn_stats
+hparam_tune_shot
+hparam_tune_memo

@@ -5,6 +5,7 @@ import wandb
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
@@ -70,6 +71,11 @@ def parse_arguments():
     parser.add_argument('--dda_guidance_weight', type=float, default=6)
     parser.add_argument('--dda_lpf_method', type=str, default='fps')
     parser.add_argument('--dda_lpf_scale', type=float, default=4)
+
+    parser.add_argument('--ours_steps', type=int, default=150)
+    parser.add_argument('--ours_guidance_weight', type=float, default=6)
+    parser.add_argument('--ours_lpf_method', type=str, default="")
+    parser.add_argument('--ours_lpf_scale', type=float, default=4)
 
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
@@ -145,7 +151,7 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
         if t is None:
             t = (args.t_min * min(1, step/args.denoising_thrs) + (1 - min(1, step/args.denoising_thrs)) * max(args.t_min, args.t_max - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
 
-        if isinstance(model, torch.nn.DataParallel):
+        if isinstance(model, nn.DataParallel):
             model = model.module
 
         gamma_t = model.inflate_batch_array(model.gamma(t), x)
@@ -165,11 +171,11 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     lr = args.lr
     steps = args.n_update
 
-    delta = torch.nn.Parameter(torch.zeros_like(x))
+    delta = nn.Parameter(torch.zeros_like(x))
     rotation = x.new_zeros((x.size(0), 6))
     rotation[:, 0] = 1
     rotation[:, 4] = 1
-    rotation = torch.nn.Parameter(rotation)
+    rotation = nn.Parameter(rotation)
 
     optim = torch.optim.Adamax([
         {
@@ -233,10 +239,9 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     return y
 
 
-def dda(args, model, x, mask, ind, classifier):
-    # TODO: implement self-ensembling
+def dda(args, model, x, mask, ind):
     chamfer_dist = ChamferDistance()
-    if isinstance(model, torch.nn.DataParallel):
+    if isinstance(model, nn.DataParallel):
         model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
@@ -262,7 +267,7 @@ def dda(args, model, x, mask, ind, classifier):
 
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
-        x0_est = (z_t - sigma_t * pred_noise) / alpha_t
+        x0_est = (z_t - pred_noise * sigma_t) / alpha_t
         dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
@@ -274,6 +279,46 @@ def dda(args, model, x, mask, ind, classifier):
     return z_t
 
 
+def ours(args, model, x, mask, ind, classifier):
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    if isinstance(classifier, nn.DataParallel):
+        classifier = classifier.module
+
+    t = torch.full((x.size(0), 1), args.ours_steps / args.diffusion_steps).to(x.device)
+    gamma_t = model.inflate_batch_array(model.gamma(t), x)
+    alpha_t = model.alpha(gamma_t, x)
+    sigma_t = model.sigma(gamma_t, x)
+
+    node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
+    eps = model.sample_noise(n_samples=x.size(0),
+        n_nodes=x.size(1),
+        node_mask=node_mask,
+    )
+    z_t = (x * alpha_t + eps * sigma_t).requires_grad_(True)
+
+    for step in tqdm(range(args.ours_steps, 0, -1)):
+        t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
+        gamma_t = model.inflate_batch_array(model.gamma(t), x)
+        alpha_t = model.alpha(gamma_t, x)
+        sigma_t = model.sigma(gamma_t, x)
+
+        t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
+        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+
+        # content preservation
+        pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
+        x0_est = (z_t - pred_noise * sigma_t) / alpha_t
+        penultimate_layer_loss = F.mse_loss(classifier.get_feature(x0_est), classifier.get_feature(x).detach())
+        grad = torch.autograd.grad(
+            penultimate_layer_loss,
+            z_t,
+            allow_unused=True,
+        )[0]
+        z_t = (z_t_m1 - args.ours_guidance_weight * grad).requires_grad_(True)
+    return z_t
+
+
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
     global EMA, mom_pre
 
@@ -282,7 +327,9 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         x = pre_trans(args, diffusion_model, x, mask, ind)
     if 'dda' in args.method:
         x_ori = x.clone()
-        x = dda(args, diffusion_model, x, mask, ind, classifier)
+        x = dda(args, diffusion_model, x, mask, ind)
+    if 'ours' in args.method:
+        x = ours(args, diffusion_model, x, mask, ind, classifier)
 
     # model adaptation
     for _ in range(1, args.num_steps + 1):
@@ -290,7 +337,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'dua' in args.method:
             mom_new = mom_pre * args.dua_decay_factor
             for m in classifier.modules():
-                if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+                if isinstance(m, nn.modules.batchnorm._BatchNorm):
                     m.train()
                     m.momentum = mom_new + args.dua_min_mom
             mom_pre = mom_new
@@ -335,7 +382,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss.backward()
         if 'shot' in args.method:
             # pseudo-labeling
-            feats = classifier.module.get_feature(x).detach() if isinstance(classifier, torch.nn.DataParallel) else classifier.get_feature(x).detach()
+            feats = classifier.module.get_feature(x).detach() if isinstance(classifier, nn.DataParallel) else classifier.get_feature(x).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -405,17 +452,17 @@ def main(args):
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
-    if 'pre_trans' in args.method or 'dda' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = torch.nn.DataParallel(model)
+        model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
 
     ########## load classifier ##########
-    # TODO: add other architectures and different datasets
+    # TODO: add other architectures
     if args.classifier == "DGCNN":
         class Args:
             def __init__(self):
@@ -428,7 +475,7 @@ def main(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = torch.nn.DataParallel(classifier)
+    classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -463,6 +510,7 @@ def main(args):
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
         all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
+        io.cprint(f"batch idx: {iter_idx}/{len(test_loader)}")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     return accuracy_score(all_gt_list, all_pred_after_list)
@@ -569,18 +617,18 @@ def vis(args):
         raise ValueError('UNDEFINED DATASET')
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
 
-    if 'pre_trans' in args.method or 'dda' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
         ########## load diffusion model ##########
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = torch.nn.DataParallel(model)
+        model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
 
     ########## load classifier ##########
-    # TODO: add other architectures and different datasets
+    # TODO:
     # if args.classifier == "DGCNN":
     #     class Args:
     #         def __init__(self):
@@ -593,7 +641,7 @@ def vis(args):
     # else:
     #     raise ValueError('UNDEFINED CLASSIFIER')
     # classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    # classifier = torch.nn.DataParallel(classifier)
+    # classifier = nn.DataParallel(classifier)
     # classifier.to(device).eval()
 
     for batch_idx, data in enumerate(test_loader_vis):

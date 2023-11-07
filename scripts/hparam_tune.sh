@@ -35,6 +35,11 @@ dda_steps=150
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
+# ours
+ours_steps=10 # default: 150
+ours_guidance_weight=0 # 3, 6, 9
+ours_lpf_method=fps # None, mean, median, fps
+ours_lpf_scale=4 # 2, 4, 8
 #################### placeholders ####################
 
 
@@ -132,7 +137,21 @@ hparam_tune() {
     # shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
 
     # hyperparameters for dda
-    method=dda
+    # method=dda
+    # batch_size=16
+    # episodic=False # placeholder
+    # test_optim=AdamW # placeholder
+    # params_to_adapt="all" # placeholder
+    # num_steps=1 # placeholder
+    # test_lr=1e-4 # placeholder
+    # # hyperparameters to tune for dda
+    # dda_steps=10 # default: 150
+    # dda_guidance_weight=6 # 3, 6, 9
+    # dda_lpf_method=fps # None, mean, median, fps
+    # dda_lpf_scale=4 # 2, 4, 8
+
+    # hyperparameters for ours
+    method=ours
     batch_size=16
     episodic=False # placeholder
     test_optim=AdamW # placeholder
@@ -140,12 +159,13 @@ hparam_tune() {
     num_steps=1 # placeholder
     test_lr=1e-4 # placeholder
     # hyperparameters to tune for dda
-    dda_steps=10 # default: 150
-    dda_guidance_weight=6 # 3, 6, 9
-    dda_lpf_method=fps # None, mean, median, fps
-    dda_lpf_scaling_factor=4 # 2, 4, 8
+    ours_steps=150 # default: 150
+    ours_guidance_weight=0.1 # 3, 6, 9
+    ours_lpf_method=fps # None, mean, median, fps
+    ours_lpf_scale=4 # 2, 4, 8
 
     # hyperparameters for cloudfixer
+    # method=pre_trans
     t_min=0.02
     t_max=0.8
     denoising_thrs=100
@@ -206,8 +226,12 @@ hparam_tune() {
             --dda_guidance_weight ${dda_guidance_weight} \
             --dda_lpf_method ${dda_lpf_method} \
             --dda_lpf_scale ${dda_lpf_scale} \
+            --ours_steps ${ours_steps} \
+            --ours_guidance_weight ${ours_guidance_weight} \
+            --ours_lpf_method ${ours_lpf_method} \
+            --ours_lpf_scale ${ours_lpf_scale} \
             --exp_name ${exp_name} \
-            --mode eval \
+            --mode hparam_tune \
             --model transformer \
             --lr ${lr} \
             --n_update ${steps} \

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from diffusion_model.transformer import PointDiffusionTransformer
+from diffusion.transformer import PointDiffusionTransformer
 
 ###############################################################################
 # This code is based on https://github.com/ehoogeboom/e3_diffusion_for_molecules

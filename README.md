@@ -5,7 +5,7 @@
 ```
 conda create -n cloudfixer python=3.8.16
 conda activate cloudfixer
-bash set_env.sh
+bash scripts/set_env.sh
 ```
 
 - Download and preprocess data by following https://github.com/zou-longkun/GAST in ./data/

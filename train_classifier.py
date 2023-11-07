@@ -12,7 +12,7 @@ import copy
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 
 from utils import pc_utils, loss, log
-from classification_model.models import PointNet, DGCNN
+from classifier.models import PointNet, DGCNN
 # from Models_Norm import PointNet, DGCNN
 # NWORKERS = 4
 # MAX_LOSS = 9 * (10 ** 9)

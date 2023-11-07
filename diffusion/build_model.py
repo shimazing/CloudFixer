@@ -1,7 +1,7 @@
 import torch
 
-from diffusion_model.diffusion import DiffusionModel
-from diffusion_model.transformer import MODEL_CONFIGS, model_from_config
+from diffusion.diffusion import DiffusionModel
+from diffusion.transformer import MODEL_CONFIGS, model_from_config
 
 
 def get_model(args, device):

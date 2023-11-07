@@ -140,8 +140,8 @@ hparam_tune() {
     num_steps=1 # placeholder
     test_lr=1e-4 # placeholder
     # hyperparameters to tune for dda
-    dda_steps=150 # official: 150
-    dda_guidance_weight=6 # official: 6
+    dda_steps=10 # default: 150
+    dda_guidance_weight=4 # default: 4
     dda_lpf_method=fps # None, mean, median, fps
     dda_lpf_scaling_factor=6 # 3, 6, 9
 

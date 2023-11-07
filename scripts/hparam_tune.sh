@@ -1,16 +1,15 @@
-hparam_tune() {
-    # dataset
-    DATASET_ROOT_DIR=../datasets
-    dataset=modelnet40c_original
-    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-    adv_attack=False # True, False
+# dataset
+DATASET_ROOT_DIR=../datasets
+dataset=modelnet40c_original
+dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
+adv_attack=False # True, False
 
-    # classifier
-    classifier=DGCNN
-    classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
+# classifier
+classifier=DGCNN
+classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
 
-    # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+# diffusion model
+diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
 
 #################### placeholders ####################
 # lame
@@ -151,7 +150,7 @@ hparam_tune() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -223,7 +222,7 @@ hparam_tune_tent() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -292,9 +291,9 @@ hparam_tune_lame() {
     num_steps=0 # placeholder
     batch_size=64 # important
     ### hyperparameters to tune for lame
-    lame_affinity=rbf # rbf, kNN, linear
-    lame_knn=3 # 1, 3, 5, 10
-    lame_max_steps=1 # 1, 10, 100
+    lame_affinity=kNN # rbf, kNN, linear
+    lame_knn=1 # 1, 3, 5, 10
+    lame_max_steps=10 # 1, 10, 100
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -313,7 +312,7 @@ hparam_tune_lame() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -402,7 +401,7 @@ hparam_tune_sar() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -469,8 +468,8 @@ hparam_tune_pl() {
     params_to_adapt="LN BN GN"
     batch_size=64
     ### hyperparameters to tune for pl
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=10 # 1 3 5 10
+    test_lr=1e-2 # 1e-4 1e-3 1e-2
+    num_steps=1 # 1 3 5 10
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -489,7 +488,7 @@ hparam_tune_pl() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -557,9 +556,9 @@ hparam_tune_memo() {
     batch_size=1
     memo_bn_momentum=1/17
     ### hyperparameters to tune for memo
-    test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
+    test_lr=1e-6 # 1e-6 1e-5 1e-4 1e-3
     num_steps=1 # "1, 2"
-    memo_num_augs=64 # "4 16 64"
+    memo_num_augs=32 # "16 32 64"
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -578,7 +577,7 @@ hparam_tune_memo() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -668,7 +667,7 @@ hparam_tune_dua() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -756,7 +755,7 @@ hparam_tune_bn_stats() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
@@ -844,7 +843,7 @@ hparam_tune_shot() {
 
     # logging
     wandb_usr=drumpt
-    exp_name=hparam_search_${classifier}_${corruption}_${severity}_${method}
+    exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do

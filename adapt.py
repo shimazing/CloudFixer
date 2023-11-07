@@ -8,8 +8,6 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score
-# import optuna
-# from optuna.samplers import RandomSampler
 
 from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
 from diffusion_model.build_model import get_model
@@ -403,6 +401,9 @@ def main(args):
         logits_before = original_classifier(x)
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
+        # logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
+
+        # TODO: fix this
         for _ in range(1, args.num_steps + 1):
             classifier, x = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
 

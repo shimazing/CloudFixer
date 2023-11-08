@@ -466,7 +466,6 @@ def main(args):
 
     ########## load classifier ##########
     # TODO: add model architectures
-    print(f"test_dataset.label_list: {test_dataset.label_list}")
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
     else:

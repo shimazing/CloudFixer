@@ -97,9 +97,9 @@ hparam_tune() {
     # batch_size=1
     # memo_bn_momentum=1/17
     # ### hyperparameters to tune for memo
-    # test_lr=1e-6 # 1e-6 1e-5 1e-4 1e-3
-    # num_steps=1 # "1, 2"
-    # memo_num_augs=32 # "16 32 64"
+    # test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
+    # num_steps=2 # "1, 2"
+    # memo_num_augs=16 # "16 32 64"
 
     # hyperparameters for dua
     # method=dua
@@ -111,8 +111,8 @@ hparam_tune() {
     # dua_min_mom=0.005
     # batch_size=64
     # ### hyperparameters to tune for dua
-    # num_steps=1 # 1, 3, 5, 10
-    # dua_decay_factor=0.94 # 0.9, 0.94, 0.99
+    # num_steps=5 # 1, 3, 5, 10
+    # dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
     # hyperparameters for bn_stats
     # method=bn_stats
@@ -123,18 +123,18 @@ hparam_tune() {
     # batch_size=64
     # num_steps=1
     # ### hyperparameters to tune for bn_stats
-    # bn_stats_prior=0 # 0, 0.2, 0.4, 0.6, 0.8
+    # bn_stats_prior=0.2 # 0, 0.2, 0.4, 0.6, 0.8
 
     # # hyperparameters for shot
     # method=shot
-    # episodic=True
+    # episodic=False
     # test_optim=AdamW
     # params_to_adapt="all"
-    # batch_size=64
+    # batch_size=32
     # # hyperparameters to tune for shot
     # test_lr=1e-4 # 1e-4 1e-3 1e-2
-    # num_steps=1 # 1 3 5 10
-    # shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
+    # num_steps=5 # 1 3 5 10
+    # shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
 
     # hyperparameters for dda
     # method=dda
@@ -596,9 +596,9 @@ hparam_tune_memo() {
     batch_size=1
     memo_bn_momentum=1/17
     ### hyperparameters to tune for memo
-    test_lr=1e-6 # 1e-6 1e-5 1e-4 1e-3
-    num_steps=1 # "1, 2"
-    memo_num_augs=32 # "16 32 64"
+    test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
+    num_steps=2 # "1, 2"
+    memo_num_augs=16 # "16 32 64"
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -687,8 +687,8 @@ hparam_tune_dua() {
     dua_min_mom=0.005
     batch_size=64
     ### hyperparameters to tune for dua
-    num_steps=1 # 1, 3, 5, 10
-    dua_decay_factor=0.94 # 0.9, 0.94, 0.99
+    num_steps=5 # 1, 3, 5, 10
+    dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -776,7 +776,7 @@ hparam_tune_bn_stats() {
     batch_size=64
     num_steps=1
     ### hyperparameters to tune for bn_stats
-    bn_stats_prior=0 # 0, 0.2, 0.4, 0.6, 0.8
+    bn_stats_prior=0.2 # 0, 0.2, 0.4, 0.6, 0.8
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -860,11 +860,11 @@ hparam_tune_shot() {
     episodic=False
     test_optim=AdamW
     params_to_adapt="all"
-    batch_size=64
+    batch_size=32
     # hyperparameters to tune for shot
     test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=1 # 1 3 5 10
-    shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
+    num_steps=5 # 1 3 5 10
+    shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
 
     # hyperparameters for cloudfixer
     t_min=0.02

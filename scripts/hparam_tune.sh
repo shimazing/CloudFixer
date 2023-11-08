@@ -1,15 +1,15 @@
 # dataset
-DATASET_ROOT_DIR=../datasets
+DATASET_ROOT_DIR=../nfs-client/datasets
 dataset=modelnet40c_original
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
 adv_attack=False # True, False
 
 # classifier
 classifier=DGCNN
-classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
+classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_modelnet40_best_test.pth
 
 # diffusion model
-diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
 
 #################### placeholders ####################
 # lame
@@ -31,10 +31,10 @@ bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
 # dda
-dda_steps=150 # official: 150
-dda_guidance_weight=6 # official: 6 (3, 6, 9)
-dda_lpf_method=fps # mean, median, fps
-dda_lpf_scaling_factor=4 # 2, 4, 8
+dda_steps=150
+dda_guidance_weight=6
+dda_lpf_method=fps
+dda_lpf_scale=4
 #################### placeholders ####################
 
 
@@ -141,9 +141,9 @@ hparam_tune() {
     test_lr=1e-4 # placeholder
     # hyperparameters to tune for dda
     dda_steps=10 # default: 150
-    dda_guidance_weight=4 # default: 4
+    dda_guidance_weight=6 # 3, 6, 9
     dda_lpf_method=fps # None, mean, median, fps
-    dda_lpf_scaling_factor=6 # 3, 6, 9
+    dda_lpf_scaling_factor=4 # 2, 4, 8
 
     # hyperparameters for cloudfixer
     t_min=0.02
@@ -205,7 +205,7 @@ hparam_tune() {
             --dda_steps ${dda_steps} \
             --dda_guidance_weight ${dda_guidance_weight} \
             --dda_lpf_method ${dda_lpf_method} \
-            --dda_lpf_scaling_factor ${dda_lpf_scaling_factor} \
+            --dda_lpf_scale ${dda_lpf_scale} \
             --exp_name ${exp_name} \
             --mode eval \
             --model transformer \
@@ -917,12 +917,12 @@ hparam_tune_shot() {
     done
 }
 
-# hparam_tune
+hparam_tune
 # hparam_tune_tent
 # hparam_tune_lame
 # hparam_tune_sar
 # hparam_tune_pl
 # hparam_tune_dua
 # hparam_tune_bn_stats
-hparam_tune_shot
+# hparam_tune_shot
 # hparam_tune_memo

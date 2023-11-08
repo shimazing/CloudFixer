@@ -463,7 +463,7 @@ class GraspNet10(Dataset):
         self.partition = partition
 
         self.scale = args.scale if hasattr(args, 'scale') else 1
-        self.scale_mode = args.scale_mode if hasattr(args, 'scale_mode') else 'unit_std'
+        self.scale_mode = args.scale_mode if hasattr(args, 'scale_mode') else 'unit_norm'
         self.zero_mean = args.zero_mean if hasattr(args, 'zero_mean') else False
 
         # augmentation
@@ -471,8 +471,9 @@ class GraspNet10(Dataset):
             self.random_scale = args.random_scale if hasattr(args, 'random_scale') else True
             self.random_rotation = args.random_rotation if hasattr(args, 'random_rotation') else False
             self.self_distillation = args.self_distillation if hasattr(args, 'self_distillation') else False
+            self.jitter = args.jitter if hasattr(args, 'jitter') else True
         else:
-            self.random_scale, self.random_rotation, self.self_distillation = False, False, False
+            self.random_scale, self.random_rotation, self.self_distillation, self.jitter = False, False, False, False
 
         self.label_to_idx = {label:idx for idx, label in enumerate(['bathtub', 'bed', 'bookshelf', 'cabinet', 'chair', 'lamp', 'monitor', 'plant', 'sofa', 'table'])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
@@ -498,6 +499,7 @@ class GraspNet10(Dataset):
             dataset_dir_realsense = os.path.join(args.dataset_dir, partition_dir, "Real", "realsense")
             pc_list = sorted(glob.glob(os.path.join(dataset_dir_realsense, '*', '*.xyz')))
         pc_list = np.asarray(pc_list)
+        print(f"pc_list: {pc_list}")
         label_list = np.asarray([int(pc.split('/')[-2]) for pc in pc_list])
 
         if partition == "train":
@@ -519,39 +521,42 @@ class GraspNet10(Dataset):
         else:
             pointcloud = self.scale * scale_to_unit_cube(pointcloud)
 
-        # sample according to farthest point sampling
-        if pointcloud.shape[0] > NUM_POINTS:
-            pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-            _, pointcloud, _ = farthest_point_sample_np(pointcloud, None, NUM_POINTS)
-            pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+        # # sample according to farthest point sampling
+        # if pointcloud.shape[0] > NUM_POINTS:
+        #     pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+        #     _, pointcloud, _ = farthest_point_sample_np(pointcloud, None, NUM_POINTS)
+        #     pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
 
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
         ind = np.arange(len(pointcloud))
 
-        while len(pointcloud) < NUM_POINTS:
-            chosen = np.arange(N)
-            np.random.shuffle(chosen)
-            chosen = chosen[:NUM_POINTS - len(pointcloud)]
-            pointcloud = np.concatenate((pointcloud, pointcloud[chosen]), axis=0)
+        # while len(pointcloud) < NUM_POINTS:
+        #     chosen = np.arange(N)
+        #     np.random.shuffle(chosen)
+        #     chosen = chosen[:NUM_POINTS - len(pointcloud)]
+        #     pointcloud = np.concatenate((pointcloud, pointcloud[chosen]), axis=0)
 
-        # apply data rotation and augmentation on train samples
-        if self.random_rotation:
-            pointcloud = random_rotate_one_axis(pointcloud, "z")
+        # # apply data rotation and augmentation on train samples
+        # if self.random_rotation:
+        #     pointcloud = random_rotate_one_axis(pointcloud, "z")
 
-        if self.zero_mean:
-            if self.scale_mode != 'unit_norm':
-                pointcloud = self.scale * scale(pointcloud, self.scale_mode)
-            else:
-                pointcloud = self.scale * scale_to_unit_cube(pointcloud)
+        # if self.zero_mean:
+        #     if self.scale_mode != 'unit_norm':
+        #         pointcloud = self.scale * scale(pointcloud, self.scale_mode)
+        #     else:
+        #         pointcloud = self.scale * scale_to_unit_cube(pointcloud)
 
-        if self.random_scale:
-            random_scale = np.random.uniform(0.9, 1.1)
-            if not self.self_distillation:
-                pointcloud = random_scale * pointcloud
-            else:
-                pointcloud_aug = random_scale * pointcloud_aug
+        # if self.random_scale:
+        #     random_scale = np.random.uniform(0.9, 1.1)
+        #     if not self.self_distillation:
+        #         pointcloud = random_scale * pointcloud
+        #     else:
+        #         pointcloud_aug = random_scale * pointcloud_aug
+
+        if self.jitter:
+            pointcloud = jitter_pointcloud(pointcloud)
 
         return (pointcloud, label, mask, ind)
 

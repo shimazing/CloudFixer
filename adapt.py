@@ -462,16 +462,10 @@ def main(args):
         model = None
 
     ########## load classifier ##########
-    # TODO: add other architectures
+    # TODO: add model architectures
+    print(f"test_dataset.label_list: {test_dataset.label_list}")
     if args.classifier == "DGCNN":
-        class Args:
-            def __init__(self):
-                self.k = 20
-                self.emb_dims = 1024
-                self.dropout = 0.5
-                self.leaky_relu = 1
-                self.cls_scale_mode = args.cls_scale_mode
-        classifier = models.DGCNN(args=Args(), output_channels=len(np.unique(test_dataset.label_list)))
+        classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
@@ -510,7 +504,7 @@ def main(args):
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
         all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
-        io.cprint(f"batch idx: {iter_idx}/{len(test_loader)}")
+        io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     return accuracy_score(all_gt_list, all_pred_after_list)

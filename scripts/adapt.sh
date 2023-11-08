@@ -8,33 +8,33 @@ DATASET_ROOT_DIR=../nfs-client/datasets
 # dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/modelnet
 # dataset=shapenet
 # dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/shapenet
-dataset=scannet
-dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/scannet
+# dataset=scannet
+# dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/scannet
 # dataset=synthetic
 # dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
 # dataset=kinect
 # dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
-# dataset=realsense
-# dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
+dataset=realsense
+dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
 adv_attack=False
 
 # classifier
 classifier=DGCNN
 # classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_modelnet40_best_test.pth
-classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_modelnet_best_test.pth
+# classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_modelnet_best_test.pth
 # classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_shapenet_best_test.pth
 # classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_scannet_best_test.pth
-# classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_synthetic_best_test.pth
+classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_synthetic_best_test.pth
 # classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_kinect_best_test.pth
 # classifier_dir=../nfs-client/CloudFixer/outputs/dgcnn_realsense_best_test.pth
 
 # diffusion model
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet40.npy
-diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet.npy
+# diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_modelnet.npy
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_shapenet.npy
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_scannet.npy
-# diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_synthetic.npy
+diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_synthetic.npy
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_kinect.npy
 # diffusion_dir=../nfs-client/CloudFixer/outputs/diffusion_model_transformer_realsense.npy
 
@@ -62,11 +62,25 @@ dda_steps=150
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
+# ours
+ours_steps=150
+ours_guidance_weight=6
+ours_lpf_method=fps
+ours_lpf_scale=4
 #################### placeholders ####################
 
 
 adapt() {
-    # hyperparameters for ours
+    # # hyperparameters for ours
+    # method="placeholder"
+    # batch_size=256
+    # episodic=False # placeholder
+    # test_optim=AdamW # placeholder
+    # params_to_adapt="all" # placeholder
+    # num_steps=1 # placeholder
+    # test_lr=1e-4 # placeholder
+
+    # # hyperparameters for ours
     method=ours
     batch_size=16
     episodic=False # placeholder
@@ -74,11 +88,11 @@ adapt() {
     params_to_adapt="all" # placeholder
     num_steps=1 # placeholder
     test_lr=1e-4 # placeholder
-    # hyperparameters to tune for dda
-    ours_steps=150 # default: 150
-    ours_guidance_weight=6 # 3, 6, 9
-    ours_lpf_method=fps # None, mean, median, fps
-    ours_lpf_scale=4 # 2, 4, 8
+    # hyperparameters to tune for ours
+    ours_steps=150
+    ours_guidance_weight=6
+    ours_lpf_method=fps
+    ours_lpf_scale=4
 
     # hyperparameters for cloudfixer
     # method=pre_trans

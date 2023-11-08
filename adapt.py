@@ -279,6 +279,9 @@ def dda(args, model, x, mask, ind, classifier):
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
     global EMA, mom_pre
 
+    if isinstance(classifier, torch.nn.DataParallel):
+        classifier = classifier.module
+
     # input adaptation
     if 'pre_trans' in args.method:
         x = pre_trans(args, diffusion_model, x, mask, ind)
@@ -324,7 +327,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
             EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
             continue # we already call optimizer.first_step and optimizer.second_step
-        if 'pl' in args.method:
+        if 'pl' in args.method: 
             logits = classifier(x)
             pseudo_label = torch.argmax(logits, dim=-1)
             loss = F.cross_entropy(logits, pseudo_label)
@@ -336,7 +339,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss.backward()
         if 'shot' in args.method:
             # pseudo-labeling
-            feats = classifier.module.get_feature(x).detach() if isinstance(classifier, torch.nn.DataParallel) else classifier.get_feature(x).detach()
+            feats = classifier.get_feature(x).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -453,7 +456,7 @@ def main(args):
         if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
-        logits_before = original_classifier(x)
+        logits_before = original_classifier(x).detach()
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)

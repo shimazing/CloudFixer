@@ -1248,7 +1248,7 @@ def softmax(x):
     return f_x
 
 
-# TODO: perform low-pass fltering here for x0_est, x
+# TODO: implement mean/median filtering
 def low_pass_filtering(x, method, scale):
     if not method or scale == 1:
         return x

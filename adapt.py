@@ -67,7 +67,7 @@ def parse_arguments():
     parser.add_argument('--dua_min_mom', type=float, default=0.005)
     parser.add_argument('--bn_stats_prior', type=float, default=0)
     parser.add_argument('--shot_pl_loss_weight', type=float, default=0.3)
-    parser.add_argument('--dda_steps', type=int, default=150)
+    parser.add_argument('--dda_steps', type=int, default=50)
     parser.add_argument('--dda_guidance_weight', type=float, default=6)
     parser.add_argument('--dda_lpf_method', type=str, default='fps')
     parser.add_argument('--dda_lpf_scale', type=float, default=4)
@@ -466,7 +466,6 @@ def main(args):
 
     ########## load classifier ##########
     # TODO: add model architectures
-    print(f"test_dataset.label_list: {test_dataset.label_list}")
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
     else:
@@ -515,7 +514,9 @@ def main(args):
 
 def tune_tta_hparams(args):
     import itertools, random
-    
+
+    print(f"args.method: {args.method}")
+
     if 'tent' in args.method:
         test_lr_list = [1e-4, 1e-3, 1e-2]
         num_steps_list = [1, 3, 5, 10]
@@ -560,6 +561,11 @@ def tune_tta_hparams(args):
         shot_pl_loss_weight_list = [0, 0.1, 0.3, 0.5, 1]
         hparams_to_search = [test_lr_list, num_steps_list, shot_pl_loss_weight_list]
         hparams_to_search_str = ['test_lr', 'num_steps', 'shot_pl_loss_weight']
+    if 'dda' in args.method:
+        dda_guidance_weight_list = [3, 6, 9]
+        dda_lpf_scale_list = [2, 4, 8]
+        hparams_to_search = [dda_guidance_weight_list, dda_lpf_scale_list]
+        hparams_to_search_str = ['dda_guidance_weight', 'dda_lpf_scale']
 
     hparam_space = list(itertools.product(*hparams_to_search))
     random.shuffle(hparam_space)
@@ -614,8 +620,8 @@ def vis(args):
         raise ValueError('UNDEFINED DATASET')
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
 
+    ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
-        ########## load diffusion model ##########
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
@@ -625,41 +631,45 @@ def vis(args):
         model = None
 
     ########## load classifier ##########
-    # TODO:
-    # if args.classifier == "DGCNN":
-    #     class Args:
-    #         def __init__(self):
-    #             self.k = 20
-    #             self.emb_dims = 1024
-    #             self.dropout = 0.5
-    #             self.leaky_relu = 1
-    #             self.cls_scale_mode = args.cls_scale_mode
-    #     classifier = models.DGCNN(args=Args(), output_channels=len(np.unique(test_dataset.label_list)))
-    # else:
-    #     raise ValueError('UNDEFINED CLASSIFIER')
-    # classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    # classifier = nn.DataParallel(classifier)
-    # classifier.to(device).eval()
+    # TODO: add model architectures
+    if args.classifier == "DGCNN":
+        classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
+    else:
+        raise ValueError('UNDEFINED CLASSIFIER')
+    classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+    classifier = nn.DataParallel(classifier)
+    classifier = classifier.to(device).eval()
 
-    for batch_idx, data in enumerate(test_loader_vis):
+    global EMA, mom_pre
+    EMA = None
+    mom_pre = args.dua_mom_pre
+
+    original_classifier = deepcopy(classifier)
+    original_classifier.eval().requires_grad_(False)
+    classifier = configure_model(args, classifier)
+    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    optimizer = setup_optimizer(args, params)
+    original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
+
+
+
+    all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
+    for batch_idx, data in tqdm(enumerate(test_loader_vis)):
         x = data[0].to(device)
-        labels = [test_dataset.idx_to_label[int(d)] for d in data[1]]
-        io.cprint(f"ground truth labels: {labels}")
+        labels = data[1].to(device).flatten()
         mask = data[2].to(device)
-        ind = data[3].to(device)
+        ind = data[3].to(device) # original indices for duplicated point
+        io.cprint(f"ground truth labels: {labels}")
 
-        # new visualization code: you can specify color with colorm
-        # visualize_pclist(x, [f"imgs/batch_{batch_idx}_{i}.png" for i in range(len(x))], colorm=[24,107,239])
+        if args.adv_attack:
+            x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
+        all_gt_list.extend(labels.cpu().tolist())
 
         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
         rgbs = get_color(x.cpu().numpy())
+        # x_ori = x.detach()
+        x_ori = ours(args, model, x, mask, ind, classifier)
 
-        x_ori = x.detach()
-        # logits = classifier(x)
-        # preds = logits.max(dim=1)[1]
-        # preds_val = logits.softmax(-1).max(dim=1)[0]
-        # preds_label = [test_dataset.idx_to_label[int(d)] for d in preds]
-        # io.cprint("original labels", preds_label)
         for b in range(len(x_ori)):
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
@@ -717,6 +727,141 @@ def vis(args):
             wandb.log({f'masked pc': obj3d}, step=b, commit=False)
         break
     io.cprint("Visualization Done")
+
+
+# @torch.no_grad()
+# def vis(args):
+#     device = torch.device("cuda" if args.cuda else "cpu")
+#     set_seed(args.random_seed) # set seed
+
+#     ########## logging ##########
+#     io = logging.IOStream(args)
+#     io.cprint(args)
+#     create_folders(args)
+#     if args.no_wandb:
+#         mode = 'disabled'
+#     else:
+#         mode = 'online' if args.online else 'offline'
+#     kwargs = {'entity': args.wandb_usr, 'name': args.exp_name + '_vis', 'project':
+#             'adapt', 'config': args,
+#             'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
+#     wandb.init(**kwargs)
+#     wandb.save('*.txt')
+
+#     ########## load dataset ##########
+#     if args.dataset.startswith('modelnet40c'):
+#         test_dataset = ModelNet40C(args, partition='test')
+#     elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
+#         test_dataset = PointDA10(args=args, partition='test')
+#     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
+#         test_dataset = GraspNet10(args=args, partition='test')
+#     else:
+#         raise ValueError('UNDEFINED DATASET')
+#     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
+
+#     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
+#         ########## load diffusion model ##########
+#         model = get_model(args, device)
+#         if args.diffusion_dir is not None:
+#             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
+#         model = nn.DataParallel(model)
+#         model = model.to(device).eval()
+#     else:
+#         model = None
+
+#     ########## load classifier ##########
+#     # TODO:
+#     # if args.classifier == "DGCNN":
+#     #     class Args:
+#     #         def __init__(self):
+#     #             self.k = 20
+#     #             self.emb_dims = 1024
+#     #             self.dropout = 0.5
+#     #             self.leaky_relu = 1
+#     #             self.cls_scale_mode = args.cls_scale_mode
+#     #     classifier = models.DGCNN(args=Args(), output_channels=len(np.unique(test_dataset.label_list)))
+#     # else:
+#     #     raise ValueError('UNDEFINED CLASSIFIER')
+#     # classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+#     # classifier = nn.DataParallel(classifier)
+#     # classifier.to(device).eval()
+
+#     for batch_idx, data in enumerate(test_loader_vis):
+#         x = data[0].to(device)
+#         labels = [test_dataset.idx_to_label[int(d)] for d in data[1]]
+#         io.cprint(f"ground truth labels: {labels}")
+#         mask = data[2].to(device)
+#         ind = data[3].to(device)
+
+#         # new visualization code: you can specify color with colorm
+#         # visualize_pclist(x, [f"imgs/batch_{batch_idx}_{i}.png" for i in range(len(x))], colorm=[24,107,239])
+
+#         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
+#         rgbs = get_color(x.cpu().numpy())
+
+#         x_ori = x.detach()
+#         # logits = classifier(x)
+#         # preds = logits.max(dim=1)[1]
+#         # preds_val = logits.softmax(-1).max(dim=1)[0]
+#         # preds_label = [test_dataset.idx_to_label[int(d)] for d in preds]
+#         # io.cprint("original labels", preds_label)
+#         for b in range(len(x_ori)):
+#             obj3d = wandb.Object3D({
+#                 "type": "lidar/beta",
+#                 "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
+#                     rgbs[b]), axis=1),
+#                 "boxes": np.array(
+#                     [
+#                         {
+#                             "corners":
+#                             (np.array([
+#                                 [-1, -1, -1],
+#                                 [-1, 1, -1],
+#                                 [-1, -1, 1],
+#                                 [1, -1, -1],
+#                                 [1, 1, -1],
+#                                 [-1, 1, 1],
+#                                 [1, -1, 1],
+#                                 [1, 1, 1]
+#                             ])* 3
+#                             ).tolist(),
+#                             # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+#                             # "label": f'{labels[b]} {preds_label[b]}',
+#                             "color": [123, 321, 111], # ???
+#                         }
+#                     ]
+#                 ),
+#             })
+#             wandb.log({f'pc': obj3d}, step=b, commit=False)
+
+#             obj3d = wandb.Object3D({
+#                 "type": "lidar/beta",
+#                 "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
+#                     rgbs_wMask[b]), axis=1),
+#                 "boxes": np.array(
+#                     [
+#                         {
+#                             "corners":
+#                             (np.array([
+#                                 [-1, -1, -1],
+#                                 [-1, 1, -1],
+#                                 [-1, -1, 1],
+#                                 [1, -1, -1],
+#                                 [1, 1, -1],
+#                                 [-1, 1, 1],
+#                                 [1, -1, 1],
+#                                 [1, 1, 1]
+#                             ])*3).tolist(),
+#                             # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+#                             # "label": f'{labels[b]} {preds_label[b]}',
+#                             "color": [123, 321, 111],
+#                         }
+#                     ]
+#                 ),
+#             })
+#             wandb.log({f'masked pc': obj3d}, step=b, commit=False)
+#         break
+#     io.cprint("Visualization Done")
 
 
 

@@ -39,7 +39,6 @@ class ModelNet40C(Dataset):
         self.dataset = args.dataset
         self.partition = partition
         
-        # self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
         if len(args.dataset.split("_")) == 1:
             self.corruption = 'original'
         elif len(args.dataset.split("_")) == 2:
@@ -49,23 +48,6 @@ class ModelNet40C(Dataset):
         if self.corruption != 'original':
             assert partition == 'test'
             self.severity = args.dataset.split("_")[-1]
-
-        # if self.corrupt_ori:
-        #     self.corruption = 'original'
-        # else:
-        #     try:
-        #         self.corruption = args.dataset.split("_")[1]
-        #     except:
-        #         self.corruption = 'original'
-
-        # if self.corruption != 'original':
-        #     assert partition == 'test'
-        # try:
-        #     self.severity = args.dataset.split("_")[2]
-        # except:
-        #     self.severity = 5
-
-        # print(f"self.severity: {self.severity}")
 
         self.rotate = args.rotate if hasattr(args, 'rotate') else True
 
@@ -150,34 +132,9 @@ class ModelNet40C(Dataset):
         norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
 
-        # if self.corrupt_ori:
-        #     t1 = random.sample([deformation, noise, part], 1)
-        #     f1 = random.choice(t1)
-        #     pointcloud = f1(pointcloud, int(self.severity))
-
-        if len(pointcloud) > self.subsample:
-            pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-            norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
-                    norm_curv, self.subsample)
-            pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
-            norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
-
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
-
-        # if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
-        if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
-            # remove duplicated points
-            dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:, None, :]), 2), axis=-1) < 1e-8
-            dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-            if np.any(dup_points):
-                row, col = dup_points.nonzero()
-                row, col = row[row<col], col[row<col]
-                dup = np.unique(col)
-                mask[dup] = 0
-                pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
 
         ind = np.arange(len(pointcloud))
         if self.rotate:
@@ -185,26 +142,6 @@ class ModelNet40C(Dataset):
             pointcloud = rotate_pc(pointcloud)
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
-
-        if self.aug:
-            pointcloud = translate_pointcloud(pointcloud)
-        if self.random_scale:
-            random_scale = np.random.uniform(0.9, 1.1)
-            pointcloud = random_scale * pointcloud
-
-        if self.subsample < 2048:
-            while len(pointcloud) < NUM_POINTS:
-                chosen = np.arange(len(pointcloud))
-                np.random.shuffle(chosen)
-                chosen = chosen[:NUM_POINTS - len(pointcloud)]
-                pointcloud = np.concatenate((
-                    pointcloud,
-                    pointcloud[chosen]
-                ), axis=0)
-                ind = np.concatenate((ind, chosen), axis=0)
-                assert len(pointcloud) == len(ind)
-                norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
-
         return (pointcloud, label, mask, ind)
 
 

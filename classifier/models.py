@@ -48,7 +48,7 @@ class PointNet(nn.Module):
         x = self.bn6(self.linear1(x))
         return x
 
-    def get_feature(self, x):
+    def get_low_level_feature(self, x):
         x = self.bn1(self.conv1(x))
         return x
 

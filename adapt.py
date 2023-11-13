@@ -18,7 +18,7 @@ from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
 from utils.visualizer import visualize_pclist
-from utils.chamfer_distance.chamfer_distance import ChamferDistance
+# from utils.chamfer_distance.chamfer_distance import ChamferDistance
 
 
 def parse_arguments():
@@ -446,7 +446,7 @@ def main(args):
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
-    elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
+    elif args.dataset in ['modelnet', 'shapenet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
         test_dataset = GraspNet10(args=args, partition='test')
@@ -459,7 +459,7 @@ def main(args):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
+        # model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
@@ -471,7 +471,7 @@ def main(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = nn.DataParallel(classifier)
+    # classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -481,13 +481,14 @@ def main(args):
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
     classifier = configure_model(args, classifier)
-    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
+
         labels = data[1].to(device).flatten()
         mask = data[2].to(device)
         ind = data[3].to(device) # original indices for duplicated point
@@ -501,15 +502,16 @@ def main(args):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
         logits_before = original_classifier(x).detach()
-        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
+        # all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-        all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
+        print(f"logits_after.shape: {logits_after.shape}")
+        # all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
-        io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
-        io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
-        io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
-    return accuracy_score(all_gt_list, all_pred_after_list)
+    #     io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
+    #     io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
+    #     io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    # return accuracy_score(all_gt_list, all_pred_after_list)
 
 
 def tune_tta_hparams(args):

@@ -145,39 +145,128 @@ class ModelNet40C(Dataset):
         return label_to_idx
 
 
+class ModelNet40C(Dataset):
+    def __init__(self, args, partition):
+        super().__init__()
+        self.dataset = args.dataset
+        self.partition = partition
+        
+        if len(args.dataset.split("_")) == 1:
+            self.corruption = 'original'
+        elif len(args.dataset.split("_")) == 2:
+            self.corruption = "_".join(args.dataset.split("_")[1:])
+        else:
+            self.corruption = "_".join(args.dataset.split("_")[1:-1])
+        if self.corruption != 'original':
+            assert partition == 'test'
+            self.severity = args.dataset.split("_")[-1]
+
+        self.rotate = args.rotate if hasattr(args, 'rotate') else True
+
+        # augmentation
+        if partition in ['train', 'train_all']:
+            self.random_scale = args.random_scale if hasattr(args, 'random_scale') else False
+            self.random_rotation = args.random_rotation if hasattr(args, 'random_rotation') else True
+            self.random_trans = args.random_trans if hasattr(args, 'random_trans') else False
+            self.subsample = args.subsample if hasattr(args, 'subsample') else 1024
+            self.aug = args.aug if hasattr(args, 'aug') else False
+        else:
+            self.random_scale, self.random_rotation, self.random_trans, self.subsample, self.aug = False, False, False, 1024, False
+
+        self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
+        self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
+        if self.corruption == 'original':
+            self.pc_list, self.label_list = self.load_modelnet40(args.dataset_dir, partition=partition)
+        else:
+            self.pc_list, self.label_list = self.load_modelnet40_c(args.dataset_dir, self.corruption, self.severity)
+
+        # print dataset statistics
+        unique, counts = np.unique(self.label_list, return_counts=True)
+        print(f"number of {partition} examples in {args.dataset} : {str(len(self.pc_list))}")
+        print(f"Occurrences count of classes in {args.dataset} {partition} set: {str(dict(zip(unique, counts)))}")
+
+
+    def load_modelnet40(self, data_path, partition='train'):
+        all_data = []
+        all_label = []
+        for h5_name in glob.glob(os.path.join(data_path, f'ply_data_{partition}*.h5')):
+            f = h5py.File(h5_name.strip(), 'r')
+            data = f['data'][:].astype('float32')
+            label = f['label'][:].astype('int64')
+            f.close()
+            all_data.append(data)
+            all_label.append(label)
+        all_data = np.concatenate(all_data, axis=0)
+        all_label = np.concatenate(all_label, axis=0).squeeze(-1)
+        return all_data, all_label
+
+
+    def load_modelnet40_c(self, data_path='data/modelnet40_c', corruption='cutout', severity=1, num_classes=40):
+        if corruption == 'original':
+            data_dir = os.path.join(data_path, f'data_{corruption}.npy')
+        else:
+            data_dir = os.path.join(data_path, f'data_{corruption}_{severity}.npy')
+        all_data = np.load(data_dir)
+        label_dir = os.path.join(data_path, 'label.npy')
+        all_label = np.load(label_dir).squeeze(-1)
+
+        if num_classes == 40:
+            return all_data, all_label
+
+        pointda_label_dict = {
+            1: 0, # bathtub
+            2: 1, # bed
+            4: 2, # bookshelf
+            23: 3, # night_stand(cabinet)
+            8: 4, # chair
+            19: 5, # lamp
+            22: 6, # monitor
+            26: 7, # plant
+            30: 8, # sofa
+            33: 9, # table
+        }
+        pointda_label = [1, 2, 4, 8, 19, 22, 23, 26, 30, 33] # 1: bathtub, 2: bed, 4: bookshelf, 8: chair, 19: lamp, 22: monitor, 23: night_stand(cabinet), 26: plant, 30: sofa, 33: table
+        pointda_indices = np.isin(all_label, pointda_label).squeeze(-1)
+        all_data = all_data[pointda_indices, :, :]
+        all_label = all_label[pointda_indices, :]
+        all_label = np.array([pointda_label_dict[idx] for idx in all_label])
+        return all_data, all_label
+
+
+    def get_label_to_idx(self, args):
+        npy_list = sorted(glob.glob(os.path.join(args.dataset_dir, '*', 'train', '*.npy')))
+        label_to_idx = {label:idx for idx, label in enumerate(list(np.unique([_dir.split('/')[-3] for _dir in npy_list])))}
+        return label_to_idx
+
+
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
         norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
 
-        # if self.corrupt_ori:
-        #     t1 = random.sample([deformation, noise, part], 1)
-        #     f1 = random.choice(t1)
-        #     pointcloud = f1(pointcloud, int(self.severity))
-
-        if len(pointcloud) > self.subsample:
-            pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-            norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-            _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
-                    norm_curv, self.subsample)
-            pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
-            norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+        # if len(pointcloud) > self.subsample:
+        #     pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+        #     norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+        #     _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
+        #             norm_curv, self.subsample)
+        #     pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+        #     norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
 
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
 
         # if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
-        if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
-            # remove duplicated points
-            dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:, None, :]), 2), axis=-1) < 1e-8
-            dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-            if np.any(dup_points):
-                row, col = dup_points.nonzero()
-                row, col = row[row<col], col[row<col]
-                dup = np.unique(col)
-                mask[dup] = 0
-                pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
+        # if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
+        #     # remove duplicated points
+        #     dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:, None, :]), 2), axis=-1) < 1e-8
+        #     dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+        #     if np.any(dup_points):
+        #         row, col = dup_points.nonzero()
+        #         row, col = row[row<col], col[row<col]
+        #         dup = np.unique(col)
+        #         mask[dup] = 0
+        #         pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
 
         ind = np.arange(len(pointcloud))
         if self.rotate:
@@ -186,27 +275,32 @@ class ModelNet40C(Dataset):
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
 
-        if self.aug:
-            pointcloud = translate_pointcloud(pointcloud)
-        if self.random_scale:
-            random_scale = np.random.uniform(0.9, 1.1)
-            pointcloud = random_scale * pointcloud
+        # if self.aug:
+        #     pointcloud = translate_pointcloud(pointcloud)
+        # if self.random_scale:
+        #     random_scale = np.random.uniform(0.9, 1.1)
+        #     pointcloud = random_scale * pointcloud
 
-        if self.subsample < 2048:
-            while len(pointcloud) < NUM_POINTS:
-                chosen = np.arange(len(pointcloud))
-                np.random.shuffle(chosen)
-                chosen = chosen[:NUM_POINTS - len(pointcloud)]
-                pointcloud = np.concatenate((
-                    pointcloud,
-                    pointcloud[chosen]
-                ), axis=0)
-                ind = np.concatenate((ind, chosen), axis=0)
-                assert len(pointcloud) == len(ind)
-                norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
+        # if self.subsample < 2048:
+        #     while len(pointcloud) < NUM_POINTS:
+        #         chosen = np.arange(len(pointcloud))
+        #         np.random.shuffle(chosen)
+        #         chosen = chosen[:NUM_POINTS - len(pointcloud)]
+        #         pointcloud = np.concatenate((
+        #             pointcloud,
+        #             pointcloud[chosen]
+        #         ), axis=0)
+        #         ind = np.concatenate((ind, chosen), axis=0)
+        #         assert len(pointcloud) == len(ind)
+        #         norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
+
+        print(f"num points: {N}")
 
         return (pointcloud, label, mask, ind)
 
+
+    def __len__(self):
+        return len(self.pc_list)
 
     def __len__(self):
         return len(self.pc_list)

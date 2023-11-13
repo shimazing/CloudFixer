@@ -313,6 +313,9 @@ def rotate_shape_tensor(x, axis, angle):
     if axis == "x":
         R_x = torch.tensor([[[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0,
             np.sin(angle), np.cos(angle)]]]).to(x) # 1 x 3 x 3
+        print(f"R_x.shape: {R_x.shape}")
+        print(f"x.shape: {x.shape}")
+
         return x @ R_x
     elif axis == "y":
         R_y = torch.tensor([[[np.cos(angle), 0, np.sin(angle)], [0, 1, 0],

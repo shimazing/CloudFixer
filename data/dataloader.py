@@ -161,8 +161,6 @@ class ModelNet40C(Dataset):
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
 
-        # print(f"pointcloud.shape 1: {pointcloud.shape}")
-
         # if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
         if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
             # remove duplicated points
@@ -175,8 +173,6 @@ class ModelNet40C(Dataset):
                 mask[dup] = 0
                 pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
 
-        # print(f"pointcloud.shape 2: {pointcloud.shape}")
-
         ind = np.arange(len(pointcloud))
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
@@ -184,15 +180,11 @@ class ModelNet40C(Dataset):
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
 
-        # print(f"pointcloud.shape 3: {pointcloud.shape}")
-
         if self.aug:
             pointcloud = translate_pointcloud(pointcloud)
         if self.random_scale:
             random_scale = np.random.uniform(0.9, 1.1)
             pointcloud = random_scale * pointcloud
-
-        # print(f"pointcloud.shape 4: {pointcloud.shape}")
 
         if self.subsample < 2048:
             while len(pointcloud) < NUM_POINTS:
@@ -206,8 +198,6 @@ class ModelNet40C(Dataset):
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
                 norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
-
-        # print(f"pointcloud.shape 5: {pointcloud.shape}")
 
         return (pointcloud, label, mask, ind)
 
@@ -493,7 +483,6 @@ class GraspNet10(Dataset):
             dataset_dir_realsense = os.path.join(args.dataset_dir, partition_dir, "Real", "realsense")
             pc_list = sorted(glob.glob(os.path.join(dataset_dir_realsense, '*', '*.xyz')))
         pc_list = np.asarray(pc_list)
-        print(f"pc_list: {pc_list}")
         label_list = np.asarray([int(pc.split('/')[-2]) for pc in pc_list])
 
         if partition == "train":

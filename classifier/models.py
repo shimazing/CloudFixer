@@ -46,7 +46,12 @@ class PointNet(nn.Module):
         x = F.relu(self.bn5(self.conv5(x)))
         x = F.adaptive_max_pool1d(x, 1).squeeze()
         x = self.bn6(self.linear1(x))
-        return x        
+        return x
+
+    def get_feature(self, x):
+        x = self.bn1(self.conv1(x))
+        return x
+
 
 
 class DGCNN(nn.Module):
@@ -164,6 +169,13 @@ class DGCNN(nn.Module):
         x = self.bn7(self.linear2(x))
         return x
 
+    def get_low_level_feature(self, x):
+        x = get_graph_feature(x, k=self.k)
+        x = self.conv1(x)
+        x1 = x.max(dim=-1, keepdim=False)[0]
+        return x1
+
+
 
 class DGCNNWrapper(nn.Module):
     def __init__(self, dataset, output_channels):
@@ -181,7 +193,7 @@ class DGCNNWrapper(nn.Module):
     def forward(self, pc):
         # normalize pc here!
         pc = scale_to_unit_cube_torch(pc)
-        if self.daㅈtaset.startswith("modelnet40"):
+        if self.dataset.startswith("modelnet40"):
             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
         pc = pc.permute(0, 2, 1).contiguous()
         logit = self.model(pc)
@@ -193,6 +205,14 @@ class DGCNNWrapper(nn.Module):
             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
         pc = pc.permute(0, 2, 1).contiguous()
         return self.model.get_feature(pc)
+
+
+    def get_low_level_feature(self, pc):
+        pc = scale_to_unit_cube_torch(pc)
+        if self.dataset.startswith("modelnet40"):
+            pc = rotate_shape_tensor(pc, 'x', np.pi/2)
+        pc = pc.permute(0, 2, 1).contiguous()
+        return self.model.get_low_level_feature(pc)
 
 
 

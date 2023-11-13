@@ -1,6 +1,6 @@
 # dataset
-DATASET_ROOT_DIR=../datasets
-CODE_BASE_DIR=.
+DATASET_ROOT_DIR=../nfs-client/datasets
+CODE_BASE_DIR=../nfs-client/CloudFixer
 # dataset=modelnet40c_original
 # dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
 # dataset=modelnet40c_occlusion_5

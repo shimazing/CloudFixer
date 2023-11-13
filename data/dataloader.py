@@ -21,13 +21,7 @@ from utils.pc_utils import (
     jitter_pointcloud,
     random_rotate_one_axis,
     remove,
-    # rotate_shape,
-    # uniform_2_sphere,
 )
-# try:
-#     from generate_c import deformation, noise, part
-# except:
-#     pass
 
 NUM_POINTS = 1024
 

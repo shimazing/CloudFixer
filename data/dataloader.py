@@ -127,23 +127,124 @@ class ModelNet40C(Dataset):
         return label_to_idx
 
 
+class ModelNet40C(Dataset):
+    def __init__(self, args, partition):
+        super().__init__()
+        self.dataset = args.dataset
+        self.partition = partition
+        
+        if len(args.dataset.split("_")) == 1:
+            self.corruption = 'original'
+        elif len(args.dataset.split("_")) == 2:
+            self.corruption = "_".join(args.dataset.split("_")[1:])
+        else:
+            self.corruption = "_".join(args.dataset.split("_")[1:-1])
+        if self.corruption != 'original':
+            assert partition == 'test'
+            self.severity = args.dataset.split("_")[-1]
+
+        self.rotate = args.rotate if hasattr(args, 'rotate') else True
+
+        # augmentation
+        if partition in ['train', 'train_all']:
+            self.jitter = args.jitter if hasattr(args, 'jitter') else True
+            self.random_scale = args.random_scale if hasattr(args, 'random_scale') else False
+            self.random_rotation = args.random_rotation if hasattr(args, 'random_rotation') else True
+            self.random_trans = args.random_trans if hasattr(args, 'random_trans') else False
+            self.subsample = args.subsample if hasattr(args, 'subsample') else 1024
+            self.aug = args.aug if hasattr(args, 'aug') else False
+        else:
+            self.jitter, self.random_scale, self.random_rotation, self.random_trans, self.subsample, self.aug = False, False, False, False, 1024, False
+
+        self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
+        self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
+        if self.corruption == 'original':
+            self.pc_list, self.label_list = self.load_modelnet40(args.dataset_dir, partition=partition)
+        else:
+            self.pc_list, self.label_list = self.load_modelnet40_c(args.dataset_dir, self.corruption, self.severity)
+
+        # print dataset statistics
+        unique, counts = np.unique(self.label_list, return_counts=True)
+        print(f"number of {partition} examples in {args.dataset} : {str(len(self.pc_list))}")
+        print(f"Occurrences count of classes in {args.dataset} {partition} set: {str(dict(zip(unique, counts)))}")
+
+
+    def load_modelnet40(self, data_path, partition='train'):
+        all_data = []
+        all_label = []
+        for h5_name in glob.glob(os.path.join(data_path, f'ply_data_{partition}*.h5')):
+            f = h5py.File(h5_name.strip(), 'r')
+            data = f['data'][:].astype('float32')
+            label = f['label'][:].astype('int64')
+            f.close()
+            all_data.append(data)
+            all_label.append(label)
+        all_data = np.concatenate(all_data, axis=0)
+        all_label = np.concatenate(all_label, axis=0).squeeze(-1)
+        return all_data, all_label
+
+
+    def load_modelnet40_c(self, data_path='data/modelnet40_c', corruption='cutout', severity=1, num_classes=40):
+        if corruption == 'original':
+            data_dir = os.path.join(data_path, f'data_{corruption}.npy')
+        else:
+            data_dir = os.path.join(data_path, f'data_{corruption}_{severity}.npy')
+        all_data = np.load(data_dir)
+        label_dir = os.path.join(data_path, 'label.npy')
+        all_label = np.load(label_dir).squeeze(-1)
+
+        if num_classes == 40:
+            return all_data, all_label
+
+        pointda_label_dict = {
+            1: 0, # bathtub
+            2: 1, # bed
+            4: 2, # bookshelf
+            23: 3, # night_stand(cabinet)
+            8: 4, # chair
+            19: 5, # lamp
+            22: 6, # monitor
+            26: 7, # plant
+            30: 8, # sofa
+            33: 9, # table
+        }
+        pointda_label = [1, 2, 4, 8, 19, 22, 23, 26, 30, 33] # 1: bathtub, 2: bed, 4: bookshelf, 8: chair, 19: lamp, 22: monitor, 23: night_stand(cabinet), 26: plant, 30: sofa, 33: table
+        pointda_indices = np.isin(all_label, pointda_label).squeeze(-1)
+        all_data = all_data[pointda_indices, :, :]
+        all_label = all_label[pointda_indices, :]
+        all_label = np.array([pointda_label_dict[idx] for idx in all_label])
+        return all_data, all_label
+
+
+    def get_label_to_idx(self, args):
+        npy_list = sorted(glob.glob(os.path.join(args.dataset_dir, '*', 'train', '*.npy')))
+        label_to_idx = {label:idx for idx, label in enumerate(list(np.unique([_dir.split('/')[-3] for _dir in npy_list])))}
+        return label_to_idx
+
+
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
-        norm_curv = self.pc_list[item][:, 3:]
+        # norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
 
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
-
         ind = np.arange(len(pointcloud))
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
             pointcloud = rotate_pc(pointcloud)
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
+
+        if self.jitter:
+            pointcloud = jitter_pointcloud(pointcloud)
+
         return (pointcloud, label, mask, ind)
 
+
+    def __len__(self):
+        return len(self.pc_list)
 
     def __len__(self):
         return len(self.pc_list)
@@ -369,12 +470,6 @@ class PointDA10(Dataset):
                 random_scale = np.random.uniform(0.9, 1.1)
                 pointcloud_rm = random_scale * pointcloud_rm
 
-        # if self.self_distillation:
-        #     return (pointcloud, label, pointcloud_aug, np.array(item))
-
-        # if self.random_remove:
-        #     return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm, mean_rm, std_rm)
-
         return (pointcloud, label, mask, ind)
 
 
@@ -447,39 +542,10 @@ class GraspNet10(Dataset):
         else:
             pointcloud = self.scale * scale_to_unit_cube(pointcloud)
 
-        # # sample according to farthest point sampling
-        # if pointcloud.shape[0] > NUM_POINTS:
-        #     pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-        #     _, pointcloud, _ = farthest_point_sample_np(pointcloud, None, NUM_POINTS)
-        #     pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
-
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
         ind = np.arange(len(pointcloud))
-
-        # while len(pointcloud) < NUM_POINTS:
-        #     chosen = np.arange(N)
-        #     np.random.shuffle(chosen)
-        #     chosen = chosen[:NUM_POINTS - len(pointcloud)]
-        #     pointcloud = np.concatenate((pointcloud, pointcloud[chosen]), axis=0)
-
-        # # apply data rotation and augmentation on train samples
-        # if self.random_rotation:
-        #     pointcloud = random_rotate_one_axis(pointcloud, "z")
-
-        # if self.zero_mean:
-        #     if self.scale_mode != 'unit_norm':
-        #         pointcloud = self.scale * scale(pointcloud, self.scale_mode)
-        #     else:
-        #         pointcloud = self.scale * scale_to_unit_cube(pointcloud)
-
-        # if self.random_scale:
-        #     random_scale = np.random.uniform(0.9, 1.1)
-        #     if not self.self_distillation:
-        #         pointcloud = random_scale * pointcloud
-        #     else:
-        #         pointcloud_aug = random_scale * pointcloud_aug
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)

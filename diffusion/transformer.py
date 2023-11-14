@@ -150,8 +150,6 @@ class MultiheadAttention(nn.Module):
     def __init__(
         self,
         *,
-        device: torch.device,
-        dtype: torch.dtype,
         n_ctx: int,
         width: int,
         heads: int,
@@ -161,9 +159,9 @@ class MultiheadAttention(nn.Module):
         self.n_ctx = n_ctx
         self.width = width
         self.heads = heads
-        self.c_qkv = nn.Linear(width, width * 3, device=device, dtype=dtype)
-        self.c_proj = nn.Linear(width, width, device=device, dtype=dtype)
-        self.attention = QKVMultiheadAttention(device=device, dtype=dtype, heads=heads, n_ctx=n_ctx)
+        self.c_qkv = nn.Linear(width, width * 3)
+        self.c_proj = nn.Linear(width, width)
+        self.attention = QKVMultiheadAttention(heads=heads, n_ctx=n_ctx)
         init_linear(self.c_qkv, init_scale)
         init_linear(self.c_proj, init_scale)
 
@@ -176,11 +174,11 @@ class MultiheadAttention(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, *, device: torch.device, dtype: torch.dtype, width: int, init_scale: float):
+    def __init__(self, *, width: int, init_scale: float):
         super().__init__()
         self.width = width
-        self.c_fc = nn.Linear(width, width * 4, device=device, dtype=dtype)
-        self.c_proj = nn.Linear(width * 4, width, device=device, dtype=dtype)
+        self.c_fc = nn.Linear(width, width * 4)
+        self.c_proj = nn.Linear(width * 4, width)
         self.gelu = nn.GELU()
         init_linear(self.c_fc, init_scale)
         init_linear(self.c_proj, init_scale)
@@ -191,10 +189,8 @@ class MLP(nn.Module):
 
 
 class QKVMultiheadAttention(nn.Module):
-    def __init__(self, *, device: torch.device, dtype: torch.dtype, heads: int, n_ctx: int):
+    def __init__(self, *, heads: int, n_ctx: int):
         super().__init__()
-        self.device = device
-        self.dtype = dtype
         self.heads = heads
         self.n_ctx = n_ctx
 
@@ -217,8 +213,6 @@ class ResidualAttentionBlock(nn.Module):
     def __init__(
         self,
         *,
-        device: torch.device,
-        dtype: torch.dtype,
         n_ctx: int,
         width: int,
         heads: int,
@@ -227,16 +221,14 @@ class ResidualAttentionBlock(nn.Module):
         super().__init__()
 
         self.attn = MultiheadAttention(
-            device=device,
-            dtype=dtype,
             n_ctx=n_ctx,
             width=width,
             heads=heads,
             init_scale=init_scale,
         )
-        self.ln_1 = nn.LayerNorm(width, device=device, dtype=dtype)
-        self.mlp = MLP(device=device, dtype=dtype, width=width, init_scale=init_scale)
-        self.ln_2 = nn.LayerNorm(width, device=device, dtype=dtype)
+        self.ln_1 = nn.LayerNorm(width)
+        self.mlp = MLP(width=width, init_scale=init_scale)
+        self.ln_2 = nn.LayerNorm(width)
 
     def forward(self, x: torch.Tensor):
         x = x + self.attn(self.ln_1(x))
@@ -249,8 +241,6 @@ class Transformer(nn.Module):
     def __init__(
         self,
         *,
-        device: torch.device,
-        dtype: torch.dtype,
         n_ctx: int,
         width: int,
         layers: int,
@@ -265,8 +255,6 @@ class Transformer(nn.Module):
         self.resblocks = nn.ModuleList(
             [
                 ResidualAttentionBlock(
-                    device=device,
-                    dtype=dtype,
                     n_ctx=n_ctx,
                     width=width,
                     heads=heads,
@@ -287,8 +275,6 @@ class PointDiffusionTransformer(nn.Module):
     def __init__(
         self,
         *,
-        device: torch.device,
-        dtype: torch.dtype,
         input_channels: int = 3,
         output_channels: int = 3,
         n_ctx: int = 1024,
@@ -304,21 +290,19 @@ class PointDiffusionTransformer(nn.Module):
         self.n_ctx = n_ctx
         self.time_token_cond = time_token_cond
         self.time_embed = MLP(
-            device=device, dtype=dtype, width=width, init_scale=init_scale * math.sqrt(1.0 / width)
+            width=width, init_scale=init_scale * math.sqrt(1.0 / width)
         )
-        self.ln_pre = nn.LayerNorm(width, device=device, dtype=dtype)
+        self.ln_pre = nn.LayerNorm(width)
         self.backbone = Transformer(
-            device=device,
-            dtype=dtype,
             n_ctx=n_ctx + int(time_token_cond),
             width=width,
             layers=layers,
             heads=heads,
             init_scale=init_scale,
         )
-        self.ln_post = nn.LayerNorm(width, device=device, dtype=dtype)
-        self.input_proj = nn.Linear(input_channels, width, device=device, dtype=dtype)
-        self.output_proj = nn.Linear(width, output_channels, device=device, dtype=dtype)
+        self.ln_post = nn.LayerNorm(width)
+        self.input_proj = nn.Linear(input_channels, width)
+        self.output_proj = nn.Linear(width, output_channels)
         with torch.no_grad():
             self.output_proj.weight.zero_()
             self.output_proj.bias.zero_()
@@ -358,11 +342,11 @@ class PointDiffusionTransformer(nn.Module):
 
 
 
-def model_from_config(config: Dict[str, Any], device: torch.device) -> nn.Module:
+def model_from_config(config: Dict[str, Any]) -> nn.Module:
     config = config.copy()
     name = config.pop("name")
     if name == "PointDiffusionTransformer":
-        return PointDiffusionTransformer(device=device, dtype=torch.float32, **config)
+        return PointDiffusionTransformer(**config)
     else:
         raise ValueError(f"unknown model name: {name}")
 

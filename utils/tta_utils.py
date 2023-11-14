@@ -36,47 +36,71 @@ def setup_optimizer(args, params):
     return optimizer
 
 
+
+def configure_bn_layer(args, m):
+    m.requires_grad_(True)
+    if not isinstance(m, nn.BatchNorm1d) or args.batch_size > 1:
+        m.track_running_stats = False
+        m.running_mean = None
+        m.running_var = None
+
+
 def configure_model(args, model):
     if 'tent' in args.method:
-        model.train()
-        for m in model.modules():
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
-                m.track_running_stats = False
-                m.running_mean = None
-                m.running_var = None
-    if 'sar' in args.method:
-        model.train()
+        model.eval()
         model.requires_grad_(False)
         for m in model.modules():
-            if isinstance(m, nn.BatchNorm2d):
-                m.requires_grad_(True)
-                m.track_running_stats = False
-                m.running_mean = None
-                m.running_var = None
-            if isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
+    if 'sar' in args.method:
+        model.eval()
+        model.requires_grad_(False)
+        for m in model.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
+            elif isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
                 m.requires_grad_(True)
     if 'pl' in args.method:
-        model.train()
-    if 'memo' in args.method:
-        model.train()
+        model.eval()
+        model.requires_grad_(False)
         for m in model.modules():
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            if isinstance(m, nn.Dropout):
                 m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
+    if 'memo' in args.method:
+        model.eval()
+        for m in model.modules():
+            if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
                 m.momentum = args.memo_bn_momentum
     if 'shot' in args.method:
-        model.train()
+        model.eval()
+        for m in model.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
         m = list(model.modules())[-1]
         m.eval()
         m.requires_grad_(False)
     if 'dua' in args.method:
         model.eval()
         for m in model.modules():
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
+                m.eval()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 m.train()
     if 'bn_stats' in args.method:
         model.eval()
         for m in model.modules():
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
+                m.eval()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 if not args.bn_stats_prior: # do not use source statistics
                     m.track_running_stats = False
                     m.running_mean = None
@@ -87,7 +111,7 @@ def configure_model(args, model):
     return model
 
 
-def collect_params(model, train_params):
+def collect_params(args, model, train_params):
     params, names = [], []
     for nm, m in model.named_modules():
         if 'all' in train_params:
@@ -103,7 +127,7 @@ def collect_params(model, train_params):
                         params.append(p)
                         names.append(f"{nm}.{np}")
         if 'BN' in train_params:
-            if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            if isinstance(m, nn.modules.batchnorm._BatchNorm):
                 for np, p in m.named_parameters():
                     if np in ['weight', 'bias']:
                         params.append(p)
@@ -114,18 +138,6 @@ def collect_params(model, train_params):
                     if np in ['weight', 'bias']:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-        if "pretrain" in train_params:
-            for np, p in m.named_parameters():
-                if 'main_head' in f"{nm}.{np}":
-                    continue
-                params.append(p)
-                names.append(f"{nm}.{np}")
-        if "downstream" in train_params:
-            for np, p in m.named_parameters():
-                if not 'main_head' in f"{nm}.{np}":
-                    continue
-                params.append(p)
-                names.append(f"{nm}.{np}")
     print(f"parameters to adapt: {names}")
     return params, names
 
@@ -158,6 +170,16 @@ def marginal_entropy(args, logits):
     probs = per_sample_logits.softmax(dim=-1)
     probs = probs.mean(dim=1)
     return -(probs * torch.log(probs)).sum(dim=-1).mean()
+
+
+def _modified_bn_forward(self, input):
+    est_mean = torch.zeros(self.running_mean.shape, device=self.running_mean.device)
+    est_var = torch.ones(self.running_var.shape, device=self.running_var.device)
+    nn.functional.batch_norm(input, est_mean, est_var, None, None, True, 1.0, self.eps)
+    running_mean = self.prior * self.running_mean + (1 - self.prior) * est_mean
+    running_var = self.prior * self.running_var + (1 - self.prior) * est_var
+    return nn.functional.batch_norm(input, running_mean, running_var, self.weight, self.bias, False, 0, self.eps)
+
 
 
 

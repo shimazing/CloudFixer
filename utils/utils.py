@@ -38,8 +38,9 @@ def set_seed(random_seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(random_seed)
         torch.cuda.manual_seed_all(random_seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.enabled = False
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
 
 def create_folders(args):
@@ -94,11 +95,11 @@ def get_augmented_input(x, num_augs=4):
     assert num_augs >= 1
     device = x.device
     augs = [
-        lambda x: random_rotate_one_axis(x, axis='z'),
+        lambda pc: random_rotate_one_axis(pc, axis='z'),
         jitter_pointcloud,
         translate_pointcloud,
-        # remove,
     ]
+    # selected_augs = random.choices(augs, k=num_augs-1)
     selected_augs = np.random.choice(augs, num_augs-1, replace=True)
     return torch.cat(
         [x] + [torch.tensor(selected_aug(x.cpu().numpy())).to(device) for selected_aug in selected_augs],

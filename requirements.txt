@@ -76,7 +76,6 @@ Pygments==2.16.1
 pyparsing==3.1.1
 pyquaternion==0.9.9
 python-dateutil==2.8.2
-pytorch3d==0.3.0
 pytz==2023.3.post1
 PyYAML==6.0.1
 referencing==0.30.2
@@ -95,8 +94,6 @@ tabulate==0.9.0
 tenacity==8.2.3
 termcolor==2.3.0
 threadpoolctl==3.2.0
-torch==1.10.1+cu111
-torchvision==0.11.2+cu111
 tqdm==4.66.1
 traitlets==5.12.0
 typing_extensions==4.8.0

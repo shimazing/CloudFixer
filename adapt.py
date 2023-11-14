@@ -320,6 +320,9 @@ def ours(args, model, x, mask, ind, classifier):
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
+    import time
+    start = time.time()
+
     global EMA, mom_pre
 
     if isinstance(classifier, torch.nn.DataParallel):
@@ -408,6 +411,9 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss.backward()
         optimizer.step()
 
+    end = time.time()
+    print(f"end: {end - start}")
+
     # output adaptation
     is_training = classifier.training
     if is_training:
@@ -452,7 +458,7 @@ def main(args):
         test_dataset = GraspNet10(args=args, partition='test')
     else:
         raise ValueError('UNDEFINED DATASET')
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, num_workers=args.num_workers)
+    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
@@ -487,6 +493,9 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
+        if iter_idx >= 100:
+            break
+
         x = data[0].to(device)
 
         labels = data[1].to(device).flatten()
@@ -502,16 +511,17 @@ def main(args):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
         logits_before = original_classifier(x).detach()
-        # all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
+        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-        print(f"logits_after.shape: {logits_after.shape}")
-        # all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
+        all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
 
-    #     io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
-    #     io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
-    #     io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
-    # return accuracy_score(all_gt_list, all_pred_after_list)
+        io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
+        io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
+        io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    io.cprint(f"final metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
+    io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    return accuracy_score(all_gt_list, all_pred_after_list)
 
 
 def tune_tta_hparams(args):

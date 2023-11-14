@@ -12,22 +12,7 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 
-from utils.pc_utils import (
-    farthest_point_sample_np,
-    scale,
-    scale_to_unit_cube,
-    rotate_pc,
-    translate_pointcloud,
-    jitter_pointcloud,
-    random_rotate_one_axis,
-    remove,
-    # rotate_shape,
-    # uniform_2_sphere,
-)
-# try:
-#     from generate_c import deformation, noise, part
-# except:
-#     pass
+from utils.pc_utils import *
 
 NUM_POINTS = 1024
 
@@ -39,7 +24,6 @@ class ModelNet40C(Dataset):
         self.dataset = args.dataset
         self.partition = partition
         
-        # self.corrupt_ori = args.corrupt_ori if hasattr(args, 'corrupt_ori') else False
         if len(args.dataset.split("_")) == 1:
             self.corruption = 'original'
         elif len(args.dataset.split("_")) == 2:
@@ -49,23 +33,6 @@ class ModelNet40C(Dataset):
         if self.corruption != 'original':
             assert partition == 'test'
             self.severity = args.dataset.split("_")[-1]
-
-        # if self.corrupt_ori:
-        #     self.corruption = 'original'
-        # else:
-        #     try:
-        #         self.corruption = args.dataset.split("_")[1]
-        #     except:
-        #         self.corruption = 'original'
-
-        # if self.corruption != 'original':
-        #     assert partition == 'test'
-        # try:
-        #     self.severity = args.dataset.split("_")[2]
-        # except:
-        #     self.severity = 5
-
-        # print(f"self.severity: {self.severity}")
 
         self.rotate = args.rotate if hasattr(args, 'rotate') else True
 
@@ -165,13 +132,14 @@ class ModelNet40C(Dataset):
 
         # augmentation
         if partition in ['train', 'train_all']:
+            self.jitter = args.jitter if hasattr(args, 'jitter') else True
             self.random_scale = args.random_scale if hasattr(args, 'random_scale') else False
             self.random_rotation = args.random_rotation if hasattr(args, 'random_rotation') else True
             self.random_trans = args.random_trans if hasattr(args, 'random_trans') else False
             self.subsample = args.subsample if hasattr(args, 'subsample') else 1024
             self.aug = args.aug if hasattr(args, 'aug') else False
         else:
-            self.random_scale, self.random_rotation, self.random_trans, self.subsample, self.aug = False, False, False, 1024, False
+            self.jitter, self.random_scale, self.random_rotation, self.random_trans, self.subsample, self.aug = False, False, False, False, 1024, False
 
         self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
@@ -241,33 +209,12 @@ class ModelNet40C(Dataset):
 
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
-        norm_curv = self.pc_list[item][:, 3:]
+        # norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
-
-        # if len(pointcloud) > self.subsample:
-        #     pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-        #     norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
-        #     _, pointcloud, norm_curv = farthest_point_sample_np(pointcloud,
-        #             norm_curv, self.subsample)
-        #     pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
-        #     norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
 
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
-
-        # if self.corrupt_ori or ('cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption):
-        # if 'cutout' in self.corruption or 'occlusion' in self.corruption or 'lidar' in self.corruption:
-        #     # remove duplicated points
-        #     dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:, None, :]), 2), axis=-1) < 1e-8
-        #     dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-        #     if np.any(dup_points):
-        #         row, col = dup_points.nonzero()
-        #         row, col = row[row<col], col[row<col]
-        #         dup = np.unique(col)
-        #         mask[dup] = 0
-        #         pointcloud = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
-
         ind = np.arange(len(pointcloud))
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
@@ -275,26 +222,8 @@ class ModelNet40C(Dataset):
             if self.random_rotation:
                 pointcloud = random_rotate_one_axis(pointcloud, "z")
 
-        # if self.aug:
-        #     pointcloud = translate_pointcloud(pointcloud)
-        # if self.random_scale:
-        #     random_scale = np.random.uniform(0.9, 1.1)
-        #     pointcloud = random_scale * pointcloud
-
-        # if self.subsample < 2048:
-        #     while len(pointcloud) < NUM_POINTS:
-        #         chosen = np.arange(len(pointcloud))
-        #         np.random.shuffle(chosen)
-        #         chosen = chosen[:NUM_POINTS - len(pointcloud)]
-        #         pointcloud = np.concatenate((
-        #             pointcloud,
-        #             pointcloud[chosen]
-        #         ), axis=0)
-        #         ind = np.concatenate((ind, chosen), axis=0)
-        #         assert len(pointcloud) == len(ind)
-        #         norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
-
-        print(f"num points: {N}")
+        if self.jitter:
+            pointcloud = jitter_pointcloud(pointcloud)
 
         return (pointcloud, label, mask, ind)
 
@@ -304,6 +233,268 @@ class ModelNet40C(Dataset):
 
     def __len__(self):
         return len(self.pc_list)
+
+
+
+# def load_data_h5py_scannet10(partition, dataroot):
+#     """
+#     Input:
+#         partition - train/test
+#     Return:
+#         data,label arrays
+#     """
+#     # DATA_DIR = 'data/PointDA_data/scannet' #_norm_curv_angle'
+#     all_data = []
+#     all_label = []
+#     for h5_name in sorted(glob.glob(os.path.join(dataroot, '%s_*.h5' % partition))):
+#         f = h5py.File(h5_name, 'r')
+#         data = f['data'][:]
+#         label = f['label'][:]
+#         f.close()
+#         all_data.append(data)
+#         all_label.append(label)
+#     all_data = np.concatenate(all_data, axis=0)
+#     all_label = np.concatenate(all_label, axis=0)
+#     return np.array(all_data).astype('float32'), np.array(all_label).astype('int64')
+
+
+
+# class ModelNet(Dataset):
+#     """
+#     modelnet dataset for pytorch dataloader
+#     """
+#     def __init__(self, io, dataroot, partition='train', random_rotation=True):
+#         self.partition = partition
+#         self.random_rotation = random_rotation if partition in ['train', 'train_all'] else False
+#         self.pc_list = []
+#         self.label_list = []
+#         # DATA_DIR = os.path.join(dataroot, "PointDA_data", "modelnet") #_norm_curv_angle")
+
+#         npy_list = sorted(glob.glob(os.path.join(dataroot, '*', partition, '*.npy')))
+#         self.label_to_idx = self.get_label_to_idx(dataroot)
+
+#         for _dir in npy_list:
+#             self.pc_list.append(_dir)
+#             self.label_list.append(self.label_to_idx[_dir.split('/')[-3]])
+
+#         self.label = np.asarray(self.label_list)
+#         self.num_examples = len(self.pc_list)
+
+#         # split train to train part and validation part
+#         if partition == "train":
+#             self.train_ind = np.asarray([i for i in range(self.num_examples) if i % 10 < 8]).astype(int)
+#             np.random.shuffle(self.train_ind)
+#             self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+#                 % 10 >= 8]).astype(int)
+#             np.random.shuffle(self.val_ind)
+
+#         io.cprint("number of " + partition + " examples in modelnet : " + str(len(self.pc_list)))
+#         unique, counts = np.unique(self.label, return_counts=True)
+#         io.cprint("Occurrences count of classes in modelnet " + partition + " set: " + str(dict(zip(unique, counts))))
+
+
+#     def get_label_to_idx(self, dataroot):
+#         npy_list = sorted(glob.glob(os.path.join(dataroot, '*', 'train', '*.npy')))
+#         label_to_idx = {label:idx for idx, label in enumerate(list(np.unique([_dir.split('/')[-3] for _dir in npy_list])))}
+#         return label_to_idx
+
+
+#     def __getitem__(self, item):
+#         pointcloud = np.load(self.pc_list[item])[:, :3].astype(np.float32)
+#         #norm_curv = np.load(self.pc_list[item])[:, 3:7].astype(np.float32)
+#         label = np.copy(self.label_list[item])
+#         pointcloud = scale_to_unit_cube(pointcloud)
+#         # sample according to farthest point sampling
+#         if pointcloud.shape[0] > NUM_POINTS:
+#             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+#             #norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+#             _, pointcloud = farthest_point_sample_np(pointcloud, NUM_POINTS)
+#             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+#             #norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+#         # apply data rotation and augmentation on train samples
+#         if self.random_rotation:
+#             pointcloud = random_rotate_one_axis(pointcloud, "z")
+#         if self.partition == 'train' and item not in self.val_ind:
+#             pointcloud = jitter_pointcloud(pointcloud)
+
+#         return (pointcloud, label) #, norm_curv)
+
+#     def __len__(self):
+#         return len(self.pc_list)
+
+
+
+# class ShapeNet(Dataset):
+#     """
+#     Sahpenet dataset for pytorch dataloader
+#     """
+#     def __init__(self, io, dataroot, partition='train', random_rotation=True):
+#         self.partition = partition
+#         self.random_rotation = random_rotation if partition in ['train', 'train_all'] else False
+#         self.pc_list = []
+#         self.label_list = []
+#         # DATA_DIR = os.path.join(dataroot, "PointDA_data", "shapenet") #_norm_curv_angle")
+
+#         npy_list = sorted(glob.glob(os.path.join(dataroot, '*', partition, '*.npy')))
+#         self.label_to_idx = self.get_label_to_idx(dataroot)
+
+#         for _dir in npy_list:
+#             self.pc_list.append(_dir)
+#             self.label_list.append(self.label_to_idx[_dir.split('/')[-3]])
+
+#         self.label = np.asarray(self.label_list)
+#         self.num_examples = len(self.pc_list)
+
+#         # split train to train part and validation part
+#         if partition == "train":
+#             self.train_ind = np.asarray([i for i in range(self.num_examples) if
+#                 i % 10 < 8]).astype(int)
+#             np.random.shuffle(self.train_ind)
+#             self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+#                 % 10 >= 8]).astype(int)
+#             np.random.shuffle(self.val_ind)
+
+#         io.cprint("number of " + partition + " examples in shapenet: " + str(len(self.pc_list)))
+#         unique, counts = np.unique(self.label, return_counts=True)
+#         io.cprint("Occurrences count of classes in shapenet " + partition + " set: " + str(dict(zip(unique, counts))))
+
+
+#     def get_label_to_idx(self, dataroot):
+#         npy_list = sorted(glob.glob(os.path.join(dataroot, '*', 'train', '*.npy')))
+#         label_to_idx = {label:idx for idx, label in enumerate(list(np.unique([_dir.split('/')[-3] for _dir in npy_list])))}
+#         return label_to_idx
+
+
+#     def __getitem__(self, item):
+#         pointcloud = np.load(self.pc_list[item])[:, :3].astype(np.float32)
+#         #norm_curv = np.load(self.pc_list[item])[:, 3:7].astype(np.float32)
+#         label = np.copy(self.label[item])
+#         pointcloud = scale_to_unit_cube(pointcloud)
+#         # Rotate ShapeNet by -90 degrees
+#         pointcloud = self.rotate_pc(pointcloud, label)
+#         # sample according to farthest point sampling
+#         if pointcloud.shape[0] > NUM_POINTS:
+#             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+#             #norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+#             _, pointcloud = farthest_point_sample_np(pointcloud, NUM_POINTS)
+#             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+#             #norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+#         # apply data rotation and augmentation on train samples
+#         if self.random_rotation:
+#             pointcloud = random_rotate_one_axis(pointcloud, "z")
+#         if self.partition == 'train' and item not in self.val_ind:
+#             pointcloud = jitter_pointcloud(pointcloud)
+
+#         return (pointcloud, label) #, norm_curv)
+
+#     def __len__(self):
+#         return len(self.pc_list)
+
+#     # shpenet is rotated such that the up direction is the y axis in all shapes except plant
+#     def rotate_pc(self, pointcloud, label):
+#         if label.item(0) != self.label_to_idx["plant"]:
+#             pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
+#         return pointcloud
+
+
+
+# class ScanNet(Dataset):
+#     """
+#     scannet dataset for pytorch dataloader
+#     """
+#     def __init__(self, io, dataroot, partition='train', random_rotation=True):
+#         self.partition = partition
+#         self.random_rotation = random_rotation if partition in ['train', 'train_all'] else False
+
+#         # read data
+#         self.data, self.label = load_data_h5py_scannet10(self.partition, dataroot)
+#         self.num_examples = self.data.shape[0]
+
+#         # split train to train part and validation part
+#         if partition == "train":
+#             self.train_ind = np.asarray([i for i in range(self.num_examples) if
+#                 i % 10 < 8]).astype(int)
+#             np.random.shuffle(self.train_ind)
+#             self.val_ind = np.asarray([i for i in range(self.num_examples) if i
+#                 % 10 >= 8]).astype(int)
+#             np.random.shuffle(self.val_ind)
+
+#         io.cprint("number of " + partition + " examples in scannet" + ": " + str(self.data.shape[0]))
+#         unique, counts = np.unique(self.label, return_counts=True)
+#         io.cprint("Occurrences count of classes in scannet " + partition + " set: " + str(dict(zip(unique, counts))))
+
+#         processed_fn = f"data/PointDA_data/scannet/processed_{partition}.pt"
+#         if not os.path.exists(processed_fn):
+#             print("Remove dup point")
+#             for item in tqdm(range(len(self.data))):
+#                 pointcloud = np.copy(self.data[item])[:, :3]
+#                 norm_curv = np.copy(self.data[item])[:, 3:].astype(np.float32)
+#                 dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+#                     None, :]), 2),
+#                         axis=-1) < 1e-8
+#                 dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+#                 mask = np.ones(len(pointcloud))
+#                 if np.any(dup_points):
+#                     row, col = dup_points.nonzero()
+#                     row, col = row[row<col], col[row<col]
+#                     dup = np.unique(col)
+#                     mask[dup] = 0
+#                 valid, = mask.nonzero()
+#                 mask = mask.astype(bool)
+#                 self.data[item] = self.data[item][mask]
+#             print("Remove dup point done")
+#             self.data = np.array(self.data, dtype=object)
+
+#             with open(processed_fn, 'wb') as f:
+#                 np.save(f, self.data, allow_pickle=True)
+#         else:
+#             with open(processed_fn, 'rb') as f:
+#                 self.data = np.load(f, allow_pickle=True)
+#             print("Processed PCs are loaded")
+
+#     def __getitem__(self, item):
+#         pointcloud = np.copy(self.data[item])[:, :3]
+#         #norm_curv = np.copy(self.data[item])[:, 3:7].astype(np.float32)
+#         label = np.copy(self.label[item])
+#         pointcloud = scale_to_unit_cube(pointcloud)
+#         # Rotate ScanNet by -90 degrees
+#         pointcloud = self.rotate_pc(pointcloud)
+#         # sample according to farthest point sampling
+#         if pointcloud.shape[0] > NUM_POINTS:
+#             pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
+#             #norm_curv = np.swapaxes(np.expand_dims(norm_curv, 0), 1, 2)
+#             #_, pointcloud, norm_curv = farthest_point_sample_np(pointcloud, norm_curv, NUM_POINTS)
+#             _, pointcloud = farthest_point_sample_np(pointcloud, NUM_POINTS)
+#             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
+#             #norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
+
+#         N = len(pointcloud)
+#         while len(pointcloud) < NUM_POINTS:
+#             chosen = np.arange(N) #int(len(pointcloud)))
+#             np.random.shuffle(chosen)
+#             chosen = chosen[:NUM_POINTS - len(pointcloud)]
+#             pointcloud = np.concatenate((
+#                 pointcloud,
+#                 pointcloud[chosen]
+#             ), axis=0)
+
+#         # apply data rotation and augmentation on train samples
+#         if self.random_rotation:
+#             pointcloud = random_rotate_one_axis(pointcloud, "z")
+#         if self.partition == 'train' and item not in self.val_ind:
+#             pointcloud = jitter_pointcloud(pointcloud)
+
+#         return (pointcloud, label) #, norm_curv)
+
+#     def __len__(self):
+#         return self.data.shape[0]
+
+#     # scannet is rotated such that the up direction is the y axis
+#     def rotate_pc(self, pointcloud):
+#         pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
+#         return pointcloud
 
 
 
@@ -423,17 +614,17 @@ class PointDA10(Dataset):
         if (self.dataset == "shapenet" and label.item(0) != self.label_to_idx["plant"]) or self.dataset == "scannet":
             pointcloud = rotate_pc(pointcloud)
         
-        if self.scale_mode != 'unit_norm':
-            pointcloud = self.scale * scale(pointcloud, self.scale_mode)
-        else:
-            pointcloud = self.scale * scale_to_unit_cube(pointcloud)
+        # if self.scale_mode != 'unit_norm':
+        #     pointcloud = self.scale * scale(pointcloud, self.scale_mode)
+        # else:
+        #     pointcloud = self.scale * scale_to_unit_cube(pointcloud)
 
-        if self.random_remove:
-            pointcloud_rm, norm_curv_rm = remove(pointcloud, norm_curv, self.p_keep)
-            mean_rm = pointcloud_rm.mean(axis=0)
-            std_rm = pointcloud_rm.reshape(-1).std(axis=0)
-        else:
-            pointcloud_rm = None
+        # if self.random_remove:
+        #     pointcloud_rm, norm_curv_rm = remove(pointcloud, norm_curv, self.p_keep)
+        #     mean_rm = pointcloud_rm.mean(axis=0)
+        #     std_rm = pointcloud_rm.reshape(-1).std(axis=0)
+        # else:
+        #     pointcloud_rm = None
 
         if self.scale_mode != 'unit_norm':
             if self.random_remove:
@@ -450,13 +641,13 @@ class PointDA10(Dataset):
             pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
             norm_curv = np.swapaxes(norm_curv.squeeze(), 1, 0).astype('float32')
 
-        if self.random_remove:
-            if pointcloud_rm.shape[0] > NUM_POINTS:
-                pointcloud_rm = np.swapaxes(np.expand_dims(pointcloud_rm, 0), 1, 2)
-                norm_curv_rm = np.swapaxes(np.expand_dims(norm_curv_rm, 0), 1, 2)
-                _, pointcloud_rm, norm_curv_rm = farthest_point_sample_np(pointcloud_rm, norm_curv_rm, NUM_POINTS)
-                pointcloud_rm = np.swapaxes(pointcloud_rm.squeeze(), 1, 0).astype('float32')
-                norm_curv_rm = np.swapaxes(norm_curv_rm.squeeze(), 1, 0).astype('float32')
+        # if self.random_remove:
+        #     if pointcloud_rm.shape[0] > NUM_POINTS:
+        #         pointcloud_rm = np.swapaxes(np.expand_dims(pointcloud_rm, 0), 1, 2)
+        #         norm_curv_rm = np.swapaxes(np.expand_dims(norm_curv_rm, 0), 1, 2)
+        #         _, pointcloud_rm, norm_curv_rm = farthest_point_sample_np(pointcloud_rm, norm_curv_rm, NUM_POINTS)
+        #         pointcloud_rm = np.swapaxes(pointcloud_rm.squeeze(), 1, 0).astype('float32')
+        #         norm_curv_rm = np.swapaxes(norm_curv_rm.squeeze(), 1, 0).astype('float32')
 
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
@@ -471,66 +662,60 @@ class PointDA10(Dataset):
             ind = np.concatenate((ind, chosen), axis=0)
             norm_curv = np.concatenate((norm_curv, norm_curv[chosen]), axis=0)
 
-        if self.random_remove:
-            N = len(pointcloud_rm)
-            while len(pointcloud_rm) < NUM_POINTS:
-                chosen = np.arange(N) #int(len(pointcloud)))
-                np.random.shuffle(chosen)
-                chosen = chosen[:NUM_POINTS - len(pointcloud_rm)]
-                pointcloud_rm = np.concatenate((
-                    pointcloud_rm,
-                    pointcloud_rm[chosen] #:NUM_POINTS - len(pointcloud)]
-                ), axis=0)
-                norm_curv_rm = np.concatenate((
-                    norm_curv_rm,
-                    norm_curv_rm[chosen] #:NUM_POINTS - len(norm_curv)]
-                ), axis=0)
+        # if self.random_remove:
+        #     N = len(pointcloud_rm)
+        #     while len(pointcloud_rm) < NUM_POINTS:
+        #         chosen = np.arange(N) #int(len(pointcloud)))
+        #         np.random.shuffle(chosen)
+        #         chosen = chosen[:NUM_POINTS - len(pointcloud_rm)]
+        #         pointcloud_rm = np.concatenate((
+        #             pointcloud_rm,
+        #             pointcloud_rm[chosen] #:NUM_POINTS - len(pointcloud)]
+        #         ), axis=0)
+        #         norm_curv_rm = np.concatenate((
+        #             norm_curv_rm,
+        #             norm_curv_rm[chosen] #:NUM_POINTS - len(norm_curv)]
+        #         ), axis=0)
 
-        if self.self_distillation:
-            pointcloud_aug = copy.deepcopy(pointcloud_rm) if self.random_remove else copy.deepcopy(pointcloud)
-            if hasattr(self, 'dist'):
-                pointcloud_aug = self.dist(pointcloud_aug)
+        # if self.self_distillation:
+        #     pointcloud_aug = copy.deepcopy(pointcloud_rm) if self.random_remove else copy.deepcopy(pointcloud)
+        #     if hasattr(self, 'dist'):
+        #         pointcloud_aug = self.dist(pointcloud_aug)
 
         # apply data rotation and augmentation on train samples
         if self.random_rotation:
             pointcloud = random_rotate_one_axis(pointcloud, "z")
-            if self.random_remove:
-                pointcloud_rm = random_rotate_one_axis(pointcloud_rm, "z")
-            if self.self_distillation:
-                pointcloud_aug = random_rotate_one_axis(pointcloud_aug, "z")
+            # if self.random_remove:
+            #     pointcloud_rm = random_rotate_one_axis(pointcloud_rm, "z")
+            # if self.self_distillation:
+            #     pointcloud_aug = random_rotate_one_axis(pointcloud_aug, "z")
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)
-            if self.self_distillation:
-                pointcloud_aug = jitter_pointcloud(pointcloud_aug)
-            if self.random_remove:
-                pointcloud_rm = jitter_pointcloud(pointcloud_rm)
+            # if self.self_distillation:
+            #     pointcloud_aug = jitter_pointcloud(pointcloud_aug)
+            # if self.random_remove:
+            #     pointcloud_rm = jitter_pointcloud(pointcloud_rm)
 
-        if self.zero_mean:
-            if self.scale_mode != 'unit_norm':
-                pointcloud = self.scale * scale(pointcloud, self.scale_mode)
-                if self.random_remove:
-                    pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
-            else:
-                pointcloud = self.scale * scale_to_unit_cube(pointcloud)
-                if self.random_remove:
-                    pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
+        # if self.zero_mean:
+        #     if self.scale_mode != 'unit_norm':
+        #         pointcloud = self.scale * scale(pointcloud, self.scale_mode)
+        #         if self.random_remove:
+        #             pointcloud_rm = self.scale * scale(pointcloud_rm, self.scale_mode)
+        #     else:
+        #         pointcloud = self.scale * scale_to_unit_cube(pointcloud)
+        #         if self.random_remove:
+        #             pointcloud_rm = self.scale * scale_to_unit_cube(pointcloud_rm)
 
-        if self.random_scale:
-            random_scale = np.random.uniform(0.9, 1.1)
-            if not self.self_distillation:
-                pointcloud = random_scale * pointcloud
-            else:
-                pointcloud_aug = random_scale * pointcloud_aug
-            if self.random_remove:
-                random_scale = np.random.uniform(0.9, 1.1)
-                pointcloud_rm = random_scale * pointcloud_rm
-
-        # if self.self_distillation:
-        #     return (pointcloud, label, pointcloud_aug, np.array(item))
-
-        # if self.random_remove:
-        #     return (pointcloud, label, norm_curv, NUM_POINTS, pointcloud_rm, mean_rm, std_rm)
+        # if self.random_scale:
+        #     random_scale = np.random.uniform(0.9, 1.1)
+        #     if not self.self_distillation:
+        #         pointcloud = random_scale * pointcloud
+        #     else:
+        #         pointcloud_aug = random_scale * pointcloud_aug
+        #     if self.random_remove:
+        #         random_scale = np.random.uniform(0.9, 1.1)
+        #         pointcloud_rm = random_scale * pointcloud_rm
 
         return (pointcloud, label, mask, ind)
 
@@ -604,39 +789,10 @@ class GraspNet10(Dataset):
         else:
             pointcloud = self.scale * scale_to_unit_cube(pointcloud)
 
-        # # sample according to farthest point sampling
-        # if pointcloud.shape[0] > NUM_POINTS:
-        #     pointcloud = np.swapaxes(np.expand_dims(pointcloud, 0), 1, 2)
-        #     _, pointcloud, _ = farthest_point_sample_np(pointcloud, None, NUM_POINTS)
-        #     pointcloud = np.swapaxes(pointcloud.squeeze(), 1, 0).astype('float32')
-
         N = len(pointcloud)
         mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
         mask[N:] = 0
         ind = np.arange(len(pointcloud))
-
-        # while len(pointcloud) < NUM_POINTS:
-        #     chosen = np.arange(N)
-        #     np.random.shuffle(chosen)
-        #     chosen = chosen[:NUM_POINTS - len(pointcloud)]
-        #     pointcloud = np.concatenate((pointcloud, pointcloud[chosen]), axis=0)
-
-        # # apply data rotation and augmentation on train samples
-        # if self.random_rotation:
-        #     pointcloud = random_rotate_one_axis(pointcloud, "z")
-
-        # if self.zero_mean:
-        #     if self.scale_mode != 'unit_norm':
-        #         pointcloud = self.scale * scale(pointcloud, self.scale_mode)
-        #     else:
-        #         pointcloud = self.scale * scale_to_unit_cube(pointcloud)
-
-        # if self.random_scale:
-        #     random_scale = np.random.uniform(0.9, 1.1)
-        #     if not self.self_distillation:
-        #         pointcloud = random_scale * pointcloud
-        #     else:
-        #         pointcloud_aug = random_scale * pointcloud_aug
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)

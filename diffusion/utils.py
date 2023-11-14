@@ -2,6 +2,7 @@ import torch
 import numpy as np
 
 
+
 class EMA():
     def __init__(self, beta):
         super().__init__()

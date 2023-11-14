@@ -66,7 +66,7 @@ def configure_model(args, model):
                 m.requires_grad_(True)
     if 'pl' in args.method:
         model.eval()
-        model.requires_grad_(True)
+        model.requires_grad_(False)
         for m in model.modules():
             if isinstance(m, nn.Dropout):
                 m.train()
@@ -76,20 +76,20 @@ def configure_model(args, model):
         model.eval()
         for m in model.modules():
             if isinstance(m, nn.modules.batchnorm._BatchNorm):
-                if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
-                    m.eval()
-                else:
-                    m.train()
+                configure_bn_layer(args, m)
                 m.momentum = args.memo_bn_momentum
     if 'shot' in args.method:
+        model.eval()
         for m in model.modules():
-            if args.batch_size > 1 or (not isinstance(m, nn.BatchNorm1d)):
+            if isinstance(m, nn.Dropout):
                 m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
         m = list(model.modules())[-1]
         m.eval()
         m.requires_grad_(False)
     if 'dua' in args.method:
-        model.eval() 
+        model.eval()
         for m in model.modules():
             if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
                 m.eval()

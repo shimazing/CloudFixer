@@ -313,9 +313,6 @@ def rotate_shape_tensor(x, axis, angle):
     if axis == "x":
         R_x = torch.tensor([[[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0,
             np.sin(angle), np.cos(angle)]]]).to(x) # 1 x 3 x 3
-        print(f"R_x.shape: {R_x.shape}")
-        print(f"x.shape: {x.shape}")
-
         return x @ R_x
     elif axis == "y":
         R_y = torch.tensor([[[np.cos(angle), 0, np.sin(angle)], [0, 1, 0],
@@ -490,7 +487,6 @@ def scale_to_unit_cube_torch(x, only_mean=False, no_mean=False):
     if not only_mean:
         furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
             keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
-        # print(furthest_distance)
         x = x / furthest_distance
     return x
 
@@ -1251,7 +1247,7 @@ def softmax(x):
     return f_x
 
 
-# TODO: perform low-pass fltering here for x0_est, x
+# TODO: implement mean/median filtering
 def low_pass_filtering(x, method, scale):
     if not method or scale == 1:
         return x

@@ -4,8 +4,8 @@ wandb_usr=drumpt
 # dataset
 DATASET_ROOT_DIR=../nfs-client/datasets
 CODE_BASE_DIR=../nfs-client/CloudFixer
-# DATASET_ROOT_DIR=../mazing_hdd/e3_diffusion_for_molecules/data
-# CODE_BASE_DIR=../mazing_hdd/pointcloud_TTA
+# DATASET_ROOT_DIR=../datasets
+# CODE_BASE_DIR=../CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 
@@ -14,7 +14,7 @@ classifier=DGCNN
 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 ############ run in single GPU ##############
 GPUS=(0 1 2 3 4 5)
@@ -25,7 +25,7 @@ i=0
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
   background=($(jobs -p))
-  local num_max_jobs=6
+  local num_max_jobs=1
   echo $num_max_jobs
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
@@ -39,7 +39,7 @@ lame_knn=3
 lame_max_steps=1
 # sar
 sar_ent_threshold=0.4
-sar_eps_threshold=0.05 
+sar_eps_threshold=0.05
 # memo
 memo_num_augs=64
 memo_bn_momentum=1/17
@@ -52,7 +52,7 @@ bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
 # dda
-dda_steps=150
+dda_steps=100
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
@@ -317,7 +317,7 @@ run_baselines() {
         params_to_adapt="all" # placeholder
         num_steps=1 # placeholder
 
-        dda_steps=150
+        dda_steps=100
         dda_guidance_weight=6
         dda_lpf_method=fps
         dda_lpf_scale=4
@@ -378,7 +378,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1 &
+        2>&1
     wait_n
     i=$((i + 1))
 }
@@ -462,7 +462,7 @@ run_baselines_graspnet() {
     CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
 
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 16 1"
+    BATCH_SIZE_LIST="64 8 1"
     SOURCE_DOMAIN_LIST=(synthetic synthetic kinect realsense)
     TARGET_DOMAIN_LIST=(kinect realsense realsense kinect)
     METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"

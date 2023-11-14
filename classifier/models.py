@@ -216,6 +216,44 @@ class DGCNNWrapper(nn.Module):
 
 
 
+# class DGCNNWrapper(nn.Module):
+#     def __init__(self, dataset, output_channels):
+#         super().__init__()
+#         self.dataset = dataset
+#         class Args:
+#             def __init__(self):
+#                 self.k = 20
+#                 self.emb_dims = 1024
+#                 self.dropout = 0.5
+#                 self.leaky_relu = 1
+#         args = Args()
+#         self.model = DGCNN(args, output_channels=output_channels)
+
+#     def forward(self, pc):
+#         # normalize pc here!
+#         pc = scale_to_unit_cube_torch(pc)
+#         if self.dataset.startswith("modelnet40"):
+#             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
+#         pc = pc.permute(0, 2, 1).contiguous()
+#         logit = self.model(pc)
+#         return logit
+
+#     def get_feature(self, pc):
+#         pc = scale_to_unit_cube_torch(pc)
+#         if self.dataset.startswith("modelnet40"):
+#             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
+#         pc = pc.permute(0, 2, 1).contiguous()
+#         return self.model.get_feature(pc)
+
+#     def get_low_level_feature(self, pc):
+#         pc = scale_to_unit_cube_torch(pc)
+#         if self.dataset.startswith("modelnet40"):
+#             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
+#         pc = pc.permute(0, 2, 1).contiguous()
+#         return self.model.get_low_level_feature(pc)
+
+
+
 # class PointNet(nn.Module):
 #     def __init__(self, args, output_channels=40):
 #         super().__init__()

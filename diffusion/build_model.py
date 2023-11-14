@@ -7,7 +7,7 @@ from diffusion.transformer import MODEL_CONFIGS, model_from_config
 def get_model(args, device):
     if args.model == 'transformer':
         print("Transformer")
-        net_dynamics = model_from_config(MODEL_CONFIGS['base40M-uncond'], device=device)
+        net_dynamics = model_from_config(MODEL_CONFIGS['base40M-uncond']).to(device)
     else:
         raise ValueError('UNDEFINED DYNAMICS')
     if args.probabilistic_model == 'diffusion':

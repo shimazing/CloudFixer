@@ -1,10 +1,12 @@
+wandb_usr=drumpt
+
 # dataset
 DATASET_ROOT_DIR=../nfs-client/datasets
 CODE_BASE_DIR=../nfs-client/CloudFixer
-dataset=modelnet40c_original
-dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
-# dataset=modelnet40c_occlusion_5
-# dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+# dataset=modelnet40c_original
+# dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
+dataset=modelnet40c_occlusion_5
+dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 # dataset=modelnet
 # dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/modelnet
 # dataset=shapenet
@@ -30,7 +32,6 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 # classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_realsense_best_test.pth
 
 # diffusion model
-# diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 # diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet.npy
 # diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_shapenet.npy
@@ -38,6 +39,22 @@ diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.np
 # diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_synthetic.npy
 # diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_kinect.npy
 # diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_realsense.npy
+
+############# run in single GPU ##############
+GPUS=(0 1 2 3)
+NUM_GPUS=4
+i=0
+##############################################
+
+wait_n() {
+  #limit the max number of jobs as NUM_MAX_JOB and wait
+  background=($(jobs -p))
+  local num_max_jobs=8
+  echo $num_max_jobs
+  if ((${#background[@]} >= num_max_jobs)); then
+    wait -n
+  fi
+}
 
 #################### placeholders ####################
 # lame
@@ -68,7 +85,21 @@ ours_steps=150
 ours_guidance_weight=6
 ours_lpf_method=fps
 ours_lpf_scale=4
-#################### placeholders ####################
+# hyperparameters for cloudfixer
+t_min=0.02
+t_max=0.8
+denoising_thrs=100
+pow=1
+lam_l=1
+lam_h=10
+lr=0.2
+steps=400
+wd=0
+optim=adamax
+optim_end_factor=0.05
+subsample=700
+weighted_reg=True
+######################################################
 
 
 adapt() {
@@ -95,87 +126,82 @@ adapt() {
     # ours_lpf_method=fps
     # ours_lpf_scale=4
 
-    # hyperparameters for cloudfixer
-    # method=pre_trans
-    t_min=0.02
-    t_max=0.8
-    denoising_thrs=100
-    pow=1
-    lam_l=1
-    lam_h=10
-    lr=0.2
-    steps=400
-    wd=0
-    optim=adamax
-    optim_end_factor=0.05
-    subsample=700
-    weighted_reg=True
-
     # logging
-    wandb_usr=drumpt
-    exp_name=adapt_${classifier}_${dataset}_${method}
-    SEEDS=2
+    SEED_LIST="2"
+    # CORRUPTION_LIST="distortion background shear lidar rotation density_inc"
+    CORRUPTION_LIST="density_inc"
+    SEVERITY_LIST="5"
 
-    for random_seed in ${SEEDS}; do
-        TORCH_USE_CUDA_DSA=true python3 adapt.py \
-            --t_min ${t_min} \
-            --t_max ${t_max} \
-            --save_itmd 0 \
-            --denoising_thrs ${denoising_thrs} \
-            --random_seed ${random_seed} \
-            --pow ${pow} \
-            --diffusion_steps 500 \
-            --diffusion_noise_schedule polynomial_2 \
-            --batch_size ${batch_size} \
-            --scale_mode unit_std \
-            --cls_scale_mode unit_norm \
-            --dataset ${dataset} \
-            --dataset_dir ${dataset_dir} \
-            --classifier ${classifier} \
-            --classifier_dir ${classifier_dir} \
-            --diffusion_dir ${diffusion_dir} \
-            --method ${method} \
-            --adv_attack ${adv_attack} \
-            --episodic ${episodic} \
-            --test_optim ${test_optim} \
-            --num_steps ${num_steps} \
-            --test_lr ${test_lr} \
-            --params_to_adapt ${params_to_adapt} \
-            --lame_affinity ${lame_affinity} \
-            --lame_knn ${lame_knn} \
-            --lame_max_steps ${lame_max_steps} \
-            --sar_ent_threshold ${sar_ent_threshold} \
-            --sar_eps_threshold ${sar_eps_threshold} \
-            --memo_bn_momentum ${memo_bn_momentum} \
-            --memo_num_augs ${memo_num_augs} \
-            --dua_mom_pre ${dua_mom_pre} \
-            --dua_min_mom ${dua_min_mom} \
-            --dua_decay_factor ${dua_decay_factor} \
-            --bn_stats_prior ${bn_stats_prior} \
-            --shot_pl_loss_weight ${shot_pl_loss_weight} \
-            --dda_steps ${dda_steps} \
-            --dda_guidance_weight ${dda_guidance_weight} \
-            --dda_lpf_method ${dda_lpf_method} \
-            --dda_lpf_scale ${dda_lpf_scale} \
-            --ours_steps ${ours_steps} \
-            --ours_guidance_weight ${ours_guidance_weight} \
-            --ours_lpf_method ${ours_lpf_method} \
-            --ours_lpf_scale ${ours_lpf_scale} \
-            --exp_name ${exp_name} \
-            --mode eval \
-            --model transformer \
-            --lr ${lr} \
-            --n_update ${steps} \
-            --weight_decay ${wd} \
-            --lam_l ${lam_l} \
-            --lam_h ${lam_h} \
-            --beta1 0.9 \
-            --beta2 0.999 \
-            --optim ${optim} \
-            --optim_end_factor ${optim_end_factor} \
-            --subsample ${subsample} \
-            --weighted_reg ${weighted_reg} \
-            --wandb_usr ${wandb_usr}
+    for random_seed in ${SEED_LIST}; do
+        for corruption in ${CORRUPTION_LIST}; do
+            for severity in ${SEVERITY_LIST}; do # "3 5"
+                dataset=modelnet40c_${corruption}_${severity}
+                exp_name=eval_${classifier}_${dataset}_${method}_${seed}
+
+                CUDA_VISIBLE_DEVICES=2 python3 adapt.py \
+                    --t_min ${t_min} \
+                    --t_max ${t_max} \
+                    --save_itmd 0 \
+                    --denoising_thrs ${denoising_thrs} \
+                    --random_seed ${random_seed} \
+                    --pow ${pow} \
+                    --diffusion_steps 500 \
+                    --diffusion_noise_schedule polynomial_2 \
+                    --batch_size ${batch_size} \
+                    --scale_mode unit_std \
+                    --cls_scale_mode unit_norm \
+                    --dataset ${dataset} \
+                    --dataset_dir ${dataset_dir} \
+                    --classifier ${classifier} \
+                    --classifier_dir ${classifier_dir} \
+                    --diffusion_dir ${diffusion_dir} \
+                    --method ${method} \
+                    --adv_attack ${adv_attack} \
+                    --episodic ${episodic} \
+                    --test_optim ${test_optim} \
+                    --num_steps ${num_steps} \
+                    --test_lr ${test_lr} \
+                    --params_to_adapt ${params_to_adapt} \
+                    --lame_affinity ${lame_affinity} \
+                    --lame_knn ${lame_knn} \
+                    --lame_max_steps ${lame_max_steps} \
+                    --sar_ent_threshold ${sar_ent_threshold} \
+                    --sar_eps_threshold ${sar_eps_threshold} \
+                    --memo_bn_momentum ${memo_bn_momentum} \
+                    --memo_num_augs ${memo_num_augs} \
+                    --dua_mom_pre ${dua_mom_pre} \
+                    --dua_min_mom ${dua_min_mom} \
+                    --dua_decay_factor ${dua_decay_factor} \
+                    --bn_stats_prior ${bn_stats_prior} \
+                    --shot_pl_loss_weight ${shot_pl_loss_weight} \
+                    --dda_steps ${dda_steps} \
+                    --dda_guidance_weight ${dda_guidance_weight} \
+                    --dda_lpf_method ${dda_lpf_method} \
+                    --dda_lpf_scale ${dda_lpf_scale} \
+                    --ours_steps ${ours_steps} \
+                    --ours_guidance_weight ${ours_guidance_weight} \
+                    --ours_lpf_method ${ours_lpf_method} \
+                    --ours_lpf_scale ${ours_lpf_scale} \
+                    --exp_name ${exp_name} \
+                    --mode eval \
+                    --model transformer \
+                    --lr ${lr} \
+                    --n_update ${steps} \
+                    --weight_decay ${wd} \
+                    --lam_l ${lam_l} \
+                    --lam_h ${lam_h} \
+                    --beta1 0.9 \
+                    --beta2 0.999 \
+                    --optim ${optim} \
+                    --optim_end_factor ${optim_end_factor} \
+                    --subsample ${subsample} \
+                    --weighted_reg ${weighted_reg} \
+                    --wandb_usr ${wandb_usr} \
+                    2>&1 &
+                    wait_n
+                    i=$((i + 1))
+            done
+        done
     done
 }
 

@@ -39,7 +39,7 @@ def parse_arguments():
     parser.add_argument('--dataset', type=str, default='modelnet40c_background_5')
     parser.add_argument('--dataset_dir', type=str, default='../datasets/modelnet40_c/')
     parser.add_argument('--adv_attack', type=eval, default=False)
-    parser.add_argument('--scenario', type=str, default='')
+    parser.add_argument('--scenario', type=str, default='normal')
     parser.add_argument('--imb_ratio', type=float, default=0)
 
     # classifier

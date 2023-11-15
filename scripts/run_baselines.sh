@@ -10,7 +10,7 @@ CODE_BASE_DIR=../CloudFixer
 # CODE_BASE_DIR=../CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
-scenario=''
+scenario=normal
 imb_ratio=1
 
 # classifier
@@ -685,13 +685,13 @@ run_baselines_modelnet40c_label_distribution_shift() {
 }
 
 
-# hparam_tune_modelnet40c
-# hparam_tune_pointda
-# hparam_tune_graspnet
+hparam_tune_modelnet40c
+hparam_tune_pointda
+hparam_tune_graspnet
 # run_baselines_modelnet40c_best_setting
 # run_baselines_modelnet40c
 # run_baselines_pointda
 # run_baselines_graspnet
 # run_baselines_modelnet40c_mixed
 # run_baselines_modelnet40c_temporally_correlated
-run_baselines_modelnet40c_label_distribution_shift
+# run_baselines_modelnet40c_label_distribution_shift

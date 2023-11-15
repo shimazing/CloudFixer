@@ -597,6 +597,6 @@ hparam_tune_graspnet() {
 # hparam_tune_pointda
 # hparam_tune_graspnet
 # run_baselines_modelnet40c_best_setting
-run_baselines_modelnet40c
+# run_baselines_modelnet40c
 # run_baselines_pointda
 # run_baselines_graspnet

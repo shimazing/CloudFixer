@@ -2,8 +2,10 @@
 wandb_usr=drumpt
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
+# DATASET_ROOT_DIR=../nfs-client/datasets
+# CODE_BASE_DIR=../nfs-client/CloudFixer
+DATASET_ROOT_DIR=../datasets
+CODE_BASE_DIR=../CloudFixer
 # DATASET_ROOT_DIR=../datasets
 # CODE_BASE_DIR=../CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
@@ -17,8 +19,8 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 ############ run in single GPU ##############
-GPUS=(0 1 2 3 4 5)
-NUM_GPUS=6
+GPUS=(0 1 2 3)
+NUM_GPUS=4
 i=0
 ##############################################
 
@@ -170,7 +172,7 @@ weighted_reg=True
 #                         batch_size=16
 #                         num_steps=1 # placeholder
 
-#                         dda_steps=150
+#                         dda_steps=100
 #                         dda_guidance_weight=6
 #                         dda_lpf_method=fps
 #                         dda_lpf_scale=4
@@ -323,7 +325,7 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
-    CUDA_VISIBLE_DEVICES=0,1,2,3,4,5 python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=1,2,3 python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
         --save_itmd 0 \
@@ -385,8 +387,6 @@ run_baselines() {
 
 
 run_baselines_modelnet40c() {
-    mode=$1
-
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
@@ -405,11 +405,14 @@ run_baselines_modelnet40c() {
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
                         diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                         for method in ${METHOD_LIST}; do
+                            if [[ "$method" == "dda" ]] && [[ "$mode" == "hparam_tune" ]]; then
+                                continue
+                            fi
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                                 continue
                             fi
-                            exp_name=${mode}_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                            mode=${mode}
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                            mode=eval
                             run_baselines
                         done
                     done
@@ -421,12 +424,10 @@ run_baselines_modelnet40c() {
 
 
 run_baselines_pointda() { 
-    mode=$1
-
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 16 1"
+    BATCH_SIZE_LIST="64 8 1"
     SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
     METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
@@ -445,8 +446,8 @@ run_baselines_pointda() {
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
                         fi
-                        exp_name=${mode}_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=${mode}
+                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                        mode=eval
                         run_baselines
                     done
                 done
@@ -457,8 +458,6 @@ run_baselines_pointda() {
 
 
 run_baselines_graspnet() { 
-    mode=$1
-
     CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
 
     SEED_LIST="2"
@@ -481,8 +480,8 @@ run_baselines_graspnet() {
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
                         fi
-                        exp_name=${mode}_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=${mode}
+                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                        mode=eval
                         run_baselines
                     done
                 done
@@ -492,10 +491,112 @@ run_baselines_graspnet() {
 }
 
 
-run_baselines_modelnet40c hparam_tune
-run_baselines_pointda hparam_tune
-run_baselines_graspnet hparam_tune
+hparam_tune_modelnet40c() {
+    CLASSIFIER_LIST=(DGCNN)
+
+    SEED_LIST="2"
+    # TODO:
+    BATCH_SIZE_LIST="16 1" # 64 8 1
+    # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                dataset=modelnet40c_original
+                dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
+                classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+                for method in ${METHOD_LIST}; do
+                    # if [[ "$method" == "dda" ]] && [[ "$mode" == "hparam_tune" ]]; then
+                    #     continue
+                    # fi
+                    if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                        continue
+                    fi
+                    exp_name=hparam_tune_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                    mode=hparam_tune
+                    run_baselines
+                done
+            done
+        done
+    done
+}
+
+
+hparam_tune_pointda() { 
+    CLASSIFIER_LIST=(DGCNN)
+
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64 8 1"
+    SOURCE_DOMAIN_LIST=(modelnet shapenet scannet)
+    TARGET_DOMAIN_LIST=(modelnet shapenet scannet)
+    # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                    dataset=${TARGET_DOMAIN_LIST[idx]}
+                    dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
+                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
+                    for method in ${METHOD_LIST}; do
+                        # if [[ "$method" == "dda" ]] && [[ "$mode" == "hparam_tune" ]]; then
+                        #     continue
+                        # fi
+                        if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                            continue
+                        fi
+                        exp_name=hparam_tune_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                        mode=hparam_tune
+                        run_baselines
+                    done
+                done
+            done
+        done
+    done
+}
+
+
+hparam_tune_graspnet() { 
+    CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
+
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64 8 1"
+    SOURCE_DOMAIN_LIST=(kinect realsense)
+    TARGET_DOMAIN_LIST=(kinect realsense)
+    # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                    dataset=${TARGET_DOMAIN_LIST[idx]}
+                    dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
+                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
+                    for method in ${METHOD_LIST}; do
+                        # if [[ "$method" == "dda" ]] && [[ "$mode" == "hparam_tune" ]]; then
+                        #     continue
+                        # fi
+                        if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                            continue
+                        fi
+                        exp_name=hparam_tune_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                        mode=hparam_tune
+                        run_baselines
+                    done
+                done
+            done
+        done
+    done
+}
+
+
+# hparam_tune_modelnet40c
+# hparam_tune_pointda
+# hparam_tune_graspnet
 # run_baselines_modelnet40c_best_setting
-# run_baselines_modelnet40c eval
-# run_baselines_pointda eval
-# run_baselines_graspnet eval
+run_baselines_modelnet40c
+# run_baselines_pointda
+# run_baselines_graspnet

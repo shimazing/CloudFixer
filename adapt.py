@@ -501,17 +501,35 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
+    args.dataset = "modelnet40c_original"
+    args.dataset_dir = "../datasets/modelnet40_ply_hdf5_2048"
+    train_dataset = ModelNet40C(
+        args, 'train'
+    )
+    batch_size = 16
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=1)
+    source_feature_list, source_label_list, source_unary_list = [], [], []
+    for iter_idx, data in enumerate(train_loader):
+        if isinstance(classifier, nn.DataParallel):
+            classifier = classifier.module
+        if iter_idx * batch_size > 10000:
+            break
+        x = data[0].to(device)
+        labels = data[1].to(device).flatten()
+        unary = -torch.log(torch.zeros(len(labels), len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().view(-1, 1), 1) + 1e-10)
+        feats = F.normalize(original_classifier.module.get_feature(x) if isinstance(original_classifier, nn.DataParallel) else original_classifier.get_feature(x), p=2, dim=-1).detach()
+        source_unary_list.extend(unary.tolist())
+        source_feature_list.extend(feats.tolist())
+        source_label_list.extend(labels.cpu().tolist())
+    # print(f"np.array(source_feature_list).shape: {np.array(source_feature_list).shape}")
+    # print(f"np.array(source_unary_list).shape: {np.array(source_unary_list).shape}")
+    # print(f"np.array(source_label_list).shape: {np.array(source_label_list).shape}")
+
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-<<<<<<< HEAD
-        if iter_idx >= 100:
-            break
-
-=======
         # TODO: remove (only for debugging)
         # if iter_idx >= 100:
         #     break
->>>>>>> 5f8bcc14bb7595cddaab817ff00145605bb67088
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         # mask = data[2].to(device)
@@ -526,18 +544,90 @@ def main(args):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
         logits_before = original_classifier(x).detach()
-<<<<<<< HEAD
-        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
-
-        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-        all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
-=======
         all_pred_before_list.extend(logits_before.argmax(dim=-1).cpu().tolist())
+
+        ################################################################################
+        # 1. lame (실패) / 2. kernel density function (실패)) / 3. knn (실패) / 4. entropy minimization
+        # out = classifier(x).detach()
+        # unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
+        # feats = F.normalize(classifier.get_feature(x), p=2, dim=-1).detach()
+
+        # feats_with_source = torch.cat([torch.tensor(source_feature_list).to(feats.device), feats], dim=0)
+        # unary_with_source = torch.cat([torch.tensor(source_unary_list).to(unary.device), unary], dim=0)
+
+        # affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+        # kernel = affinity(feats_with_source)
+        # Y = laplacian_optimization(unary_with_source, kernel, max_steps=args.lame_max_steps)[len(source_unary_list):]
+        # print(f"Y.shape: {Y.shape}")
+        # logits_after = Y.log()
+
+        # feats = F.normalize(classifier.get_feature(x), p=2, dim=-1).detach()
+        # values, indices = torch.topk(feats @ torch.tensor(source_feature_list).to(feats.device).T, 10, dim=-1)
+        # labels, _ = torch.mode(torch.tensor(source_label_list)[indices], dim=-1)
+
+        # logits_after = []
+        # for i, (val, ind) in enumerate(zip(values, indices)):
+        #     # print(f"val.shape: {val.shape}")
+        #     # print(f"torch.cat([torch.ones(1).to(logits_before.device), val], dim=1): {torch.cat([torch.ones(1).to(logits_before.device), val], dim=0)}")
+        #     # print(f"F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).shape: {F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).shape}")
+
+        #     weights = F.normalize(torch.cat([torch.ones(1).to(logits_before.device), val], dim=0).unsqueeze(-1), p=1, dim=0)
+        #     probs = torch.cat([logits_before[i].softmax(dim=-1).unsqueeze(0), F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device)])
+        #     logits_after.append(torch.sum(weights * probs, dim=0).log())
+
+        #     # print(f"logits_before.softmax(dim=-1)[i] / 2.shape: {logits_before[i].softmax(dim=-1).shape}")
+        #     # print(f"(F.normalize(val, p=1, dim=0) * F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device)).shape: {(F.normalize(val, p=1, dim=0).unsqueeze(-1) * F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device)).shape}")
+
+        #     # logits_after.append((logits_before[i].softmax(dim=-1) / 3 + 2 * (torch.sum(F.normalize(val, p=1, dim=0).unsqueeze(-1) * F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device), dim=0) / 3)).log())
+
+        #     # print("1111")
+        #     # print(logits_before.softmax(dim=-1))
+
+        #     # print("2222")
+        #     # print(torch.sum(F.normalize(val, p=1, dim=0).unsqueeze(-1) * F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device)))
+
+        #     # weights = torch.cat([torch.ones(1).to(logits_before.device), val], dim=0).unsqueeze(-1)
+        #     # probs = torch.cat([logits_before[i].softmax(dim=-1).unsqueeze(0), F.one_hot(torch.tensor(source_label_list)[ind], num_classes=len(train_dataset.label_to_idx)).to(logits_before.device)])
+        #     # logits_after.append(torch.sum(F.normalize(weights, p=1, dim=0) * probs, dim=0).log())
+        #     # print(f"torch.tensor(source_label_dist)[ind].shape: {torch.tensor(source_label_list)[ind].shape}")
+        #     # print(f"torch.cat([logits_before[i].softmax(dim=-1).unsqueeze(0), torch.zeros(5, len(train_dataset.label_to_idx)).scatter_(1, torch.tensor(source_label_list)[ind].cpu(), 1).to(logits_before.device)], dim=0).shape: {torch.cat([logits_before[i].softmax(dim=-1).unsqueeze(0), torch.zeros(5, len(train_dataset.label_to_idx)).scatter_(1, torch.tensor(source_label_list)[ind].cpu(), 1).to(logits_before.device)], dim=0).shape}")
+        #     # print(torch.cat([torch.ones(1).to(logits_before.device), val], dim=0).shape)
+        #     # print(torch.cat([logits_before[i].softmax(dim=-1), torch.zeros(5 * len(train_dataset.label_to_idx)).scatter_(0, torch.tensor(source_label_list)[ind].cpu(), 1).to(logits_before.device)], dim=0))
+
+        # logits_after = torch.stack(logits_after, dim=0)
+
+        # print(f"logits_before.softmax(dim=-1).unsqueeze(-1).shape: {logits_before.softmax(dim=-1).unsqueeze(-1).shape}")
+        # print(f"torch.zeros(len(labels), 5 * len(train_dataset.label_to_idx)).scatter_(1, labels.cpu(), 1).view(len(feats), len(labels), -1).to(logits_before.device).shape: {torch.zeros(len(labels), 5 * len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().flatten(), 1).view(len(labels), len(train_dataset.label_to_idx), -1).to(logits_before.device).shape}")
+        # torch.cat([torch.ones(len(feats), 1).to(logits_before.device), values], dim=1)
+
+        # print(f"torch.stack([logits_before, torch.zeros(len(labels), len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().view(-1, 1), 1)], dim=1): {torch.cat([logits_before.softmax(dim=-1).unsqueeze(-1), torch.zeros(len(labels), 5 * len(train_dataset.label_to_idx)).scatter_(1, labels.cpu(), 1).view(len(feats), len(labels), -1).to(logits_before.device)], dim=1).shape}")
+        # print(f"torch.stack([torch.ones(len(feats)), values], dim=1).shape: {torch.cat([torch.ones(len(feats), 1).to(logits_before.device), values], dim=1).shape}")
+        # print(f"torch.stack([torch.ones(len(feats), 1).to(logits_before.device), values], dim=1): {torch.cat([torch.ones(len(feats), 1).to(logits_before.device), values], dim=1)}")
+        # print(f"torch.stack([logits_before, torch.zeros(len(labels), len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().view(-1, 1), 1).to(logits_before.device)], dim=1): {torch.stack([logits_before.softmax(dim=-1), torch.zeros(len(labels), len(train_dataset.label_to_idx)).to(logits_before.device)], dim=1)}")
+
+        # print(f"torch.zeros(len(labels), len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().view(-1, 1), 1).shape: {torch.zeros(len(labels), len(train_dataset.label_to_idx)).scatter_(1, labels.cpu().view(-1, 1), 1).shape}")
+        # print(f"values: {values.shape}")
+        # print(f"labels: {labels.shape}")
+        # for i in indices:
+        #     print(torch.mode(torch.tensor(source_label_list))[i])
+        # source_label_list
+        # out = classifier(x).detach()
+        # unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
+
+        # feats_with_source = torch.cat([torch.tensor(source_feature_list).to(feats.device), feats], dim=0)
+        # unary_with_source = torch.cat([torch.tensor(source_unary_list).to(unary.device), unary], dim=0)
+
+        # affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+        # kernel = affinity(feats_with_source)
+        # Y = laplacian_optimization(unary_with_source, kernel, max_steps=args.lame_max_steps)[len(source_unary_list):]
+        # print(f"Y.shape: {Y.shape}")
+        # logits_after = Y.log()
+        ################################################################################
 
         # logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind).detach()
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=None, ind=None).detach()
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
->>>>>>> 5f8bcc14bb7595cddaab817ff00145605bb67088
+        # all_pred_after_list.extend(labels.cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")

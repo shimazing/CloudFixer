@@ -35,7 +35,7 @@ bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
 # dda
-dda_steps=100
+dda_steps=150
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
@@ -897,7 +897,7 @@ hparam_tune_dda() {
     test_lr=1e-4 # placeholder
     dda_lpf_method=fps # None, mean, median, fps
     # # hyperparameters to tune for dda
-    dda_steps=100 # default: 50
+    dda_steps=50 # default: 50
     dda_guidance_weight=6 # 3, 6, 9
     dda_lpf_scale=4 # 2, 4, 8
 

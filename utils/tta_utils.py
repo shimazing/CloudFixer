@@ -270,3 +270,13 @@ def batch_evaluation(args, model, x):
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
     return Y
+
+
+def batch_evaluation_with_source(args, model, x):
+    out = model(x).detach()
+    unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
+    feats = F.normalize(model.get_feature(x), p=2, dim=-1).detach()
+    affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+    kernel = affinity(feats)
+    Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
+    return Y

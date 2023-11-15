@@ -2,10 +2,10 @@
 wandb_usr=drumpt
 
 # dataset
-# DATASET_ROOT_DIR=../nfs-client/datasets
-# CODE_BASE_DIR=../nfs-client/CloudFixer
-DATASET_ROOT_DIR=../datasets
-CODE_BASE_DIR=../CloudFixer
+DATASET_ROOT_DIR=../nfs-client/datasets
+CODE_BASE_DIR=../nfs-client/CloudFixer
+# DATASET_ROOT_DIR=../datasets
+# CODE_BASE_DIR=../CloudFixer
 # DATASET_ROOT_DIR=../datasets
 # CODE_BASE_DIR=../CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
@@ -20,17 +20,10 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
-############ run in single GPU ##############
-GPUS=(0 1 2 3)
-NUM_GPUS=4
-i=0
-##############################################
-
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
   background=($(jobs -p))
   local num_max_jobs=1
-  echo $num_max_jobs
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
   fi
@@ -327,7 +320,7 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
-    CUDA_VISIBLE_DEVICES=1,2,3 python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
         --save_itmd 0 \
@@ -384,9 +377,8 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1
+        2>&1 &
     wait_n
-    i=$((i + 1))
 }
 
 
@@ -685,13 +677,39 @@ run_baselines_modelnet40c_label_distribution_shift() {
 }
 
 
-hparam_tune_modelnet40c
-hparam_tune_pointda
-hparam_tune_graspnet
-# run_baselines_modelnet40c_best_setting
+
+
+
+wait_n() {
+  # limit the max number of jobs as NUM_MAX_JOB and wait
+  background=($(jobs -p))
+  local num_max_jobs=1
+  echo $num_max_jobs
+  if ((${#background[@]} >= num_max_jobs)); then
+    wait -n
+  fi
+}
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="0,1"
 # run_baselines_modelnet40c
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="2,3"
 # run_baselines_pointda
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="4,5"
 # run_baselines_graspnet
-# run_baselines_modelnet40c_mixed
-# run_baselines_modelnet40c_temporally_correlated
-# run_baselines_modelnet40c_label_distribution_shift
+##############################################
+
+
+##############################################
+CUDA_VISIBLE_DEVICES="6,7"
+run_baselines_modelnet40c_mixed
+run_baselines_modelnet40c_temporally_correlated
+run_baselines_modelnet40c_label_distribution_shift
+##############################################t

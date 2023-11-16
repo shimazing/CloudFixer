@@ -504,20 +504,12 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
-    # args.dataset = "modelnet40c_original"
-    # args.dataset_dir = "../datasets/modelnet40_ply_hdf5_2048"
-    # train_dataset = ModelNet40C(
-    #     args, 'train'
-    # )
-    # batch_size = 16
-    # train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=False, num_workers=1)
-    # source_feature_list, source_label_list, source_unary_list = [], [], []
-
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
 
+        print(f"x.shape: {x.shape}")
         print(f"labels: {labels}")
 
         if args.adv_attack:

@@ -101,6 +101,7 @@ def configure_model(args, model):
             if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
                 m.eval()
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                m.train()
                 if not args.bn_stats_prior: # do not use source statistics
                     m.track_running_stats = False
                     m.running_mean = None
@@ -116,7 +117,7 @@ def collect_params(args, model, train_params):
     for nm, m in model.named_modules():
         if 'all' in train_params:
             for np, p in m.named_parameters():
-                p.requires_grad = True
+                # p.requires_grad = True # for SHOT
                 if not f"{nm}.{np}" in names:
                     params.append(p)
                     names.append(f"{nm}.{np}")

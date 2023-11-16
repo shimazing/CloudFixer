@@ -18,7 +18,7 @@ from utils import logging
 from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
-from utils.visualizer import visualize_pclist
+# from utils.visualizer import visualize_pclist
 # from utils.chamfer_distance.chamfer_distance import ChamferDistance
 
 
@@ -468,11 +468,9 @@ def main(args):
     else:
         raise ValueError('UNDEFINED DATASET')
     if args.scenario == "label_distribution_shift":
-        print(f"args.scenario: {args.scenario}")
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=ImbalancedDatasetSampler(test_dataset, imb_ratio=args.imb_ratio), shuffle=False, drop_last=False, num_workers=args.num_workers)
     else:
         shuffle = False if args.scenario == "temporally_correlated" else True
-        print(f"shuffle: {shuffle}")
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=shuffle, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
@@ -519,6 +517,8 @@ def main(args):
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
+
+        print(f"labels: {labels}")
 
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')

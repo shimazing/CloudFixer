@@ -220,7 +220,7 @@ run_baselines_pointda() {
     BATCH_SIZE_LIST="64 8 1"
     SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do

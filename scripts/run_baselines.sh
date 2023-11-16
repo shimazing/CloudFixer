@@ -709,7 +709,7 @@ wait_n() {
 
 ##############################################
 CUDA_VISIBLE_DEVICES="6,7"
-run_baselines_modelnet40c_mixed
+# run_baselines_modelnet40c_mixed
 run_baselines_modelnet40c_temporally_correlated
-run_baselines_modelnet40c_label_distribution_shift
+# run_baselines_modelnet40c_label_distribution_shift
 ##############################################t

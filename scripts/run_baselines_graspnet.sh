@@ -220,7 +220,7 @@ run_baselines_graspnet() {
     BATCH_SIZE_LIST="64 8 1"
     SOURCE_DOMAIN_LIST=(synthetic synthetic kinect realsense)
     TARGET_DOMAIN_LIST=(kinect realsense realsense kinect)
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do

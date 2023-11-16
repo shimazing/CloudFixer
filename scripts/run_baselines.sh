@@ -275,7 +275,7 @@ run_baselines() {
         test_optim=AdamW
         test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
         params_to_adapt="all"
-        batch_size=1
+        # batch_size=1
         num_steps=2 # "1, 2"
 
         memo_bn_momentum=1/17
@@ -575,10 +575,10 @@ run_baselines_modelnet40c_mixed() {
 
     scenario=mixed
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 8"
+    BATCH_SIZE_LIST="64"
     CORRUPTION_LIST="background"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -610,10 +610,10 @@ run_baselines_modelnet40c_temporally_correlated() {
 
     scenario=temporally_correlated
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 8"
+    BATCH_SIZE_LIST="64"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -647,10 +647,10 @@ run_baselines_modelnet40c_label_distribution_shift() {
     scenario=label_distribution_shift
     imb_ratio=10
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 8"
+    BATCH_SIZE_LIST="64"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do

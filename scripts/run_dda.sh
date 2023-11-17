@@ -18,32 +18,14 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
-<<<<<<< HEAD
 GPUS=(0 1 2 3 4 5 6 7)
 NUM_GPUS=8
-=======
-<<<<<<< HEAD
-GPUS=(0 1)
-NUM_GPUS=2
-=======
-GPUS=(2 3 4 5 6 7)
-NUM_GPUS=6
->>>>>>> c0eca530276db44da8850d32017dd78783295354
->>>>>>> dadb47a05bd3b1a2af3e9cc744850700f4cd12f3
 i=0
 
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
   background=($(jobs -p))
-<<<<<<< HEAD
-  local num_max_jobs=8
-=======
-<<<<<<< HEAD
-  local num_max_jobs=1
-=======
-  local num_max_jobs=6
->>>>>>> c0eca530276db44da8850d32017dd78783295354
->>>>>>> dadb47a05bd3b1a2af3e9cc744850700f4cd12f3
+  num_max_jobs=8
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
   fi
@@ -104,11 +86,7 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
-<<<<<<< HEAD
-    CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]}:${GPUS[${i+1} % ${NUM_GPUS}]} python3 adapt.py \
-=======
     CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
->>>>>>> c0eca530276db44da8850d32017dd78783295354
         --t_min ${t_min} \
         --t_max ${t_max} \
         --save_itmd 0 \

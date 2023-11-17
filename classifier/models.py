@@ -97,7 +97,7 @@ class DGCNN(nn.Module):
         self.dp2 = nn.Dropout(p=args.dropout)
         self.linear3 = nn.Linear(256, output_channels)
 
-    def forward(self, x):
+    def forward(self, x, return_feature=False):
         batch_size = x.size(0)
         x = get_graph_feature(x, k=self.k)
         x = self.conv1(x)
@@ -129,6 +129,10 @@ class DGCNN(nn.Module):
 
         x = act(self.bn6(self.linear1(x)))
         x = self.dp1(x)
+        if return_feature:
+            return self.bn7(self.linear2(x))
+
+
         x = act(self.bn7(self.linear2(x)))
         x = self.dp2(x)
         x = self.linear3(x)
@@ -190,13 +194,13 @@ class DGCNNWrapper(nn.Module):
         self.dataset = dataset
         self.model = DGCNN(args, output_channels=output_channels)
 
-    def forward(self, pc):
+    def forward(self, pc, return_feature=False):
         # normalize pc here!
         pc = scale_to_unit_cube_torch(pc)
         if self.dataset.startswith("modelnet40"):
             pc = rotate_shape_tensor(pc, 'x', np.pi/2)
         pc = pc.permute(0, 2, 1).contiguous()
-        logit = self.model(pc)
+        logit = self.model(pc, return_feature)
         return logit
 
     def get_feature(self, pc):

@@ -152,14 +152,10 @@ run_baselines() {
 run_dda() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"
-    BATCH_SIZE_LIST="32"
+    BATCH_SIZE_LIST="16"
     METHOD_LIST="dda"
 
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
-    # CORRUPTION_LIST="upsampling"
-    # CORRUPTION_LIST="occlusion lidar gaussian rotation shear distortion_rbf_inv"
-    CORRUPTION_LIST="rotation distortion_rbf_inv"
+    CORRUPTION_LIST="upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -183,33 +179,43 @@ run_dda() {
 
     # SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     # TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
-    SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet scannet scannet)
-    TARGET_DOMAIN_LIST=(shapenet scannet modelnet modelnet shapenet)
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
-                    dataset=${TARGET_DOMAIN_LIST[idx]}
-                    dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
-                    for method in ${METHOD_LIST}; do
-                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
-}
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for classifier in ${CLASSIFIER_LIST}; do
+    #             for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+    #                 dataset=${TARGET_DOMAIN_LIST[idx]}
+    #                 dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
+    #                 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+    #                 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+    #                 for method in ${METHOD_LIST}; do
+    #                     exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+    #                     mode=eval
+    #                     run_baselines
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
-
-run_dda_2() {
-    CLASSIFIER_LIST=(DGCNN)
-    SEED_LIST="2"
-    BATCH_SIZE_LIST="32"
-    METHOD_LIST="dda"
+    # SOURCE_DOMAIN_LIST=(synthetic synthetic kinect realsense)
+    # TARGET_DOMAIN_LIST=(kinect realsense realsense kinect)
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for classifier in ${CLASSIFIER_LIST}; do
+    #             for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+    #                 dataset=${TARGET_DOMAIN_LIST[idx]}
+    #                 dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
+    #                 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+    #                 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+    #                 for method in ${METHOD_LIST}; do
+    #                     exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+    #                     mode=eval
+    #                     run_baselines
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
     # scenario=mixed
     # CORRUPTION_LIST="background"
@@ -237,9 +243,8 @@ run_dda_2() {
 
     scenario=label_distribution_shift
     imb_ratio=10
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
     CORRUPTION_LIST="upsampling"
-    # CORRUPTION_LIST="background density density_inc distortion distortion_rbf gaussian impulse lidar rotation shear uniform"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -250,11 +255,6 @@ run_dda_2() {
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
                         diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-
-                        if [[ "$corruption" == "upsampling" ]]; then
-                            batch_size=16
-                        fi
-
                         for method in ${METHOD_LIST}; do
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
                             mode=eval
@@ -268,45 +268,4 @@ run_dda_2() {
     done
 }
 
-run_kinect() {
-    CLASSIFIER_LIST=(DGCNN)
-    SEED_LIST="2"
-    BATCH_SIZE_LIST="32"
-    METHOD_LIST="dda"
-
-    SOURCE_DOMAIN_LIST=(synthetic realsense)
-    TARGET_DOMAIN_LIST=(kinect kinect)
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
-                    dataset=${TARGET_DOMAIN_LIST[idx]}
-                    dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
-                    for method in ${METHOD_LIST}; do
-                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done    
-}
-
-GPUS=(0 1 2 3 6 7)
-NUM_GPUS=6
-i=0
-
-wait_n() {
-  background=($(jobs -p))
-  local num_max_jobs=6
-  if ((${#background[@]} >= num_max_jobs)); then
-    wait -n
-  fi
-}
-
 run_dda
-run_dda_2
-run_kinect

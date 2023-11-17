@@ -480,7 +480,7 @@ def main(args):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
+        # model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
@@ -492,7 +492,7 @@ def main(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = nn.DataParallel(classifier)
+    # classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -506,14 +506,13 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
+    if isinstance(classifier, nn.DataParallel):
+        classifier = classifier.module
+
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
-
-        print(f"x.shape: {x.shape}")
-        print(f"labels: {labels}")
-
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
@@ -523,7 +522,7 @@ def main(args):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
         logits_before = original_classifier(x).detach()
-        all_pred_before_list.extend(logits_before.argmax(dim=-1).cpu().tolist())
+        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=None, ind=None).detach()
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
@@ -648,7 +647,7 @@ def vis(args):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
+        # model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
@@ -660,7 +659,7 @@ def vis(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = nn.DataParallel(classifier)
+    # classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre

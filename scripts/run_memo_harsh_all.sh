@@ -217,7 +217,11 @@ run_baselines() {
 }
 
 
+<<<<<<< HEAD:scripts/run_baselines_modelnet40c.sh
+run_baselines_modelnet40c() {
+=======
 run_memo_harsh_all() {
+>>>>>>> c0eca530276db44da8850d32017dd78783295354:scripts/run_memo_harsh_all.sh
     CLASSIFIER_LIST=(DGCNN)
 
     BATCH_SIZE_LIST="1"

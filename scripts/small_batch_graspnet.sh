@@ -2,8 +2,10 @@
 wandb_usr=drumpt
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
+# DATASET_ROOT_DIR=../nfs-client/datasets
+# CODE_BASE_DIR=../nfs-client/CloudFixer
+DATASET_ROOT_DIR=../datasets
+CODE_BASE_DIR=../CloudFixer
 # DATASET_ROOT_DIR=../datasets
 # CODE_BASE_DIR=../CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
@@ -165,7 +167,7 @@ weighted_reg=True
 #                         batch_size=16
 #                         num_steps=1 # placeholder
 
-#                         dda_steps=150
+#                         dda_steps=100
 #                         dda_guidance_weight=6
 #                         dda_lpf_method=fps
 #                         dda_lpf_scale=4
@@ -244,10 +246,10 @@ run_baselines() {
 
         test_lr=1e-4 # 1e-4 1e-3 1e-2
         num_steps=10 # 1 3 5 10
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-4
             num_steps=5
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-4
             num_steps=3
         fi
@@ -261,11 +263,11 @@ run_baselines() {
         lame_affinity=kNN # rbf, kNN, linear
         lame_knn=1 # 1, 3, 5, 10
         lame_max_steps=10 # 1, 10, 100
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             lame_affinity=rbf # rbf, kNN, linear
             lame_knn=3 # 1, 3, 5, 10
             lame_max_steps=100 # 1, 10, 100
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             lame_affinity=rbf # rbf, kNN, linear
             lame_knn=3 # 1, 3, 5, 10
             lame_max_steps=1 # 1, 10, 100
@@ -278,12 +280,12 @@ run_baselines() {
         num_steps=3 # 1 3 5 10
         sar_ent_threshold=0.2 # 0.4, 0.2, 0.6, 0.8
         sar_eps_threshold=0.1 # 0.01, 0.05, 0.1
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-3
             num_steps=3
             sar_ent_threshold=0.2
             sar_eps_threshold=0.1
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-2 # 1e-4 1e-3 1e-2
             num_steps=10 # 1 3 5 10
             sar_ent_threshold=0.2 # 0.4, 0.2, 0.6, 0.8
@@ -295,10 +297,10 @@ run_baselines() {
         params_to_adapt="LN BN GN"
         test_lr=1e-2 # 1e-4 1e-3 1e-2
         num_steps=1 # 1 3 5 10
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-2
             num_steps=10
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-2 # 1e-4 1e-3 1e-2
             num_steps=3 # 1 3 5 10
         fi        
@@ -323,10 +325,10 @@ run_baselines() {
         dua_min_mom=0.005
         dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             num_steps=3
             dua_decay_factor=0.94
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             num_steps=1
             dua_decay_factor=0.94
         fi
@@ -337,9 +339,9 @@ run_baselines() {
         params_to_adapt="LN BN GN" # placeholder
         num_steps=1 # 1, 3, 5, 10
         bn_stats_prior=0.2 # 0, 0.2, 0.4, 0.6, 0.8
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             bn_stats_prior=0
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             bn_stats_prior=0
         fi
     elif [ "$method" == "shot" ]; then
@@ -349,12 +351,11 @@ run_baselines() {
         test_lr=1e-4 # 1e-4 1e-3 1e-2
         num_steps=5 # 1 3 5 10
         shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
-
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-4 # 1e-4 1e-3 1e-2
             num_steps=5 # 1 3 5 10
             shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-4 # 1e-4 1e-3 1e-2
             num_steps=5 # 1 3 5 10
             shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
@@ -372,7 +373,6 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
-    # CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
     CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
@@ -430,8 +430,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1
-        i=$((i + 1))
+        2>&1 &
     wait_n
 }
 
@@ -441,7 +440,7 @@ hparam_tune_modelnet40c() {
 
     SEED_LIST="2"
     # TODO:
-    BATCH_SIZE_LIST="8 1" # 64 8 1
+    BATCH_SIZE_LIST="8" # 64 8 1
     # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
     METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
@@ -450,7 +449,7 @@ hparam_tune_modelnet40c() {
                 dataset=modelnet40c_original
                 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
                 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                 for method in ${METHOD_LIST}; do
                     if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                         continue
@@ -481,7 +480,7 @@ hparam_tune_pointda() {
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
                     for method in ${METHOD_LIST}; do
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
@@ -513,7 +512,7 @@ hparam_tune_graspnet() {
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
                     for method in ${METHOD_LIST}; do
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
@@ -536,9 +535,7 @@ run_baselines_modelnet40c() {
     BATCH_SIZE_LIST="64 8 1"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
-    METHOD_LIST="tent"
-    # METHOD_LIST="bn_stats dua"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -547,7 +544,7 @@ run_baselines_modelnet40c() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                                 continue
@@ -568,7 +565,7 @@ run_baselines_pointda() {
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64 16 1"
+    BATCH_SIZE_LIST="64 8 1"
     SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
     METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
@@ -579,7 +576,7 @@ run_baselines_pointda() {
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
                     for method in ${METHOD_LIST}; do
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
@@ -610,7 +607,7 @@ run_baselines_graspnet() {
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
                     for method in ${METHOD_LIST}; do
                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                             continue
@@ -643,7 +640,7 @@ run_baselines_modelnet40c_mixed() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
                                 continue
@@ -678,7 +675,7 @@ run_baselines_modelnet40c_temporally_correlated() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
                                 continue
@@ -706,7 +703,7 @@ run_baselines_modelnet40c_label_distribution_shift() {
     BATCH_SIZE_LIST="64"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl dua bn_stats shot"
+    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -715,124 +712,7 @@ run_baselines_modelnet40c_label_distribution_shift() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-
-    BATCH_SIZE_LIST="1"
-    METHOD_LIST="memo"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-}
-
-
-
-
-run_memo_harsh_all() {
-    CLASSIFIER_LIST=(DGCNN)
-
-    BATCH_SIZE_LIST="1"
-    METHOD_LIST="memo"
-    SEED_LIST="2"
-
-    scenario=mixed
-    CORRUPTION_LIST="background"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-
-    scenario=temporally_correlated
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-
-
-    scenario=label_distribution_shift
-    imb_ratio=10
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
                                 continue
@@ -850,161 +730,44 @@ run_memo_harsh_all() {
 }
 
 
-run_method_all() {
-    CLASSIFIER_LIST=(DGCNN)
 
-    SEED_LIST="2"
-    BATCH_SIZE_LIST="64"
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                            mode=eval
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
 
-    SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
-    TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
-                    dataset=${TARGET_DOMAIN_LIST[idx]}
-                    dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
-                    for method in ${METHOD_LIST}; do
-                        if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
-                            continue
-                        fi
-                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
 
-    SOURCE_DOMAIN_LIST=(synthetic synthetic kinect realsense)
-    TARGET_DOMAIN_LIST=(kinect realsense realsense kinect)
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
-                    dataset=${TARGET_DOMAIN_LIST[idx]}
-                    dataset_dir=${DATASET_ROOT_DIR}/GraspNetPointClouds
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
-                    for method in ${METHOD_LIST}; do
-                        if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
-                            continue
-                        fi
-                        exp_name=eval_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
-
-    scenario=mixed
-    CORRUPTION_LIST="background"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-
-    scenario=temporally_correlated
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
-
-    scenario=label_distribution_shift
-    imb_ratio=10
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
+wait_n() {
+  # limit the max number of jobs as NUM_MAX_JOB and wait
+  background=($(jobs -p))
+  local num_max_jobs=1
+  echo $num_max_jobs
+  if ((${#background[@]} >= num_max_jobs)); then
+    wait -n
+  fi
 }
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="0,1"
+# hparam_tune_modelnet40c
+# run_baselines_modelnet40c
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="2,3"
+# run_baselines_pointda
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="4,5"
+# run_baselines_graspnet
+##############################################
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="6,7"
+# run_baselines_modelnet40c_mixed
+# run_baselines_modelnet40c_temporally_correlated
+# run_baselines_modelnet40c_label_distribution_shift
+##############################################t
+
 
 
 run_baselines_modelnet40c_small_batch() {
@@ -1101,60 +864,9 @@ run_baselines_graspnet_small_batch() {
     done
 }
 
+# CUDA_VISIBLE_DEVICES=1
 # run_baselines_modelnet40c_small_batch
+# CUDA_VISIBLE_DEVICES=2
 # run_baselines_pointda_small_batch
-# run_baselines_graspnet_small_batch
-
-
-
-
-# GPUS=(4 5 6 7)
-# NUM_GPUS=4
-# i=0
-
-# wait_n() {
-#   # limit the max number of jobs as NUM_MAX_JOB and wait
-#   background=($(jobs -p))
-#   local num_max_jobs=4
-#   echo $num_max_jobs
-#   if ((${#background[@]} >= num_max_jobs)); then
-#     wait -n
-#   fi
-# }
-
-
-##############################################
-# CUDA_VISIBLE_DEVICES="0,1"
-# hparam_tune_modelnet40c
-# run_baselines_modelnet40c
-##############################################
-
-##############################################
-# CUDA_VISIBLE_DEVICES="2,3"
-# run_baselines_pointda
-##############################################
-
-##############################################
-# CUDA_VISIBLE_DEVICES="4,5"
-# run_baselines_graspnet
-##############################################
-
-
-##############################################
-# CUDA_VISIBLE_DEVICES="6,7"
-# run_baselines_modelnet40c_mixed
-# run_baselines_modelnet40c_temporally_correlated
-# run_baselines_modelnet40c_label_distribution_shift
-##############################################t
-
-
-##############################################
-# CUDA_VISIBLE_DEVICES="0"
-# run_memo_harsh_all
-##############################################
-
-
-##############################################
-CUDA_VISIBLE_DEVICES="4,5"
-run_baselines_modelnet40c_label_distribution_shift
-##############################################
+CUDA_VISIBLE_DEVICES=3
+run_baselines_graspnet_small_batch

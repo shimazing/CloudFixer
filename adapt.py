@@ -509,9 +509,6 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-        if iter_idx >=1:
-            break
-
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         if args.adv_attack:

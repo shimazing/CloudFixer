@@ -152,7 +152,6 @@ run_baselines() {
 run_dda() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"
-<<<<<<< HEAD
     BATCH_SIZE_LIST="8"
     METHOD_LIST="dda"
 
@@ -246,7 +245,6 @@ run_dda() {
     imb_ratio=10
     # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
     CORRUPTION_LIST="upsampling"
-=======
     BATCH_SIZE_LIST="32"
     METHOD_LIST="dda"
 
@@ -302,7 +300,7 @@ run_dda() {
 run_dda_2() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"
-    BATCH_SIZE_LIST="32"
+    BATCH_SIZE_LIST="16"
     METHOD_LIST="dda"
 
     scenario=mixed
@@ -332,12 +330,7 @@ run_dda_2() {
     scenario=label_distribution_shift
     imb_ratio=10
     # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-<<<<<<< HEAD
-    CORRUPTION_LIST="background density density_inc distortion distortion_rbf gaussian impulse lidar rotation shear uniform"
-=======
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
->>>>>>> c0eca530276db44da8850d32017dd78783295354
->>>>>>> dadb47a05bd3b1a2af3e9cc744850700f4cd12f3
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do

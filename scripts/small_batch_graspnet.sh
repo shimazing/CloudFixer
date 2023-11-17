@@ -246,10 +246,10 @@ run_baselines() {
 
         test_lr=1e-4 # 1e-4 1e-3 1e-2
         num_steps=10 # 1 3 5 10
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-4
             num_steps=5
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-4
             num_steps=3
         fi
@@ -263,11 +263,11 @@ run_baselines() {
         lame_affinity=kNN # rbf, kNN, linear
         lame_knn=1 # 1, 3, 5, 10
         lame_max_steps=10 # 1, 10, 100
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             lame_affinity=rbf # rbf, kNN, linear
             lame_knn=3 # 1, 3, 5, 10
             lame_max_steps=100 # 1, 10, 100
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             lame_affinity=rbf # rbf, kNN, linear
             lame_knn=3 # 1, 3, 5, 10
             lame_max_steps=1 # 1, 10, 100
@@ -280,12 +280,12 @@ run_baselines() {
         num_steps=3 # 1 3 5 10
         sar_ent_threshold=0.2 # 0.4, 0.2, 0.6, 0.8
         sar_eps_threshold=0.1 # 0.01, 0.05, 0.1
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-3
             num_steps=3
             sar_ent_threshold=0.2
             sar_eps_threshold=0.1
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-2 # 1e-4 1e-3 1e-2
             num_steps=10 # 1 3 5 10
             sar_ent_threshold=0.2 # 0.4, 0.2, 0.6, 0.8
@@ -297,10 +297,10 @@ run_baselines() {
         params_to_adapt="LN BN GN"
         test_lr=1e-2 # 1e-4 1e-3 1e-2
         num_steps=1 # 1 3 5 10
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-2
             num_steps=10
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-2 # 1e-4 1e-3 1e-2
             num_steps=3 # 1 3 5 10
         fi        
@@ -325,10 +325,10 @@ run_baselines() {
         dua_min_mom=0.005
         dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             num_steps=3
             dua_decay_factor=0.94
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             num_steps=1
             dua_decay_factor=0.94
         fi
@@ -339,9 +339,9 @@ run_baselines() {
         params_to_adapt="LN BN GN" # placeholder
         num_steps=1 # 1, 3, 5, 10
         bn_stats_prior=0.2 # 0, 0.2, 0.4, 0.6, 0.8
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             bn_stats_prior=0
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             bn_stats_prior=0
         fi
     elif [ "$method" == "shot" ]; then
@@ -351,12 +351,11 @@ run_baselines() {
         test_lr=1e-4 # 1e-4 1e-3 1e-2
         num_steps=5 # 1 3 5 10
         shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
-
-        if [ $batch_size$ == "1" ]; then
+        if [ "$batch_size" == "1" ]; then
             test_lr=1e-4 # 1e-4 1e-3 1e-2
             num_steps=5 # 1 3 5 10
             shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
-        elif [ $batch_size$ == "8" ]; then
+        elif [ "$batch_size" == "8" ]; then
             test_lr=1e-4 # 1e-4 1e-3 1e-2
             num_steps=5 # 1 3 5 10
             shot_pl_loss_weight=0.3 # 0 0.1, 0.3, 0.5, 1
@@ -746,8 +745,8 @@ wait_n() {
 
 
 ##############################################
-CUDA_VISIBLE_DEVICES="0,1"
-hparam_tune_modelnet40c
+# CUDA_VISIBLE_DEVICES="0,1"
+# hparam_tune_modelnet40c
 # run_baselines_modelnet40c
 ##############################################
 
@@ -865,6 +864,9 @@ run_baselines_graspnet_small_batch() {
     done
 }
 
-run_baselines_modelnet40c_small_batch
-run_baselines_pointda_small_batch
+# CUDA_VISIBLE_DEVICES=1
+# run_baselines_modelnet40c_small_batch
+# CUDA_VISIBLE_DEVICES=2
+# run_baselines_pointda_small_batch
+CUDA_VISIBLE_DEVICES=3
 run_baselines_graspnet_small_batch

@@ -19,7 +19,7 @@ from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
 from utils.visualizer import visualize_pclist
-# from utils.chamfer_distance.chamfer_distance import ChamferDistance
+from utils.chamfer_distance.chamfer_distance import ChamferDistance
 
 
 def parse_arguments():
@@ -242,7 +242,7 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
 
 
 def dda(args, model, x, mask, ind):
-    from chamfer_distance import ChamferDistance
+    # from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
 
     if isinstance(model, nn.DataParallel):
@@ -272,8 +272,8 @@ def dda(args, model, x, mask, ind):
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        # dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
-        dist1, dist2, _, _ = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
+        dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
+        # dist1, dist2, _, _ = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
             cd_loss,

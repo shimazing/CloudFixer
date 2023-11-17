@@ -122,10 +122,11 @@ class ModelNet40C(Dataset):
             label_dir = os.path.join(data_path, 'label.npy')
             all_label = np.load(label_dir).squeeze(-1)
 
-        if self.dataset.endswith("temporally_correlated"):
+        if self.scenario == "temporally_correlated":
             sorted_indices = np.argsort(all_label)
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
+            print(f"all_label: {all_label}")
 
         if num_classes == 40:
             return all_data, all_label

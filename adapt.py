@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, recall_score
 
 from data.dataloader import *
 from diffusion.build_model import get_model
@@ -18,7 +18,7 @@ from utils import logging
 from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
-from utils.visualizer import visualize_pclist
+# from utils.visualizer import visualize_pclist
 # from utils.chamfer_distance.chamfer_distance import ChamferDistance
 
 
@@ -39,6 +39,8 @@ def parse_arguments():
     parser.add_argument('--dataset', type=str, default='modelnet40c_background_5')
     parser.add_argument('--dataset_dir', type=str, default='../datasets/modelnet40_c/')
     parser.add_argument('--adv_attack', type=eval, default=False)
+    parser.add_argument('--scenario', type=str, default='normal')
+    parser.add_argument('--imb_ratio', type=float, default=0)
 
     # classifier
     parser.add_argument('--classifier', type=str, default='DGCNN')
@@ -240,7 +242,9 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
 
 
 def dda(args, model, x, mask, ind):
+    from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
+
     if isinstance(model, nn.DataParallel):
         model = model.module
 
@@ -268,7 +272,8 @@ def dda(args, model, x, mask, ind):
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
+        # dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
+        dist1, dist2, _, _ = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
             cd_loss,
@@ -458,17 +463,15 @@ def main(args):
         test_dataset = ModelNet40C(args, partition='test')
     elif args.dataset in ['modelnet', 'shapenet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
-        # if args.dataset == 'modelnet':
-        #     test_dataset = ModelNet(io, dataroot=args.dataset_dir, partition='test')
-        # elif args.dataset == 'shapenet':
-        #     test_dataset = ShapeNet(io, dataroot=args.dataset_dir, partition='test')
-        # elif args.dataset == 'scannet':
-        #     test_dataset = ScanNet(io, dataroot=args.dataset_dir, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
         test_dataset = GraspNet10(args=args, partition='test')
     else:
         raise ValueError('UNDEFINED DATASET')
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=True, drop_last=False, num_workers=args.num_workers)
+    if args.scenario == "label_distribution_shift":
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, sampler=ImbalancedDatasetSampler(test_dataset, imb_ratio=args.imb_ratio), shuffle=False, drop_last=False, num_workers=args.num_workers)
+    else:
+        shuffle = False if args.scenario == "temporally_correlated" else True
+        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=shuffle, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
@@ -506,14 +509,11 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-        # TODO: remove (only for debugging)
-        # if iter_idx >= 100:
-        #     break
+        if iter_idx >=1:
+            break
+
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
-        mask = data[2].to(device)
-        ind = data[3].to(device) # original indices for duplicated point
-
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
@@ -525,28 +525,17 @@ def main(args):
         logits_before = original_classifier(x).detach()
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
-        # # 1. lame / 2. kernel density function / 3. knn / 4. entropy minimization
-        # out = classifier(x).detach()
-        # unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
-        # feats = F.normalize(classifier.get_feature(x), p=2, dim=-1).detach()
-
-        # feats_with_source = torch.cat([torch.tensor(source_feature_list).to(feats.device), feats], dim=0)
-        # unary_with_source = torch.cat([torch.tensor(source_unary_list).to(unary.device), unary], dim=0)
-
-        # affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
-        # kernel = affinity(feats_with_source)
-        # Y = laplacian_optimization(unary_with_source, kernel, max_steps=args.lame_max_steps)[len(source_unary_list):]
-        # print(f"Y: {Y}")
-        # ################################################################################
-
-        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask, ind)
-        all_pred_after_list.extend(torch.argmax(logits_after, dim=-1).cpu().tolist())
+        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=None, ind=None).detach()
+        all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
+    io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
+
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 
@@ -611,7 +600,7 @@ def tune_tta_hparams(args):
     create_folders(args)
 
     best_acc, best_hparam = 0, None
-    for hparam_comb in hparam_space[:min(len(hparam_space), 100)]:
+    for hparam_comb in hparam_space[:min(len(hparam_space), 10)]:
         for hparam_str, hparam in zip(hparams_to_search_str, hparam_comb):
             setattr(args, hparam_str, hparam)
         io.cprint(f"hparams_to_search_str: {hparams_to_search_str}")

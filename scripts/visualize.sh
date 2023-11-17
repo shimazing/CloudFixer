@@ -16,7 +16,7 @@ visualize() {
     classifier_dir=outputs/dgcnn_modelnet40_best_test.pth
 
     # diffusion model
-    diffusion_dir=outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+    diffusion_dir=outputs/diffusion_model_transformer_modelnet40.npy
 
     # common hyperparameters
     random_seed=2

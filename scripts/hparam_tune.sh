@@ -13,7 +13,7 @@ classifier=DGCNN
 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 #################### placeholders ####################
 # lame

@@ -372,6 +372,7 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
+    # CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
     CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
@@ -430,6 +431,7 @@ run_baselines() {
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
         2>&1
+        i=$((i + 1))
     wait_n
 }
 
@@ -704,7 +706,7 @@ run_baselines_modelnet40c_label_distribution_shift() {
     BATCH_SIZE_LIST="64"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua bn_stats shot"
+    METHOD_LIST="tent lame sar pl dua bn_stats shot"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -718,7 +720,33 @@ run_baselines_modelnet40c_label_distribution_shift() {
                             if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
                                 continue
                             fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
+                            mode=eval
+                            scenario=${scenario}
+                            run_baselines
+                        done
+                    done
+                done
+            done
+        done
+    done
+
+    BATCH_SIZE_LIST="1"
+    METHOD_LIST="memo"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        for method in ${METHOD_LIST}; do
+                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
+                                continue
+                            fi
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
                             mode=eval
                             scenario=${scenario}
                             run_baselines
@@ -979,43 +1007,6 @@ run_method_all() {
 }
 
 
-wait_n() {
-  # limit the max number of jobs as NUM_MAX_JOB and wait
-  background=($(jobs -p))
-  local num_max_jobs=1
-  echo $num_max_jobs
-  if ((${#background[@]} >= num_max_jobs)); then
-    wait -n
-  fi
-}
-
-
-##############################################
-CUDA_VISIBLE_DEVICES="0,1"
-hparam_tune_modelnet40c
-# run_baselines_modelnet40c
-##############################################
-
-##############################################
-# CUDA_VISIBLE_DEVICES="2,3"
-# run_baselines_pointda
-##############################################
-
-##############################################
-# CUDA_VISIBLE_DEVICES="4,5"
-# run_baselines_graspnet
-##############################################
-
-
-##############################################
-# CUDA_VISIBLE_DEVICES="6,7"
-# run_baselines_modelnet40c_mixed
-# run_baselines_modelnet40c_temporally_correlated
-# run_baselines_modelnet40c_label_distribution_shift
-##############################################t
-
-
-
 run_baselines_modelnet40c_small_batch() {
     CLASSIFIER_LIST=(DGCNN)
 
@@ -1110,6 +1101,60 @@ run_baselines_graspnet_small_batch() {
     done
 }
 
-run_baselines_modelnet40c_small_batch
-run_baselines_pointda_small_batch
-run_baselines_graspnet_small_batch
+# run_baselines_modelnet40c_small_batch
+# run_baselines_pointda_small_batch
+# run_baselines_graspnet_small_batch
+
+
+
+
+# GPUS=(4 5 6 7)
+# NUM_GPUS=4
+# i=0
+
+# wait_n() {
+#   # limit the max number of jobs as NUM_MAX_JOB and wait
+#   background=($(jobs -p))
+#   local num_max_jobs=4
+#   echo $num_max_jobs
+#   if ((${#background[@]} >= num_max_jobs)); then
+#     wait -n
+#   fi
+# }
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="0,1"
+# hparam_tune_modelnet40c
+# run_baselines_modelnet40c
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="2,3"
+# run_baselines_pointda
+##############################################
+
+##############################################
+# CUDA_VISIBLE_DEVICES="4,5"
+# run_baselines_graspnet
+##############################################
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="6,7"
+# run_baselines_modelnet40c_mixed
+# run_baselines_modelnet40c_temporally_correlated
+# run_baselines_modelnet40c_label_distribution_shift
+##############################################t
+
+
+##############################################
+# CUDA_VISIBLE_DEVICES="0"
+# run_memo_harsh_all
+##############################################
+
+
+##############################################
+CUDA_VISIBLE_DEVICES="4,5"
+run_baselines_modelnet40c_label_distribution_shift
+##############################################

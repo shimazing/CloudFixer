@@ -535,7 +535,6 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
                 weights[df["label"] == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
-
     def _get_labels(self, dataset):
         return dataset.label_list
 

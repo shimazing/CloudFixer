@@ -285,10 +285,10 @@ def dda(args, model, x, mask, ind):
 
 
 def ours(args, model, x, mask, ind, classifier):
-    if isinstance(model, nn.DataParallel):
-        model = model.module
-    if isinstance(classifier, nn.DataParallel):
-        classifier = classifier.module
+    # if isinstance(model, nn.DataParallel):
+    #     model = model.module
+    # if isinstance(classifier, nn.DataParallel):
+    #     classifier = classifier.module
 
     t = torch.full((x.size(0), 1), args.ours_steps / args.diffusion_steps).to(x.device)
     gamma_t = model.inflate_batch_array(model.gamma(t), x)
@@ -314,7 +314,8 @@ def ours(args, model, x, mask, ind, classifier):
         # content preservation
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        penultimate_layer_loss = F.mse_loss(classifier.get_feature(x0_est), classifier.get_feature(x).detach())
+        # penultimate_layer_loss = F.mse_loss(classifier.get_feature(x0_est), classifier.get_feature(x).detach())
+        penultimate_layer_loss = F.mse_loss(classifier(x0_est, return_feature=True), classifier(x, return_feature=True).detach())
         grad = torch.autograd.grad(
             penultimate_layer_loss,
             z_t,
@@ -330,8 +331,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     global EMA, mom_pre
 
-    if isinstance(classifier, torch.nn.DataParallel):
-        classifier = classifier.module
+    # if isinstance(classifier, torch.nn.DataParallel):
+    #     classifier = classifier.module
 
     # input adaptation
     if 'pre_trans' in args.method:
@@ -396,7 +397,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss.backward()
         if 'shot' in args.method:
             # pseudo-labeling
-            feats = classifier.get_feature(x).detach()
+            # feats = classifier.get_feature(x).detach()
+            feats = classifier(x, return_feature=True).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -442,7 +444,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
 def main(args):
     device = torch.device("cuda" if args.cuda else "cpu")
-    set_seed(args.random_seed) # set seed
+    set_seed(args.random_seed)
 
     ########## logging ##########
     io = logging.IOStream(args)

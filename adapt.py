@@ -531,8 +531,7 @@ def main(args):
     io.cprint(f"final metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
-    io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
-
+    io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 

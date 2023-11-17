@@ -527,16 +527,13 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        if not imb_ratio:
-            weights = 1.0 / label_to_count[df["label"]]
-            self.weights = torch.DoubleTensor(weights.to_list())
-        else:
+        weights = 1.0 / label_to_count[df["label"]]
+        if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
-            weights = np.empty(len(label_to_count))
-            p = 1 / (len(label_to_count) + (imb_ratio - 1) * len(selected_idx))
-            weights.fill(p)
-            weights[selected_idx] = imb_ratio * p
-            self.weights = torch.DoubleTensor(weights.tolist())
+            print(f"selected_idx: {selected_idx}")
+            for idx in selected_idx:
+                weights[df["label"] == idx] *= imb_ratio
+        self.weights = torch.DoubleTensor(weights.tolist())
 
 
     def _get_labels(self, dataset):

@@ -288,13 +288,16 @@ def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
     farthest = np.random.randint(0, N, (B,), dtype=np.int64)
     batch_indices = np.arange(B, dtype=np.int64)
     centroids_vals = np.zeros((B, C, npoint))
-    centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
+    centroids_norm_curv_vals = None
+    if norm_curv is not None:
+        centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
     for i in range(npoint):
         centroids[:, i] = farthest  # save current chosen point index
         centroid = xyz[batch_indices, :, farthest].reshape(B, C, 1)  # get the current chosen point value
-        centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
         centroids_vals[:, :, i] = centroid[:, :, 0].copy()
-        centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
+        if norm_curv is not None:
+            centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
+            centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
         dist = np.sum((xyz - centroid) ** 2, 1)  # euclidean distance of points from the current centroid
         mask = dist < distance  # save index of all point that are closer than the current max distance
         distance[mask] = dist[mask]  # save the minimal distance of each point from all points that were chosen until now

@@ -240,16 +240,16 @@ def dda(args, model, x, mask, ind):
     from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
 
-    if isinstance(model, nn.DataParallel):
-        model = model.module
+    #if isinstance(model, nn.DataParallel):
+    #    model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
-    gamma_t = model.inflate_batch_array(model.gamma(t), x)
-    alpha_t = model.alpha(gamma_t, x)
-    sigma_t = model.sigma(gamma_t, x)
+    gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+    alpha_t = model.module.alpha(gamma_t, x)
+    sigma_t = model.module.sigma(gamma_t, x)
 
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-    eps = model.sample_noise(n_samples=x.size(0),
+    eps = model.module.sample_noise(n_samples=x.size(0),
         n_nodes=x.size(1),
         node_mask=node_mask,
     )
@@ -257,12 +257,14 @@ def dda(args, model, x, mask, ind):
 
     for step in tqdm(range(args.dda_steps, 0, -1)):
         t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
-        gamma_t = model.inflate_batch_array(model.gamma(t), x)
-        alpha_t = model.alpha(gamma_t, x)
-        sigma_t = model.sigma(gamma_t, x)
+        gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+        alpha_t = model.module.alpha(gamma_t, x)
+        sigma_t = model.module.sigma(gamma_t, x)
 
         t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
-        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+        #z_t_m1 = model.module.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+        z_t_m1 = model(z_t, t, node_mask=node_mask,
+                sample_p_zs_given_zt=True,s=t_m1).detach()
 
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
@@ -530,7 +532,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif 'dda' in args.method:
+    elif False: #'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     else:
         logits_after = classifier(x)

@@ -18,23 +18,14 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
-<<<<<<< HEAD
-GPUS=(0 2 3)
-NUM_GPUS=3
-=======
 GPUS=(0 1 2 3 4 5 6 7)
 NUM_GPUS=8
->>>>>>> f6d861913fa3ad389ed6575b14d7eb99e120b2a5
 i=0
 
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
   background=($(jobs -p))
-<<<<<<< HEAD
-  local num_max_jobs=3
-=======
   num_max_jobs=8
->>>>>>> f6d861913fa3ad389ed6575b14d7eb99e120b2a5
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
   fi
@@ -95,6 +86,9 @@ run_baselines() {
         dda_lpf_scale=4
     fi
 
+    # echo ${CUDA_VISIBLE_DEVICES}
+
+    # CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
     CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
@@ -161,7 +155,7 @@ run_baselines() {
 run_dda() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"
-    BATCH_SIZE_LIST="8"
+    BATCH_SIZE_LIST="32"
     METHOD_LIST="dda"
 
     # CORRUPTION_LIST="upsampling"
@@ -250,43 +244,47 @@ run_dda() {
     #     done
     # done
 
-    scenario=label_distribution_shift
-    imb_ratio=10
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
-    CORRUPTION_LIST="upsampling"
-    BATCH_SIZE_LIST="32"
-    METHOD_LIST="dda"
-
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
+    # scenario=label_distribution_shift
+    # imb_ratio=10
+    # # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
     # CORRUPTION_LIST="upsampling"
-    # CORRUPTION_LIST="occlusion lidar gaussian rotation shear distortion_rbf_inv"
-    CORRUPTION_LIST="rotation distortion_rbf_inv"
-    SEVERITY_LIST="5"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                            mode=eval
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
+    # BATCH_SIZE_LIST="32"
+    # METHOD_LIST="dda"
+
+    # # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform"
+    # # CORRUPTION_LIST="upsampling"
+    # # CORRUPTION_LIST="occlusion lidar gaussian rotation shear distortion_rbf_inv"
+    # CORRUPTION_LIST="rotation distortion_rbf_inv"
+    # SEVERITY_LIST="5"
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for classifier in ${CLASSIFIER_LIST}; do
+    #             for corruption in ${CORRUPTION_LIST}; do
+    #                 for severity in ${SEVERITY_LIST}; do # "3 5"
+    #                     dataset=modelnet40c_${corruption}_${severity}
+    #                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    #                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+    #                     diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+    #                     for method in ${METHOD_LIST}; do
+    #                         exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+    #                         mode=eval
+    #                         run_baselines
+    #                     done
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
     # SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     # TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
-    SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet scannet scannet)
-    TARGET_DOMAIN_LIST=(shapenet scannet modelnet modelnet shapenet)
+    # SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet scannet scannet)
+    # TARGET_DOMAIN_LIST=(shapenet scannet modelnet modelnet shapenet)
+
+
+    SOURCE_DOMAIN_LIST=(scannet)
+    TARGET_DOMAIN_LIST=(shapenet)
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -339,9 +337,8 @@ run_dda_2() {
 
     scenario=label_distribution_shift
     imb_ratio=10
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="uniform gaussian impulse rotation shear"
     # CORRUPTION_LIST="upsampling"
-    # CORRUPTION_LIST="background density density_inc distortion distortion_rbf gaussian impulse lidar rotation shear uniform"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -353,9 +350,12 @@ run_dda_2() {
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
                         diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
-                        if [[ "$corruption" == "upsampling" ]]; then
-                            batch_size=16
-                        fi
+                        # if [[ "$corruption" ==  "upsampling" ]]; then
+                        #     batch_size=16
+                        # else
+                        #     batch_size=32
+                        # fi
+                        # echo ${batch_size}
 
                         for method in ${METHOD_LIST}; do
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
@@ -397,18 +397,21 @@ run_kinect() {
     done    
 }
 
-GPUS=(0 1 2 3 6 7)
-NUM_GPUS=6
+GPUS=(3 4 5 6 7)
+NUM_GPUS=5
 i=0
 
 wait_n() {
   background=($(jobs -p))
-  local num_max_jobs=6
+  local num_max_jobs=5
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
   fi
 }
 
-run_dda
+# CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+# CUDA_VISIBLE_DEVICES="0,1,2"
+
+# run_dda
 run_dda_2
-run_kinect
+# run_kinect

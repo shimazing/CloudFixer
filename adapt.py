@@ -245,8 +245,8 @@ def dda(args, model, x, mask, ind):
     from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
 
-    if isinstance(model, nn.DataParallel):
-        model = model.module
+    # if isinstance(model, nn.DataParallel):
+    #     model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
     gamma_t = model.inflate_batch_array(model.gamma(t), x)
@@ -326,10 +326,10 @@ def ours(args, model, x, mask, ind, classifier):
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
+    global EMA, mom_pre, adaptation_time
+
     import time
     start = time.time()
-
-    global EMA, mom_pre
 
     # if isinstance(classifier, torch.nn.DataParallel):
     #     classifier = classifier.module
@@ -424,6 +424,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     end = time.time()
     print(f"end: {end - start}")
+    adaptation_time += end - start
 
     # output adaptation
     is_training = classifier.training
@@ -443,6 +444,9 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
 
 def main(args):
+    global adaptation_time
+    adaptation_time = 0
+
     device = torch.device("cuda" if args.cuda else "cpu")
     set_seed(args.random_seed)
 
@@ -480,7 +484,7 @@ def main(args):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        # model = nn.DataParallel(model)
+        model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
@@ -492,7 +496,7 @@ def main(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    # classifier = nn.DataParallel(classifier)
+    classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -506,8 +510,8 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
-    if isinstance(classifier, nn.DataParallel):
-        classifier = classifier.module
+    # if isinstance(classifier, nn.DataParallel):
+    #     classifier = classifier.module
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
@@ -534,6 +538,9 @@ def main(args):
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
+
+    print(f"average adaptation time: {adaptation_time / len(test_dataset.pc_list)}")
+
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 

@@ -4,8 +4,10 @@ import h5py
 import random
 import copy
 from tqdm import tqdm
-
-import open3d as o3d
+try:
+    import open3d as o3d
+except:
+    print("unable to import open3d. GraspNet10 is not available")
 import numpy as np
 import scipy
 import pandas as pd
@@ -170,7 +172,6 @@ class ModelNet40C(Dataset):
                 axis=-1) < 1e-8
         dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
         if np.any(dup_points):
-            print("?????")
             row, col = dup_points.nonzero()
             row, col = row[row<col], col[row<col]
             filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
@@ -565,12 +566,13 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        weights = 1.0 / label_to_count[df["label"]]
+        weights = 1.0 / label_to_count[df["label"]].to_numpy()
+        labels = df["label"].to_numpy()
         if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
             print(f"selected_idx: {selected_idx}")
             for idx in selected_idx:
-                weights[df["label"] == idx] *= imb_ratio
+                weights[labels == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
     def _get_labels(self, dataset):

@@ -46,6 +46,14 @@ def configure_bn_layer(args, m):
 
 
 def configure_model(args, model):
+    if 'pl' in args.method:
+        model.eval()
+        model.requires_grad_(False)
+        for m in model.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
     if 'tent' in args.method:
         model.eval()
         model.requires_grad_(False)
@@ -64,14 +72,6 @@ def configure_model(args, model):
                 configure_bn_layer(args, m)
             elif isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
                 m.requires_grad_(True)
-    if 'pl' in args.method:
-        model.eval()
-        model.requires_grad_(False)
-        for m in model.modules():
-            if isinstance(m, nn.Dropout):
-                m.train()
-            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
-                configure_bn_layer(args, m)
     if 'memo' in args.method:
         model.eval()
         for m in model.modules():

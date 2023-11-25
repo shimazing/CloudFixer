@@ -15,6 +15,36 @@ N = 16
 K = 4
 NUM_FEATURES = K * 3 + 1
 
+def knn(x, k=5, mask=None, ind=None, return_dist=False):
+    # mask : [B, N]
+    # x : [B, C=3, N]
+    inner = -2 * torch.matmul(x.transpose(2, 1), x)
+    xx = torch.sum(x ** 2, dim=1, keepdim=True)
+    pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
+    # B x N x N
+
+    if ind is not None:
+        # update mask only to consider duplicated points
+        mask = (ind == torch.arange(ind.shape[1]).to(ind.device))
+    if mask is not None:
+        B_ind, N_ind = (~mask).nonzero(as_tuple=True)
+        pairwise_distance[B_ind, N_ind] = -np.inf
+        pairwise_distance[B_ind, :, N_ind] = -np.inf
+    # (batch_size, num_points, k)
+    idx = pairwise_distance.topk(k=k, dim=-1)[1]
+    if return_dist:
+        B = x.shape[0]
+        N = x.shape[2]
+        dist =  -pairwise_distance[torch.arange(B)[:, None, None],
+                            torch.arange(N)[None, :, None],
+                idx] + 1e-8
+        is_valid = mask[torch.arange(B)[:, None, None], idx]
+        dist[~is_valid] = 0
+        n_valid = is_valid.float().sum(dim=-1)
+        return idx, (dist.sum(dim=-1) / (n_valid).clamp(min=1)).detach().clone()
+
+    return idx
+
 
 def knn_point(k, xyz, new_xyz):
     """
@@ -258,13 +288,16 @@ def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
     farthest = np.random.randint(0, N, (B,), dtype=np.int64)
     batch_indices = np.arange(B, dtype=np.int64)
     centroids_vals = np.zeros((B, C, npoint))
-    centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
+    centroids_norm_curv_vals = None
+    if norm_curv is not None:
+        centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
     for i in range(npoint):
         centroids[:, i] = farthest  # save current chosen point index
         centroid = xyz[batch_indices, :, farthest].reshape(B, C, 1)  # get the current chosen point value
-        centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
         centroids_vals[:, :, i] = centroid[:, :, 0].copy()
-        centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
+        if norm_curv is not None:
+            centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
+            centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
         dist = np.sum((xyz - centroid) ** 2, 1)  # euclidean distance of points from the current centroid
         mask = dist < distance  # save index of all point that are closer than the current max distance
         distance[mask] = dist[mask]  # save the minimal distance of each point from all points that were chosen until now

@@ -4,8 +4,10 @@ import h5py
 import random
 import copy
 from tqdm import tqdm
-
-import open3d as o3d
+try:
+    import open3d as o3d
+except:
+    print("unable to import open3d. GraspNet10 is not available")
 import numpy as np
 import scipy
 import pandas as pd
@@ -24,6 +26,7 @@ class ModelNet40C(Dataset):
         self.dataset = args.dataset
         self.partition = partition
         self.scenario = args.scenario
+        self.subsample = getattr(args, 'subsample', 2048)
 
         if len(args.dataset.split("_")) == 1:
             self.corruption = 'original'
@@ -43,10 +46,9 @@ class ModelNet40C(Dataset):
             self.random_scale = args.random_scale if hasattr(args, 'random_scale') else False
             self.random_rotation = args.random_rotation if hasattr(args, 'random_rotation') else True
             self.random_trans = args.random_trans if hasattr(args, 'random_trans') else False
-            self.subsample = args.subsample if hasattr(args, 'subsample') else 1024
             self.aug = args.aug if hasattr(args, 'aug') else False
         else:
-            self.jitter, self.random_scale, self.random_rotation, self.random_trans, self.subsample, self.aug = False, False, False, False, 1024, False
+            self.jitter, self.random_scale, self.random_rotation, self.random_trans, self.aug = False, False, False, False, False
 
         self.label_to_idx = {label:idx for idx, label in enumerate(["airplane", "bathtub", "bed", "bench", "bookshelf", "bottle", "bowl", "car", "chair", "cone", "cup", "curtain", "desk", "door", "dresser", "flower_pot", "glass_box", "guitar", "keyboard", "lamp", "laptop", "mantel", "monitor", "night_stand", "person", "piano", "plant", "radio", "range_hood", "sink", "sofa", "stairs", "stool", "table", "tent", "toilet", "tv_stand", "vase", "wardrobe", "xbox"])}
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
@@ -159,13 +161,25 @@ class ModelNet40C(Dataset):
 
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
-        # norm_curv = self.pc_list[item][:, 3:]
         label = self.label_list[item]
 
-        N = len(pointcloud)
-        mask = np.ones((max(NUM_POINTS, N), 1)).astype(pointcloud.dtype)
-        mask[N:] = 0
+        mask = np.ones((len(pointcloud), 1)).astype(pointcloud.dtype)
         ind = np.arange(len(pointcloud))
+
+        # identify duplicated points
+        dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+            None, :]), 2),
+                axis=-1) < 1e-8
+        dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+        if np.any(dup_points):
+            row, col = dup_points.nonzero()
+            row, col = row[row<col], col[row<col]
+            filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
+            row, col = row[filter], col[filter]
+            ind[col] = row
+            dup = np.unique(col)
+            mask[dup] = 0
+
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
             pointcloud = rotate_pc(pointcloud)
@@ -174,7 +188,32 @@ class ModelNet40C(Dataset):
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)
+        if mask.sum() > self.subsample:
+            valid = mask.nonzero()[0]
+            pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
+            pointcloud_ = np.swapaxes(np.expand_dims(pointcloud_, 0), 1, 2)
+            centroids, pointcloud_, _ = \
+                farthest_point_sample_np(pointcloud_,
+                        None, self.subsample)
+            pointcloud_ = np.swapaxes(pointcloud_.squeeze(), 1, 0).astype('float32')
+            centroids = centroids.squeeze()
+            assert len(centroids) == self.subsample
+            mask_ = np.zeros_like(mask)
+            mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
+            assert np.all(mask[mask_==1] == 1)
+            mask = mask_
 
+        if self.subsample < 2048:
+            valid = mask.nonzero()[0]
+            while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
+                np.random.shuffle(valid)
+                chosen = chosen[:NUM_POINTS - len(pointcloud)]
+                pointcloud = np.concatenate((
+                    pointcloud,
+                    pointcloud[chosen],
+                ), axis=0)
+                ind = np.concatenate((ind, chosen), axis=0)
+                assert len(pointcloud) == len(ind)
         return (pointcloud, label, mask, ind)
 
 
@@ -303,7 +342,7 @@ class PointDA10(Dataset):
         # scannet is rotated such that the up direction is the y axis
         if (self.dataset == "shapenet" and label.item(0) != self.label_to_idx["plant"]) or self.dataset == "scannet":
             pointcloud = rotate_pc(pointcloud)
-        
+
         # if self.scale_mode != 'unit_norm':
         #     pointcloud = self.scale * scale(pointcloud, self.scale_mode)
         # else:
@@ -527,12 +566,13 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        weights = 1.0 / label_to_count[df["label"]]
+        weights = 1.0 / label_to_count[df["label"]].to_numpy()
+        labels = df["label"].to_numpy()
         if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
             print(f"selected_idx: {selected_idx}")
             for idx in selected_idx:
-                weights[df["label"] == idx] *= imb_ratio
+                weights[labels == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
     def _get_labels(self, dataset):

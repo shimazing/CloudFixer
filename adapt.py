@@ -20,6 +20,8 @@ from utils.pc_utils import *
 from utils.tta_utils import *
 # from utils.visualizer import visualize_pclist
 # from utils.chamfer_distance.chamfer_distance import ChamferDistance
+from chamfer_distance import ChamferDistance as chamfer_dist
+chamfer_dist_fn = chamfer_dist()
 
 
 def parse_arguments():
@@ -86,21 +88,23 @@ def parse_arguments():
     parser.add_argument('--diffusion_dir', type=str, default='outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy')
 
     # diffusion model hyperparameters
-    parser.add_argument('--diffusion_steps', type=int, default=100)
+    parser.add_argument('--diffusion_steps', type=int, default=500)
     parser.add_argument('--diffusion_noise_schedule', type=str, default='polynomial_2', help='learned, cosine, linear')
     parser.add_argument('--diffusion_noise_precision', type=float, default=1e-5)
     parser.add_argument('--diffusion_loss_type', type=str, default='l2', help='vlb, l2')
     parser.add_argument('--scale_mode', type=str, default='unit_std')
     parser.add_argument('--n_nodes', type=int, default=1024)
     parser.add_argument('--dp', type=eval, default=True, help='True | False')
-    parser.add_argument('--knn', type=int, default=20)
+    parser.add_argument('--knn', type=int, default=5)
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
-    parser.add_argument('--weighted_reg', type=eval, default=False)
-    parser.add_argument('--n_update', default=400, type=int)
-    parser.add_argument('--lr', type=float, default=1e-2)
+    parser.add_argument('--weighted_reg', type=eval, default=True)
+    parser.add_argument('--n_update', default=100, type=int)
+    parser.add_argument('--warmup', default=0.2, type=float)
+    parser.add_argument('--input_lr', type=float, default=1e-2)
+    parser.add_argument('--rotation', default=0.1, type=float)
     parser.add_argument('--optim', type=str, default='adamax')
-    parser.add_argument('--optim_end_factor', type=float, default=0.2)
+    parser.add_argument('--optim_end_factor', type=float, default=0.05)
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--beta1', type=float, default=0.9)
     parser.add_argument('--beta2', type=float, default=0.999)
@@ -108,46 +112,45 @@ def parse_arguments():
     parser.add_argument('--lam_h', type=float, default=0)
     parser.add_argument('--t_min', type=float, default=0.02)
     parser.add_argument('--t_max', type=float, default=0.2)
+    parser.add_argument('--t_len', type=float, default=0.2)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
-    parser.add_argument('--subsample', type=int, default=1024)
+    parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--pow', type=int, default=1)
     parser.add_argument('--denoising_thrs', type=int, default=100)
-    parser.add_argument('--save_itmd', type=int, default=0)
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True
-        args.save_itmd = 0
     args.cuda = not args.no_cuda and torch.cuda.is_available()
     return args
 
 
 @torch.enable_grad()
 def pre_trans(args, model, x, mask, ind, verbose=True):
-    def knn(x, k=args.knn, mask=None, return_dist=False):
-        # mask : [B, N]
-        # x : [B, C=3, N]
-        inner = -2 * torch.matmul(x.transpose(2, 1), x)
-        xx = torch.sum(x ** 2, dim=1, keepdim=True)
-        pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
-        # B x N x N
+    #def knn(x, k=args.knn, mask=None, return_dist=False):
+    #    # mask : [B, N]
+    #    # x : [B, C=3, N]
+    #    inner = -2 * torch.matmul(x.transpose(2, 1), x)
+    #    xx = torch.sum(x ** 2, dim=1, keepdim=True)
+    #    pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
+    #    # B x N x N
 
-        if mask is not None:
-            B_ind, N_ind = (~mask).nonzero(as_tuple=True)
-            pairwise_distance[B_ind, N_ind] = -np.inf
-            pairwise_distance[B_ind, :, N_ind] = -np.inf
-        # (batch_size, num_points, k)
-        idx = pairwise_distance.topk(k=k, dim=-1)[1]
-        if return_dist:
-            B = x.shape[0]
-            N = x.shape[2]
-            dist =  -pairwise_distance[torch.arange(B)[:, None, None],
-                                torch.arange(N)[None, :, None],
-                    idx] + 1e-8
-            is_valid = mask[torch.arange(B)[:, None, None], idx]
-            dist[~is_valid] = 0
-            n_valid = is_valid.float().sum(dim=-1)
-            return idx, (dist.sum(dim=-1) / (n_valid-1).clamp(min=1)).detach().clone()
-        return idx
+    #    if mask is not None:
+    #        B_ind, N_ind = (~mask).nonzero(as_tuple=True)
+    #        pairwise_distance[B_ind, N_ind] = -np.inf
+    #        pairwise_distance[B_ind, :, N_ind] = -np.inf
+    #    # (batch_size, num_points, k)
+    #    idx = pairwise_distance.topk(k=k, dim=-1)[1]
+    #    if return_dist:
+    #        B = x.shape[0]
+    #        N = x.shape[2]
+    #        dist =  -pairwise_distance[torch.arange(B)[:, None, None],
+    #                            torch.arange(N)[None, :, None],
+    #                idx] + 1e-8
+    #        is_valid = mask[torch.arange(B)[:, None, None], idx]
+    #        dist[~is_valid] = 0
+    #        n_valid = is_valid.float().sum(dim=-1)
+    #        return idx, (dist.sum(dim=-1) / (n_valid-1).clamp(min=1)).detach().clone()
+    #    return idx
 
     def matching_loss(model, x, step, t=None):
         if t is None:
@@ -170,7 +173,7 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
         loss = (pred_noise - eps).pow(2).mean()
         return loss, z_t.detach().clone().cpu()
 
-    lr = args.lr
+    lr = args.input_lr
     steps = args.n_update
 
     delta = nn.Parameter(torch.zeros_like(x))
@@ -203,9 +206,6 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     if not args.weighted_reg:
         weight = torch.ones_like(weight)
     weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
-    if args.save_itmd:
-        itmd = []
-        itmd_zt = []
     for step in tqdm(range(steps), desc='pre trans', ncols=100):
         rot = compute_rotation_matrix_from_ortho6d(rotation)
         y = x + delta
@@ -217,9 +217,6 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
             y = y @ rot
         L21_norm = (torch.norm(delta, 2, dim=-1) * weight).sum(dim=1).mean() # B x N
         matching, zt = matching_loss(model, y, step+1)
-        if args.save_itmd > 0 and step % args.szave_itmd == 0:
-            itmd.append(y.clone().detach().cpu())
-            itmd_zt.append(zt.clone().detach().cpu())
         loss = matching + ((args.lam_h * np.cos(step/steps*np.pi/2) +
             args.lam_l * (1-np.cos(step/steps*np.pi/2))) * L21_norm)
         loss.backward()
@@ -236,8 +233,6 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
     y = (x + delta)
     y = y - y.mean(dim=1, keepdim=True)
     y = y @ rot
-    if args.save_itmd:
-        return y, itmd, itmd_zt
     return y
 
 
@@ -249,12 +244,12 @@ def dda(args, model, x, mask, ind):
     #     model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
-    gamma_t = model.inflate_batch_array(model.gamma(t), x)
-    alpha_t = model.alpha(gamma_t, x)
-    sigma_t = model.sigma(gamma_t, x)
+    gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+    alpha_t = model.module.alpha(gamma_t, x)
+    sigma_t = model.module.sigma(gamma_t, x)
 
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-    eps = model.sample_noise(n_samples=x.size(0),
+    eps = model.module.sample_noise(n_samples=x.size(0),
         n_nodes=x.size(1),
         node_mask=node_mask,
     )
@@ -262,12 +257,14 @@ def dda(args, model, x, mask, ind):
 
     for step in tqdm(range(args.dda_steps, 0, -1)):
         t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
-        gamma_t = model.inflate_batch_array(model.gamma(t), x)
-        alpha_t = model.alpha(gamma_t, x)
-        sigma_t = model.sigma(gamma_t, x)
+        gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+        alpha_t = model.module.alpha(gamma_t, x)
+        sigma_t = model.module.sigma(gamma_t, x)
 
         t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
-        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+        #z_t_m1 = model.module.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
+        z_t_m1 = model(z_t, t, node_mask=node_mask,
+                sample_p_zs_given_zt=True,s=t_m1).detach()
 
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
@@ -284,45 +281,98 @@ def dda(args, model, x, mask, ind):
     return z_t
 
 
-def ours(args, model, x, mask, ind, classifier):
-    # if isinstance(model, nn.DataParallel):
-    #     model = model.module
-    # if isinstance(classifier, nn.DataParallel):
-    #     classifier = classifier.module
+@torch.enable_grad()
+def cloudfixer(args, model, x, mask, ind, verbose=False):
+    ################################################# Scheduler
+    def get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps,
+        num_training_steps,
+        last_epoch=-1,
+        end_factor=0,
+    ):
+        """ Create a schedule with a learning rate that decreases linearly after
+        linearly increasing during a warmup period.
+        """
+        def lr_lambda(current_step):
+            if current_step < num_warmup_steps:
+                return float(current_step) / float(max(1, num_warmup_steps))
+            return end_factor + \
+                max(0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
+    ################################################# End Scheduler
 
-    t = torch.full((x.size(0), 1), args.ours_steps / args.diffusion_steps).to(x.device)
-    gamma_t = model.inflate_batch_array(model.gamma(t), x)
-    alpha_t = model.alpha(gamma_t, x)
-    sigma_t = model.sigma(gamma_t, x)
-
+    _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
+            mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
+    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
+        None], ind]
+    weight = 1/knn_dist_square_mean.pow(args.pow)
+    if not args.weighted_reg:
+        weight = torch.ones_like(weight)
+    weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
+    weight = weight * mask.squeeze(-1)
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-    eps = model.sample_noise(n_samples=x.size(0),
-        n_nodes=x.size(1),
-        node_mask=node_mask,
-    )
-    z_t = (x * alpha_t + eps * sigma_t).requires_grad_(True)
+    delta = torch.nn.Parameter(torch.zeros_like(x))
+    rotation = torch.nn.Parameter(x.new_zeros((x.size(0), 6)))
+    rotation_base = x.new_zeros((x.size(0), 6))
+    rotation_base[:, 0] = 1
+    rotation_base[:, 4] = 1
+    delta.requires_grad_(True)
+    rotation.requires_grad_(True)
+    optim = torch.optim.Adamax([
+        {'params': [delta], 'lr': args.input_lr},
+        {'params':[rotation], 'lr': args.rotation*args.input_lr}, #, 'weight_decay': 0.0},
+        ],
+        lr=args.input_lr, weight_decay=args.weight_decay,
+        betas=(args.beta1, args.beta2))
+    scheduler = get_linear_schedule_with_warmup(
+                optim,
+                int(args.n_update*args.warmup),
+                args.n_update,
+                last_epoch=-1,
+                end_factor=args.optim_end_factor)
+    iterator = tqdm(range(args.n_update)) if verbose else range(args.n_update)
+    for iter in iterator:
+        optim.zero_grad()
+        t = args.t_min + args.t_len * torch.rand(x.shape[0], 1).to(x.device)
+        t = (t * args.diffusion_steps).long().float() / args.diffusion_steps
+        gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+        alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
+        sigma_t = model.module.sigma(gamma_t, x)
+        eps = torch.randn_like(x)
+        x_trans = (x+delta)
+        rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
+        x_trans = x_trans @ rot
+        with torch.no_grad():
+            x_trans_t = x_trans * alpha_t + sigma_t * eps
+            _, x_trans_est = model(x_trans_t, phi=True, return_x0_est=True,
+                    t=t, node_mask=node_mask,
+                   )
+        dist1, dist2, idx1, idx2 = chamfer_dist_fn(x_trans, x_trans_est)
+        matching = dist1.mean() + dist2.mean()
+        L2_norm = (delta.pow(2) * weight[:, :, None]).sum(dim=1).mean()
+        norm = L2_norm * (args.lam_h * (1-iter/args.n_update) + args.lam_l * iter / args.n_update)
+        loss = matching + norm
+        loss.backward()
+        optim.step()
+        scheduler.step()
+        if verbose and (iter) % 10 == 0:
+            print("LR", scheduler.get_last_lr())
+            print("rotation", (rotation_base+rotation).abs().mean(dim=0))
+            print('delta', (delta).abs().mean().item()) #norm(2,dim=-1).mean())
+            print(delta[mask.expand_as(delta)==1].abs().mean().item(),
+                    delta[mask.expand_as(delta)==0].abs().mean().item())
+    rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
+    x_trans = (x+delta)
+    x_trans =  x_trans @ rot
+    if verbose:
+        print("LR", scheduler.get_last_lr())
+        print("rotation", (rotation_base+rotation).abs().mean(dim=0))
+        print('delta', (delta).norm(2,dim=-1).mean())
+    return x_trans
 
-    for step in tqdm(range(args.ours_steps, 0, -1)):
-        t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
-        gamma_t = model.inflate_batch_array(model.gamma(t), x)
-        alpha_t = model.alpha(gamma_t, x)
-        sigma_t = model.sigma(gamma_t, x)
 
-        t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
-        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
 
-        # content preservation
-        pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
-        x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        # penultimate_layer_loss = F.mse_loss(classifier.get_feature(x0_est), classifier.get_feature(x).detach())
-        penultimate_layer_loss = F.mse_loss(classifier(x0_est, return_feature=True), classifier(x, return_feature=True).detach())
-        grad = torch.autograd.grad(
-            penultimate_layer_loss,
-            z_t,
-            allow_unused=True,
-        )[0]
-        z_t = (z_t_m1 - args.ours_guidance_weight * grad).requires_grad_(True)
-    return z_t
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
@@ -340,8 +390,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     if 'dda' in args.method:
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
-    if 'ours' in args.method:
-        x = ours(args, diffusion_model, x, mask, ind, classifier)
+    if 'cloudfixer' in args.method:
+        x = cloudfixer(args, diffusion_model, x, mask, ind)
 
     # model adaptation
     for _ in range(1, args.num_steps + 1):
@@ -385,7 +435,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
             EMA = 0.9 * EMA + (1 - 0.9) * loss_second.item() if EMA != None else loss_second.item()
             continue # we already call optimizer.first_step and optimizer.second_step
-        if 'pl' in args.method: 
+        if 'pl' in args.method:
             logits = classifier(x)
             pseudo_label = torch.argmax(logits, dim=-1)
             loss = F.cross_entropy(logits, pseudo_label)
@@ -433,7 +483,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif 'dda' in args.method:
+    elif False: # 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     else:
         logits_after = classifier(x)
@@ -458,8 +508,7 @@ def main(args):
         mode = 'disabled'
     else:
         mode = 'online' if args.online else 'offline'
-    kwargs = {'entity': args.wandb_usr, 'name': args.exp_name + '_vis', 'project':
-            'adapt', 'config': args,
+    kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
             'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
     wandb.init(**kwargs)
     wandb.save('*.txt')
@@ -480,7 +529,7 @@ def main(args):
         test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=shuffle, drop_last=False, num_workers=args.num_workers)
 
     ########## load diffusion model ##########
-    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
@@ -492,10 +541,13 @@ def main(args):
     ########## load classifier ##########
     # TODO: add model architectures
     if args.classifier == "DGCNN":
-        classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
+        classifier = models.DGCNNWrapper(args.dataset, output_channels=np.max(test_dataset.label_list) + 1)
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
-    classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+    ckpt = torch.load(args.classifier_dir, map_location='cpu')
+    if 'model_state' in ckpt:
+        ckpt = ckpt['model_state']
+    classifier.load_state_dict(ckpt)
     classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
@@ -510,13 +562,12 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
-    # if isinstance(classifier, nn.DataParallel):
-    #     classifier = classifier.module
-
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
+        mask = data[-2].to(device)
+        ind = data[-1].to(device)
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
@@ -528,7 +579,7 @@ def main(args):
         logits_before = original_classifier(x).detach()
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
-        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=None, ind=None).detach()
+        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
@@ -540,7 +591,6 @@ def main(args):
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
 
     print(f"average adaptation time: {adaptation_time / len(test_dataset.pc_list)}")
-
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 
@@ -650,11 +700,11 @@ def vis(args):
     test_loader_vis = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, drop_last=False, sampler=ImbalancedDatasetSampler(test_dataset))
 
     ########## load diffusion model ##########
-    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method:
+    if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        # model = nn.DataParallel(model)
+        model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
         model = None
@@ -666,7 +716,7 @@ def vis(args):
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    # classifier = nn.DataParallel(classifier)
+    classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre

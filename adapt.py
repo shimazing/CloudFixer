@@ -240,8 +240,8 @@ def dda(args, model, x, mask, ind):
     from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
 
-    #if isinstance(model, nn.DataParallel):
-    #    model = model.module
+    # if isinstance(model, nn.DataParallel):
+    #     model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
     gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
@@ -280,46 +280,6 @@ def dda(args, model, x, mask, ind):
         z_t = (z_t_m1 - args.dda_guidance_weight * grad).requires_grad_(True)
     return z_t
 
-
-def ours(args, model, x, mask, ind, classifier):
-    # if isinstance(model, nn.DataParallel):
-    #     model = model.module
-    # if isinstance(classifier, nn.DataParallel):
-    #     classifier = classifier.module
-
-    t = torch.full((x.size(0), 1), args.ours_steps / args.diffusion_steps).to(x.device)
-    gamma_t = model.inflate_batch_array(model.gamma(t), x)
-    alpha_t = model.alpha(gamma_t, x)
-    sigma_t = model.sigma(gamma_t, x)
-
-    node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-    eps = model.sample_noise(n_samples=x.size(0),
-        n_nodes=x.size(1),
-        node_mask=node_mask,
-    )
-    z_t = (x * alpha_t + eps * sigma_t).requires_grad_(True)
-
-    for step in tqdm(range(args.ours_steps, 0, -1)):
-        t = torch.full((x.size(0), 1), step / args.diffusion_steps).to(x.device)
-        gamma_t = model.inflate_batch_array(model.gamma(t), x)
-        alpha_t = model.alpha(gamma_t, x)
-        sigma_t = model.sigma(gamma_t, x)
-
-        t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
-        z_t_m1 = model.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
-
-        # content preservation
-        pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
-        x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        # penultimate_layer_loss = F.mse_loss(classifier.get_feature(x0_est), classifier.get_feature(x).detach())
-        penultimate_layer_loss = F.mse_loss(classifier(x0_est, return_feature=True), classifier(x, return_feature=True).detach())
-        grad = torch.autograd.grad(
-            penultimate_layer_loss,
-            z_t,
-            allow_unused=True,
-        )[0]
-        z_t = (z_t_m1 - args.ours_guidance_weight * grad).requires_grad_(True)
-    return z_t
 
 @torch.enable_grad()
 def cloudfixer(args, model, x, mask, ind, verbose=False):
@@ -380,14 +340,6 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
         sigma_t = model.module.sigma(gamma_t, x)
         eps = torch.randn_like(x)
-        #eps = model.sample_noise(n_samples=x.size(0),
-        #    n_nodes=x.size(1),
-        #    node_mask=node_mask,
-        #)
-        #model.module.sample_combined_position_feature_noise(n_samples=x.size(0),
-        #    n_nodes=x.size(1),
-        #    node_mask=node_mask,
-        #    )
         x_trans = (x+delta)
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
@@ -424,10 +376,10 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
+    global EMA, mom_pre, adaptation_time
+
     import time
     start = time.time()
-
-    global EMA, mom_pre
 
     # if isinstance(classifier, torch.nn.DataParallel):
     #     classifier = classifier.module
@@ -438,8 +390,6 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     if 'dda' in args.method:
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
-    if 'ours' in args.method:
-        x = ours(args, diffusion_model, x, mask, ind, classifier)
     if 'cloudfixer' in args.method:
         x = cloudfixer(args, diffusion_model, x, mask, ind)
 
@@ -524,6 +474,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     end = time.time()
     print(f"end: {end - start}")
+    adaptation_time += end - start
 
     # output adaptation
     is_training = classifier.training
@@ -532,7 +483,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif False: #'dda' in args.method:
+    elif False: # 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     else:
         logits_after = classifier(x)
@@ -543,7 +494,10 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
 
 def main(args):
-    device = torch.device("cuda:0" if args.cuda else "cpu")
+    global adaptation_time
+    adaptation_time = 0
+
+    device = torch.device("cuda" if args.cuda else "cpu")
     set_seed(args.random_seed)
 
     ########## logging ##########
@@ -593,7 +547,7 @@ def main(args):
     ckpt = torch.load(args.classifier_dir, map_location='cpu')
     if 'model_state' in ckpt:
         ckpt = ckpt['model_state']
-    classifier.load_state_dict(ckpt) #torch.load(args.classifier_dir, map_location='cpu'))
+    classifier.load_state_dict(ckpt)
     classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
@@ -607,9 +561,6 @@ def main(args):
     params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
-
-    #if isinstance(classifier, nn.DataParallel):
-    #    classifier = classifier.module
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
@@ -638,6 +589,8 @@ def main(args):
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
+
+    print(f"average adaptation time: {adaptation_time / len(test_dataset.pc_list)}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 

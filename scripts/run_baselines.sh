@@ -376,7 +376,6 @@ run_baselines() {
     CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
-        --save_itmd 0 \
         --denoising_thrs ${denoising_thrs} \
         --random_seed ${random_seed} \
         --pow ${pow} \
@@ -418,7 +417,6 @@ run_baselines() {
         --exp_name ${exp_name} \
         --mode ${mode} \
         --model transformer \
-        --lr ${lr} \
         --n_update ${steps} \
         --weight_decay ${wd} \
         --lam_l ${lam_l} \
@@ -533,12 +531,15 @@ run_baselines_modelnet40c() {
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
+    # BATCH_SIZE_LIST="64 8 1"
     BATCH_SIZE_LIST="64 8 1"
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="distortion"
     SEVERITY_LIST="5"
     # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
-    METHOD_LIST="tent"
-    # METHOD_LIST="bn_stats dua"
+    METHOD_LIST="memo shot"
+    # METHOD_LIST="tent"
+    # # METHOD_LIST="bn_stats dua"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -549,8 +550,14 @@ run_baselines_modelnet40c() {
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
                         diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
                         for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
-                                continue
+                            # if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                            #     continue
+                            # fi
+                            if [[ "$method" == "memo" ]]; then
+                                batch_size=1
+                            fi
+                            if [[ "$method" == "shot" ]]; then
+                                batch_size=64
                             fi
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval
@@ -703,35 +710,38 @@ run_baselines_modelnet40c_label_distribution_shift() {
     scenario=label_distribution_shift
     imb_ratio=10
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64"
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl dua bn_stats shot"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
-                            mode=eval
-                            scenario=${scenario}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
-    done
+
+    # BATCH_SIZE_LIST="64"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # SEVERITY_LIST="5"
+    # METHOD_LIST="tent lame sar pl dua bn_stats shot"
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for classifier in ${CLASSIFIER_LIST}; do
+    #             for corruption in ${CORRUPTION_LIST}; do
+    #                 for severity in ${SEVERITY_LIST}; do # "3 5"
+    #                     dataset=modelnet40c_${corruption}_${severity}
+    #                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    #                     classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+    #                     diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+    #                     for method in ${METHOD_LIST}; do
+    #                         if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
+    #                             continue
+    #                         fi
+    #                         exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
+    #                         mode=eval
+    #                         scenario=${scenario}
+    #                         run_baselines
+    #                     done
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
     BATCH_SIZE_LIST="1"
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    SEVERITY_LIST="5"
     METHOD_LIST="memo"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -743,9 +753,9 @@ run_baselines_modelnet40c_label_distribution_shift() {
                         classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
                         diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
                         for method in ${METHOD_LIST}; do
-                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
-                                continue
-                            fi
+                            # if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]] || [[ "$method" != "dda" && "$batch_size" != "64" ]]; then
+                            #     continue
+                            # fi
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
                             mode=eval
                             scenario=${scenario}
@@ -1101,12 +1111,51 @@ run_baselines_graspnet_small_batch() {
     done
 }
 
+
+run_label_distribution_shift_new() {
+    CLASSIFIER_LIST="DGCNN"
+
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64"
+    scenario=label_distribution_shift
+    imb_ratio=10
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    SEVERITY_LIST="5"
+    METHOD_LIST="tent lame sar pl memo dua shot"
+
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        for method in ${METHOD_LIST}; do
+                            if [[ "$method" == "memo" ]]; then
+                                batch_size=1
+                            elif [ "$method" == "dua" ]; then
+                                batch_size=16
+                            else
+                                batch_size=64
+                            fi
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}_new
+                            mode=eval
+                            scenario=${scenario}
+                            run_baselines
+                        done
+                    done
+                done
+            done
+        done
+    done
+}
+
+
 # run_baselines_modelnet40c_small_batch
 # run_baselines_pointda_small_batch
 # run_baselines_graspnet_small_batch
-
-
-
 
 # GPUS=(4 5 6 7)
 # NUM_GPUS=4
@@ -1124,7 +1173,7 @@ run_baselines_graspnet_small_batch() {
 
 
 ##############################################
-# CUDA_VISIBLE_DEVICES="0,1"
+# CUDA_VISIBLE_DEVICES="4"
 # hparam_tune_modelnet40c
 # run_baselines_modelnet40c
 ##############################################
@@ -1155,6 +1204,12 @@ run_baselines_graspnet_small_batch() {
 
 
 ##############################################
-CUDA_VISIBLE_DEVICES="4,5"
-run_baselines_modelnet40c_label_distribution_shift
+# CUDA_VISIBLE_DEVICES="4,5"
+# run_baselines_modelnet40c_label_distribution_shift
+##############################################
+
+
+##############################################
+CUDA_VISIBLE_DEVICES="0,1"
+run_label_distribution_shift_new
 ##############################################

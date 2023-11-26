@@ -18,14 +18,14 @@ classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
-GPUS=(0 1 2 3 4 5 6 7)
-NUM_GPUS=8
+GPUS=(2 3 4 5 6 7)
+NUM_GPUS=6
 i=0
 
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
   background=($(jobs -p))
-  num_max_jobs=8
+  num_max_jobs=6
   if ((${#background[@]} >= num_max_jobs)); then
     wait -n
   fi
@@ -101,7 +101,6 @@ run_baselines() {
     CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
         --t_min ${t_min} \
         --t_max ${t_max} \
-        --save_itmd 0 \
         --denoising_thrs ${denoising_thrs} \
         --random_seed ${random_seed} \
         --pow ${pow} \
@@ -143,7 +142,6 @@ run_baselines() {
         --exp_name ${exp_name} \
         --mode ${mode} \
         --model transformer \
-        --lr ${lr} \
         --n_update ${steps} \
         --weight_decay ${wd} \
         --lam_l ${lam_l} \
@@ -155,7 +153,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1
+        2>&1 &
         i=$((i + 1))
     wait_n
 }

@@ -1,11 +1,9 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=../e3_diffusion_for_molecules/data/ #nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
-# DATASET_ROOT_DIR=../datasets
-# CODE_BASE_DIR=../CloudFixer
+DATASET_ROOT_DIR=./data
+CODE_BASE_DIR=./
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -13,12 +11,10 @@ imb_ratio=1
 
 # classifier
 classifier=DGCNN
-classifier_dir=../pointcloud_TTA/outputs/dgcnn_modelnet40_best_test.pth
-#${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
 # diffusion model
-diffusion_dir="../e3_diffusion_for_molecules/outputs/modelnet40_unit_std_transformer_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995_finetune_resume_resume/generative_model_ema_1300.npy"
-#${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 GPUS=(0 1 2 3)
 NUM_GPUS=4
@@ -46,20 +42,20 @@ bn_stats_prior=0
 shot_pl_loss_weight=0.3
 # cloudfixer
 t_min=0.02
-t_len=0.2
-t_max=0.22
+t_len=0.1
+t_max=0.12
 pow=1
 lam_l=1
 lam_h=10
-lr=0.02
-steps=100
+lr=0.2
+steps=30
 warmup=0.2
 wd=0
 optim=adamax
 optim_end_factor=0.05
 subsample=2048
 weighted_reg=True
-rotation=0.1
+rotation=0
 ######################################################
 
 
@@ -151,10 +147,40 @@ run_cloudfixer_all_experiments() {
                             if [[ "$corruption" == "upsampling" ]]; then
                                 batch_size=16
                             else
-                                batch_size=16
+                                batch_size=64
                             fi
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval
+                            run_baselines
+                        done
+                    done
+                done
+            done
+        done
+    done
+}
+
+run_cloudfixer_adv() {
+    CLASSIFIER_LIST=(DGCNN)
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64"
+    METHOD_LIST="cloudfixer"
+
+    scenario=normal
+    imb_ratio=1
+    CORRUPTION_LIST="original" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    SEVERITY_LIST="5"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
+                        for method in ${METHOD_LIST}; do
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_adv
+                            mode=eval
+                            adv_attack=True
                             run_baselines
                         done
                     done
@@ -170,3 +196,4 @@ GPUS=(0 1 2 3)
 NUM_GPUS=4
 
 run_cloudfixer_all_experiments
+#run_cloudfixer_adv

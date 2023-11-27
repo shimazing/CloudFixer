@@ -99,7 +99,7 @@ def parse_arguments():
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
     parser.add_argument('--weighted_reg', type=eval, default=True)
-    parser.add_argument('--n_update', default=100, type=int)
+    parser.add_argument('--n_update', default=30, type=int)
     parser.add_argument('--warmup', default=0.2, type=float)
     parser.add_argument('--input_lr', type=float, default=1e-2)
     parser.add_argument('--rotation', default=0.1, type=float)
@@ -112,11 +112,11 @@ def parse_arguments():
     parser.add_argument('--lam_h', type=float, default=0)
     parser.add_argument('--t_min', type=float, default=0.02)
     parser.add_argument('--t_max', type=float, default=0.2)
-    parser.add_argument('--t_len', type=float, default=0.2)
+    parser.add_argument('--t_len', type=float, default=0.1)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--pow', type=int, default=1)
-    parser.add_argument('--denoising_thrs', type=int, default=100)
+    parser.add_argument('--denoising_thrs', type=int, default=0)
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True

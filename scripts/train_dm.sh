@@ -1,5 +1,5 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 DATASET_ROOT_DIR=../datasets
 test_epochs=100
 random_seed=0

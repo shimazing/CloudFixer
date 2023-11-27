@@ -1,4 +1,4 @@
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
 DATASET_ROOT_DIR=../nfs-client/datasets
@@ -63,7 +63,7 @@ lame_knn=3
 lame_max_steps=1
 # sar
 sar_ent_threshold=0.4
-sar_eps_threshold=0.05 
+sar_eps_threshold=0.05
 # memo
 memo_num_augs=64
 memo_bn_momentum=1/17

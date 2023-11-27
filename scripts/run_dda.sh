@@ -1,5 +1,5 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
 DATASET_ROOT_DIR=../nfs-client/datasets
@@ -401,7 +401,7 @@ run_kinect() {
                 done
             done
         done
-    done    
+    done
 }
 
 

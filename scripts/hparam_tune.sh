@@ -1,4 +1,4 @@
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
 DATASET_ROOT_DIR=../datasets
@@ -22,7 +22,7 @@ lame_knn=3
 lame_max_steps=1
 # sar
 sar_ent_threshold=0.4
-sar_eps_threshold=0.05 
+sar_eps_threshold=0.05
 # memo
 memo_num_augs=64
 memo_bn_momentum=1/17
@@ -295,7 +295,7 @@ hparam_tune_tent() {
     num_steps=10 # 1 3 5 10
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -385,7 +385,7 @@ hparam_tune_lame() {
     weighted_reg=True
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -459,7 +459,7 @@ hparam_tune_sar() {
     sar_eps_threshold=0.1 # 0.01, 0.05, 0.1
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -531,7 +531,7 @@ hparam_tune_pl() {
     num_steps=1 # 1 3 5 10
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -605,7 +605,7 @@ hparam_tune_memo() {
     memo_num_augs=16 # "16 32 64"
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -680,7 +680,7 @@ hparam_tune_dua() {
     dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -753,7 +753,7 @@ hparam_tune_bn_stats() {
     bn_stats_prior=0.2 # 0, 0.2, 0.4, 0.6, 0.8
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -826,7 +826,7 @@ hparam_tune_shot() {
     shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 
@@ -902,7 +902,7 @@ hparam_tune_dda() {
     dda_lpf_scale=4 # 2, 4, 8
 
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
 

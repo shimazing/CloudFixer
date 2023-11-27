@@ -128,7 +128,6 @@ class ModelNet40C(Dataset):
             sorted_indices = np.argsort(all_label)
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
-            print(f"all_label: {all_label}")
 
         if num_classes == 40:
             return all_data, all_label
@@ -167,18 +166,18 @@ class ModelNet40C(Dataset):
         ind = np.arange(len(pointcloud))
 
         # identify duplicated points
-        dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
-            None, :]), 2),
-                axis=-1) < 1e-8
-        dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-        if np.any(dup_points):
-            row, col = dup_points.nonzero()
-            row, col = row[row<col], col[row<col]
-            filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
-            row, col = row[filter], col[filter]
-            ind[col] = row
-            dup = np.unique(col)
-            mask[dup] = 0
+        # dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+        #     None, :]), 2),
+        #         axis=-1) < 1e-8
+        # dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+        # if np.any(dup_points):
+        #     row, col = dup_points.nonzero()
+        #     row, col = row[row<col], col[row<col]
+        #     filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
+        #     row, col = row[filter], col[filter]
+        #     ind[col] = row
+        #     dup = np.unique(col)
+        #     mask[dup] = 0
 
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')
@@ -188,32 +187,36 @@ class ModelNet40C(Dataset):
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)
-        if mask.sum() > self.subsample:
-            valid = mask.nonzero()[0]
-            pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
-            pointcloud_ = np.swapaxes(np.expand_dims(pointcloud_, 0), 1, 2)
-            centroids, pointcloud_, _ = \
-                farthest_point_sample_np(pointcloud_,
-                        None, self.subsample)
-            pointcloud_ = np.swapaxes(pointcloud_.squeeze(), 1, 0).astype('float32')
-            centroids = centroids.squeeze()
-            assert len(centroids) == self.subsample
-            mask_ = np.zeros_like(mask)
-            mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
-            assert np.all(mask[mask_==1] == 1)
-            mask = mask_
+        
+        print(f"pointcloud.shape: {pointcloud.shape}")
 
-        if self.subsample < 2048:
-            valid = mask.nonzero()[0]
-            while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
-                np.random.shuffle(valid)
-                chosen = chosen[:NUM_POINTS - len(pointcloud)]
-                pointcloud = np.concatenate((
-                    pointcloud,
-                    pointcloud[chosen],
-                ), axis=0)
-                ind = np.concatenate((ind, chosen), axis=0)
-                assert len(pointcloud) == len(ind)
+        # if mask.sum() > self.subsample:
+        #     valid = mask.nonzero()[0]
+        #     pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
+        #     pointcloud_ = np.swapaxes(np.expand_dims(pointcloud_, 0), 1, 2)
+        #     centroids, pointcloud_, _ = \
+        #         farthest_point_sample_np(pointcloud_,
+        #                 None, self.subsample)
+        #     pointcloud_ = np.swapaxes(pointcloud_.squeeze(), 1, 0).astype('float32')
+        #     centroids = centroids.squeeze()
+        #     assert len(centroids) == self.subsample
+        #     mask_ = np.zeros_like(mask)
+        #     mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
+        #     assert np.all(mask[mask_==1] == 1)
+        #     mask = mask_
+
+        # if self.subsample < 2048:
+        #     valid = mask.nonzero()[0]
+        #     while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
+        #         np.random.shuffle(valid)
+        #         chosen = chosen[:NUM_POINTS - len(pointcloud)]
+        #         pointcloud = np.concatenate((
+        #             pointcloud,
+        #             pointcloud[chosen],
+        #         ), axis=0)
+        #         ind = np.concatenate((ind, chosen), axis=0)
+        #         assert len(pointcloud) == len(ind)
+
         return (pointcloud, label, mask, ind)
 
 
@@ -252,8 +255,6 @@ class PointDA10(Dataset):
         self.label_to_idx = self.get_label_to_idx(args)
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
         self.pc_list, self.label_list = self.get_data(args, partition)
-
-        print(f"self.label_list: {self.label_list}")
 
         # print dataset statistics
         unique, counts = np.unique(self.label_list, return_counts=True)
@@ -566,13 +567,11 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        weights = 1.0 / label_to_count[df["label"]].to_numpy()
-        labels = df["label"].to_numpy()
+        weights = 1.0 / label_to_count[df["label"]]
         if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
-            print(f"selected_idx: {selected_idx}")
             for idx in selected_idx:
-                weights[labels == idx] *= imb_ratio
+                weights[df["label"] == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
 
@@ -609,6 +608,7 @@ class ElasticDistortion:
         self._granularity = granularity
         self._magnitude = magnitude
 
+
     @staticmethod
     def elastic_distortion(coords, granularity, magnitude):
         if not isinstance(coords, np.ndarray):
@@ -639,7 +639,6 @@ class ElasticDistortion:
 
 
     def __call__(self, data):
-        # coords = data.pos / self._spatial_resolution
         if self._apply_distorsion:
             if random.random() < 0.95:
                 for i in range(len(self._granularity)):
@@ -648,6 +647,4 @@ class ElasticDistortion:
 
 
     def __repr__(self):
-        return "{}(apply_distorsion={}, granularity={}, magnitude={})".format(
-            self.__class__.__name__, self._apply_distorsion, self._granularity, self._magnitude,
-        )
+        return f"{self.__class__.__name__}(apply_distorsion={self._apply_distorsion}, granularity={self._granularity}, magnitude={self._magnitude})"

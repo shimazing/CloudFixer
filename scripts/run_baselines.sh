@@ -1119,9 +1119,11 @@ run_label_distribution_shift_new() {
     BATCH_SIZE_LIST="64"
     scenario=label_distribution_shift
     imb_ratio=10
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua shot"
+    # METHOD_LIST="tent lame sar pl memo dua shot"
+    METHOD_LIST="dua"
 
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -1135,7 +1137,7 @@ run_label_distribution_shift_new() {
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "memo" ]]; then
                                 batch_size=1
-                            elif [ "$method" == "dua" ]; then
+                            elif [ "$method" == "dda" ]; then
                                 batch_size=16
                             else
                                 batch_size=64
@@ -1210,6 +1212,6 @@ run_label_distribution_shift_new() {
 
 
 ##############################################
-CUDA_VISIBLE_DEVICES="0,1"
+CUDA_VISIBLE_DEVICES="1,2,3"
 run_label_distribution_shift_new
 ##############################################

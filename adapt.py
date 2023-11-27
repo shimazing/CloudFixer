@@ -564,23 +564,49 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
+        # if iter_idx < len(test_loader) - 1:
+        #     continue
+
+        import time
+        current = time.time()
+
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         mask = data[-2].to(device)
         ind = data[-1].to(device)
+
+        print(f"x.shape: {x.shape}")
+
+        print(f"1: {time.time() - current}")
+        current = time.time()
+
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
+
+        print(f"2: {time.time() - current}")
+        current = time.time()
 
         # reset source model and optimizer
         if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
+        print(f"3: {time.time() - current}")
+        current = time.time()
+
+        print(f"original_classifier.device: {type(original_classifier)}")
+
         logits_before = original_classifier(x).detach()
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
+        print(f"4: {time.time() - current}")
+        current = time.time()
+
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
+
+        print(f"5: {time.time() - current}")
+        current = time.time()
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
@@ -809,6 +835,8 @@ def vis(args):
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    print(f"args.mode: {args.mode}")
     if 'eval' in args.mode:
         main(args)
     if 'vis' in args.mode:

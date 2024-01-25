@@ -1,5 +1,5 @@
 # logging
-wandb_usr=unknown
+wandb_usr=mazing
 
 # dataset
 DATASET_ROOT_DIR=./data
@@ -13,8 +13,18 @@ imb_ratio=1
 classifier=DGCNN
 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
+classifier=pointMLP
+classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+
+#classifier=pointNeXt
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
+
+#classifier=point2vec
+#classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
+
+
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
 
 GPUS=(0 1 2 3)
 NUM_GPUS=4
@@ -127,7 +137,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
 
 
 run_cloudfixer_all_experiments() {
-    CLASSIFIER_LIST=(DGCNN)
+    CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
     BATCH_SIZE_LIST="64"
     METHOD_LIST="cloudfixer"

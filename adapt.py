@@ -542,13 +542,50 @@ def main(args):
     # TODO: add model architectures
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=np.max(test_dataset.label_list) + 1)
+        ckpt = torch.load(args.classifier_dir, map_location='cpu')
+        if 'model_state' in ckpt:
+            ckpt = ckpt['model_state']
+        classifier.load_state_dict(ckpt)
+    elif args.classifier == 'pointNeXt':
+        from classifier.openpoints.utils import EasyConfig, load_checkpoint
+        from classifier.openpoints.models import build_model_from_cfg
+        cfg = EasyConfig()
+        cfg.load('cfgs/modelnet40ply2048_pointnext-s.yaml')
+        classifier = build_model_from_cfg(cfg.model)#.to(cfg.rank)
+        load_checkpoint(classifier,
+            pretrained_path=args.classifier_dir
+            #'ckpt/pointNeXt_modelnet40.pth'
+            )
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'pointMLP':
+        from classifier.pointMLP.models import pointMLP
+        classifier = pointMLP()
+        classifier = torch.nn.DataParallel(classifier)
+        classifier.load_state_dict(torch.load(
+            args.classifier_dir,
+            #'ckpt/pointMLP_modelnet40.pth',
+            map_location='cpu')['net'])
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'point2vec':
+        from classifier.point2vec.models import Point2VecClassification
+        from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
+        classifier = Point2VecClassification()
+        classifier.cuda()
+        classifier.setup()
+        checkpoint = extract_model_checkpoint(
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
+        )
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
+        print(f"Missing keys: {missing_keys}")
+        print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
-    ckpt = torch.load(args.classifier_dir, map_location='cpu')
-    if 'model_state' in ckpt:
-        ckpt = ckpt['model_state']
-    classifier.load_state_dict(ckpt)
-    classifier = nn.DataParallel(classifier)
+    if 'pointMLP' not in args.classifier:
+        classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -713,10 +750,46 @@ def vis(args):
     # TODO: add model architectures
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
+        classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+    elif args.classifier == 'pointNeXt':
+        from classifier.openpoints.utils import EasyConfig, load_checkpoint
+        from classifier.openpoints.models import build_model_from_cfg
+        cfg = EasyConfig()
+        cfg.load('cfgs/modelnet40ply2048_pointnext-s.yaml')
+        classifier = build_model_from_cfg(cfg.model)#.to(cfg.rank)
+        load_checkpoint(classifier,
+            pretrained_path=args.classifier_dir
+            #'ckpt/pointNeXt_modelnet40.pth'
+            )
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'pointMLP':
+        from classifier.pointMLP.models import pointMLP
+        classifier = pointMLP()
+        classifier = torch.nn.DataParallel(classifier)
+        classifier.load_state_dict(torch.load(args.classifier_dir,
+            #'ckpt/pointMLP_modelnet40.pth',
+            map_location='cpu')['net'])
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'point2vec':
+        from classifier.point2vec.models import Point2VecClassification
+        from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
+        classifier = Point2VecClassification()
+        classifier.cuda()
+        classifier.setup()
+        checkpoint = extract_model_checkpoint(
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
+        )
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
+        print(f"Missing keys: {missing_keys}")
+        print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
-    classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = nn.DataParallel(classifier)
+    if 'pointMLP' not in args.classifier:
+        classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre

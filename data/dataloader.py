@@ -25,7 +25,7 @@ class ModelNet40C(Dataset):
         super().__init__()
         self.dataset = args.dataset
         self.partition = partition
-        self.scenario = args.scenario
+        self.scenario = getattr(args, 'scenario', '')
         self.subsample = getattr(args, 'subsample', 2048)
 
         if len(args.dataset.split("_")) == 1:
@@ -167,18 +167,19 @@ class ModelNet40C(Dataset):
         ind = np.arange(len(pointcloud))
 
         # identify duplicated points
-        dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
-            None, :]), 2),
-                axis=-1) < 1e-8
-        dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
-        if np.any(dup_points):
-            row, col = dup_points.nonzero()
-            row, col = row[row<col], col[row<col]
-            filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
-            row, col = row[filter], col[filter]
-            ind[col] = row
-            dup = np.unique(col)
-            mask[dup] = 0
+        if ('occlusion' in self.corruption or 'density_inc' in self.corruption  or 'lidar' in self.corruption):
+            dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
+                None, :]), 2),
+                    axis=-1) < 1e-8
+            dup_points[np.arange(len(pointcloud)), np.arange(len(pointcloud))] = False
+            if np.any(dup_points):
+                row, col = dup_points.nonzero()
+                row, col = row[row<col], col[row<col]
+                filter = (row.reshape(-1, 1) == col).astype(float).sum(-1) == 0
+                row, col = row[filter], col[filter]
+                ind[col] = row
+                dup = np.unique(col)
+                mask[dup] = 0
 
         if self.rotate:
             pointcloud = scale(pointcloud, 'unit_std')

@@ -1,9 +1,9 @@
 # logging
-wandb_usr=mazing
+wandb_usr=drumpt
 
 # dataset
-DATASET_ROOT_DIR=./data
-CODE_BASE_DIR=./
+DATASET_ROOT_DIR=../nfs-client/datasets
+CODE_BASE_DIR=../
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal

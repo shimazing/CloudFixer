@@ -3,7 +3,7 @@ wandb_usr=drumpt
 
 # dataset
 DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../
+CODE_BASE_DIR=../nfs-client/CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -13,8 +13,8 @@ imb_ratio=1
 classifier=DGCNN
 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
-classifier=pointMLP
-classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+# classifier=pointMLP
+# classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
 
 #classifier=pointNeXt
 #classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
@@ -76,62 +76,62 @@ run_baselines() {
     test_lr=1e-4 # placeholder
     params_to_adapt="all" # placeholder
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
-        --t_min ${t_min} \
-        --t_len ${t_len} \
-        --warmup ${warmup} \
-        --rotation ${rotation} \
-        --t_max ${t_max} \
-        --random_seed ${random_seed} \
-        --pow ${pow} \
-        --diffusion_steps 500 \
-        --diffusion_noise_schedule polynomial_2 \
-        --batch_size ${batch_size} \
-        --scale_mode unit_std \
-        --cls_scale_mode unit_norm \
-        --dataset ${dataset} \
-        --dataset_dir ${dataset_dir} \
-        --scenario ${scenario} \
-        --imb_ratio ${imb_ratio} \
-        --classifier ${classifier} \
-        --classifier_dir ${classifier_dir} \
-        --diffusion_dir ${diffusion_dir} \
-        --method cloudfixer \
-        --adv_attack ${adv_attack} \
-        --episodic ${episodic} \
-        --test_optim ${test_optim} \
-        --num_steps ${num_steps} \
-        --test_lr ${test_lr} \
-        --params_to_adapt ${params_to_adapt} \
-        --lame_affinity ${lame_affinity} \
-        --lame_knn ${lame_knn} \
-        --lame_max_steps ${lame_max_steps} \
-        --sar_ent_threshold ${sar_ent_threshold} \
-        --sar_eps_threshold ${sar_eps_threshold} \
-        --memo_bn_momentum ${memo_bn_momentum} \
-        --memo_num_augs ${memo_num_augs} \
-        --dua_mom_pre ${dua_mom_pre} \
-        --dua_min_mom ${dua_min_mom} \
-        --dua_decay_factor ${dua_decay_factor} \
-        --bn_stats_prior ${bn_stats_prior} \
-        --shot_pl_loss_weight ${shot_pl_loss_weight} \
-        --exp_name ${exp_name} \
-        --mode ${mode} \
-        --model transformer \
-        --input_lr ${lr} \
-        --n_update ${steps} \
-        --weight_decay ${wd} \
-        --lam_l ${lam_l} \
-        --lam_h ${lam_h} \
-        --beta1 0.9 \
-        --beta2 0.999 \
-        --optim ${optim} \
-        --optim_end_factor ${optim_end_factor} \
-        --subsample ${subsample} \
-        --weighted_reg ${weighted_reg} \
-        --wandb_usr ${wandb_usr} \
-        2>&1
-        #i=$((i + 1))
+    CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
+            --t_min ${t_min} \
+            --t_len ${t_len} \
+            --warmup ${warmup} \
+            --rotation ${rotation} \
+            --t_max ${t_max} \
+            --random_seed ${random_seed} \
+            --pow ${pow} \
+            --diffusion_steps 500 \
+            --diffusion_noise_schedule polynomial_2 \
+            --batch_size ${batch_size} \
+            --scale_mode unit_std \
+            --cls_scale_mode unit_norm \
+            --dataset ${dataset} \
+            --dataset_dir ${dataset_dir} \
+            --scenario ${scenario} \
+            --imb_ratio ${imb_ratio} \
+            --classifier ${classifier} \
+            --classifier_dir ${classifier_dir} \
+            --diffusion_dir ${diffusion_dir} \
+            --method cloudfixer \
+            --adv_attack ${adv_attack} \
+            --episodic ${episodic} \
+            --test_optim ${test_optim} \
+            --num_steps ${num_steps} \
+            --test_lr ${test_lr} \
+            --params_to_adapt ${params_to_adapt} \
+            --lame_affinity ${lame_affinity} \
+            --lame_knn ${lame_knn} \
+            --lame_max_steps ${lame_max_steps} \
+            --sar_ent_threshold ${sar_ent_threshold} \
+            --sar_eps_threshold ${sar_eps_threshold} \
+            --memo_bn_momentum ${memo_bn_momentum} \
+            --memo_num_augs ${memo_num_augs} \
+            --dua_mom_pre ${dua_mom_pre} \
+            --dua_min_mom ${dua_min_mom} \
+            --dua_decay_factor ${dua_decay_factor} \
+            --bn_stats_prior ${bn_stats_prior} \
+            --shot_pl_loss_weight ${shot_pl_loss_weight} \
+            --exp_name ${exp_name} \
+            --mode ${mode} \
+            --model transformer \
+            --input_lr ${lr} \
+            --n_update ${steps} \
+            --weight_decay ${wd} \
+            --lam_l ${lam_l} \
+            --lam_h ${lam_h} \
+            --beta1 0.9 \
+            --beta2 0.999 \
+            --optim ${optim} \
+            --optim_end_factor ${optim_end_factor} \
+            --subsample ${subsample} \
+            --weighted_reg ${weighted_reg} \
+            --wandb_usr ${wandb_usr} \
+            2>&1
+            #i=$((i + 1))
 }
 
 

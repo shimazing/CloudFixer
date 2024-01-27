@@ -208,7 +208,7 @@ class ModelNet40C(Dataset):
             valid = mask.nonzero()[0]
             while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
                 np.random.shuffle(valid)
-                chosen = chosen[:NUM_POINTS - len(pointcloud)]
+                chosen = valid[:NUM_POINTS - len(pointcloud)]
                 pointcloud = np.concatenate((
                     pointcloud,
                     pointcloud[chosen],

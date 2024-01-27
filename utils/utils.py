@@ -7,6 +7,8 @@ import torch
 
 from utils.pc_utils import *
 
+def make_4d(x): return x.unsqueeze(-1).unsqueeze(-1) if \
+                                    len(x.shape) == 2 else x.unsqueeze(-1)
 
 
 class Queue():

@@ -102,6 +102,7 @@ def parse_arguments():
     parser.add_argument('--n_update', default=30, type=int)
     parser.add_argument('--warmup', default=0.2, type=float)
     parser.add_argument('--input_lr', type=float, default=1e-2)
+    parser.add_argument('--displacement', default=1, type=float)
     parser.add_argument('--rotation', default=0.1, type=float)
     parser.add_argument('--optim', type=str, default='adamax')
     parser.add_argument('--optim_end_factor', type=float, default=0.05)
@@ -111,7 +112,7 @@ def parse_arguments():
     parser.add_argument('--lam_l', type=float, default=0)
     parser.add_argument('--lam_h', type=float, default=0)
     parser.add_argument('--t_min', type=float, default=0.02)
-    parser.add_argument('--t_max', type=float, default=0.2)
+    # parser.add_argument('--t_max', type=float, default=0.2)
     parser.add_argument('--t_len', type=float, default=0.1)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
@@ -154,7 +155,7 @@ def pre_trans(args, model, x, mask, ind, verbose=True):
 
     def matching_loss(model, x, step, t=None):
         if t is None:
-            t = (args.t_min * min(1, step/args.denoising_thrs) + (1 - min(1, step/args.denoising_thrs)) * max(args.t_min, args.t_max - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
+            t = (args.t_min * min(1, step/args.denoising_thrs) + (1 - min(1, step/args.denoising_thrs)) * max(args.t_min, args.t_min + args.t_len - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
 
         if isinstance(model, nn.DataParallel):
             model = model.module
@@ -304,9 +305,8 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
 
     _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
-    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
-        None], ind]
-    weight = 1/knn_dist_square_mean.pow(args.pow)
+    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:, None], ind]
+    weight = 1 / knn_dist_square_mean.pow(args.pow)
     if not args.weighted_reg:
         weight = torch.ones_like(weight)
     weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
@@ -320,8 +320,8 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     delta.requires_grad_(True)
     rotation.requires_grad_(True)
     optim = torch.optim.Adamax([
-        {'params': [delta], 'lr': args.input_lr},
-        {'params':[rotation], 'lr': args.rotation*args.input_lr}, #, 'weight_decay': 0.0},
+        {'params': [delta], 'lr': args.displacement * args.input_lr},
+        {'params':[rotation], 'lr': args.rotation * args.input_lr}, #, 'weight_decay': 0.0},
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))

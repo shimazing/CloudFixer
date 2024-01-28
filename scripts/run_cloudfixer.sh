@@ -14,22 +14,17 @@ classifier=DGCNN
 classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
 # classifier=pointMLP
-# classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+# classifier_dir=${CODE_BASE_DIR}/outputs/pointMLP_modelnet40.pth
 
 #classifier=pointNeXt
-#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
+#classifier_dir=${CODE_BASE_DIR}/outputs/pointNeXt_modelnet40.pth
 
 #classifier=point2vec
-#classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
+#classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
-
-GPUS=(0 1 2 3)
-NUM_GPUS=4
-i=0
-
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 #################### placeholders ####################
 # lame
@@ -53,7 +48,6 @@ shot_pl_loss_weight=0.3
 # cloudfixer
 t_min=0.02
 t_len=0.1
-t_max=0.12
 pow=1
 lam_l=1
 lam_h=10
@@ -76,12 +70,11 @@ run_baselines() {
     test_lr=1e-4 # placeholder
     params_to_adapt="all" # placeholder
 
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} python3 adapt.py \
             --t_min ${t_min} \
             --t_len ${t_len} \
             --warmup ${warmup} \
             --rotation ${rotation} \
-            --t_max ${t_max} \
             --random_seed ${random_seed} \
             --pow ${pow} \
             --diffusion_steps 500 \
@@ -135,7 +128,6 @@ run_baselines() {
 }
 
 
-
 run_cloudfixer_all_experiments() {
     CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
@@ -170,6 +162,7 @@ run_cloudfixer_all_experiments() {
     done
 }
 
+
 run_cloudfixer_adv() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"
@@ -201,9 +194,105 @@ run_cloudfixer_adv() {
 }
 
 
+run_cloudfixer_ablation_study() {
+    CLASSIFIER_LIST=(${classifier})
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64"
+    METHOD_LIST="cloudfixer"
 
-GPUS=(0 1 2 3)
-NUM_GPUS=4
+    scenario=normal
+    imb_ratio=1
+    CORRUPTION_LIST="lidar density_inc uniform gaussian upsampling distortion_rbf distortion_rbf_inv"
+    SEVERITY_LIST="5"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                        for method in ${METHOD_LIST}; do
+                            if [[ "$corruption" == "upsampling" ]]; then
+                                batch_size=16
+                            else
+                                batch_size=64
+                            fi
+                            mode=eval
 
-run_cloudfixer_all_experiments
-#run_cloudfixer_adv
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation
+                            run_baselines
+
+                            # t_min=0
+                            # t_len=0.01
+                            # knn=5
+                            # displacement=1
+                            # rotation=0.1
+                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            # run_baselines
+
+                            # t_min=0.8
+                            # t_len=0.2
+                            # k=5
+                            # displacement=1
+                            # rotation=0.1
+                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            # run_baselines
+
+                            # t_min=0.02
+                            # t_len=0.2
+                            # knn=1
+                            # displacement=1
+                            # rotation=0.1
+                            # lam_h=0
+                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}_${lam_h}
+                            # run_baselines
+
+                            # t_min=0.02
+                            # t_len=0.2
+                            # knn=1
+                            # displacement=1
+                            # rotation=0.1
+                            # lam_h=10
+                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            # run_baselines
+
+                            # t_min=0.02
+                            # t_len=0.2
+                            # knn=25
+                            # displacement=1
+                            # rotation=0.1
+                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            # run_baselines
+
+                            t_min=0.02
+                            t_len=0.2
+                            knn=5
+                            displacement=1
+                            rotation=0
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            run_baselines
+
+                            t_min=0.02
+                            t_len=0.2
+                            knn=5
+                            displacement=0
+                            rotation=0.1
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_ablation_${t_min}_${t_len}_${knn}_${displacement}_${rotation}
+                            run_baselines
+                        done
+                    done
+                done
+            done
+        done
+    done
+}
+
+
+
+GPUS=(0 1 2 3 4 5 6 7)
+NUM_GPUS=${#GPUS[@]}
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+
+
+
+run_cloudfixer_ablation_study

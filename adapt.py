@@ -335,17 +335,49 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     for iter in iterator:
         optim.zero_grad()
         t = args.t_min + args.t_len * torch.rand(x.shape[0], 1).to(x.device)
-        t = (t * args.diffusion_steps).long().float() / args.diffusion_steps
-        gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
-        alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
-        sigma_t = model.module.sigma(gamma_t, x)
+        if args.dataset.startswith('shapenetcore'):
+            t = (t * model.cfg.sde.diffusion_steps).long()
+            t, var_t, alpha_t, _, _, _ = model.diffusion.iw_quantities_t(len(t), t)
+            sigma_t = torch.sqrt(var_t)
+        else:
+            t = (t * args.diffusion_steps).long().float() / args.diffusion_steps
+            gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+            alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
+            sigma_t = model.module.sigma(gamma_t, x)
         eps = torch.randn_like(x)
         x_trans = (x+delta)
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
         with torch.no_grad():
-            x_trans_t = x_trans * alpha_t + sigma_t * eps
-            _, x_trans_est = model(x_trans_t, phi=True, return_x0_est=True,
+            if args.dataset.startswith('shapenetcore'):
+                # model is lion
+                num_classes = model.priors[1].num_classes
+                model.priors[1].num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
+                model.vae.decoder.num_points = num_points
+                all_z, _, _ = model.vae.encode(x_trans)
+                all_z = make_4d(all_z)
+                decomposed_z = model.vae.decompose_eps(all_z)
+                updated_z = []
+                for latent_id, z in enumerate(decomposed_z):
+                    noise = torch.randn_like(z)
+                    z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
+                    if latent_id == 0:
+                        pred_noise = model.priors[latent_id](z_t, t)
+                    else:
+                        #cond = decomposed_z[0] # or updated_z[0]
+                        cond = updated_z[0]
+                        cond = model.vae.global2style(cond) # squeeze
+                        pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
+                    est_z = (z_t - sigma_t * pred_noise) / alpha_t
+                    updated_z.append(est_z)
+
+                x_trans_est = model.vae.decoder(None, beta=None,
+                        context=updated_z[1].view(len(t),-1), # local
+                        style=updated_z[0].view(len(t), -1) # global
+                        )
+            else:
+                x_trans_t = x_trans * alpha_t + sigma_t * eps
+                _, x_trans_est = model(x_trans_t, phi=True, return_x0_est=True,
                     t=t, node_mask=node_mask,
                    )
         dist1, dist2, idx1, idx2 = chamfer_dist_fn(x_trans, x_trans_est)
@@ -516,6 +548,15 @@ def main(args):
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('shapenetcore'):
+        from datasets.tta_datasets import ShapeNetCore
+        test_dataset = ShapeNetCore(args)
+        #from datasets.ShapeNetCoreDataset import ShapeNetCore
+        #from utils.config import cfg_from_yaml_file
+        #config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        #config.ROOT = 'data/shapenetcorev2_hdf5_2048'
+        #config.subset = 'test'
+        #test_dataset = ShapeNetCore(config, split='test')
     elif args.dataset in ['modelnet', 'shapenet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
@@ -530,11 +571,19 @@ def main(args):
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
-        model = get_model(args, device)
-        if args.diffusion_dir is not None:
-            model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
-        model = model.to(device).eval()
+        if args.dataset.startswith('shapenetcore'):
+            from models.lion import LION
+            from cfgs.default_config_lion import cfg as config_lion
+            config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
+            lion = LION(config_lion)
+            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            model = lion
+        else:
+            model = get_model(args, device)
+            if args.diffusion_dir is not None:
+                model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
+            model = nn.DataParallel(model)
+            model = model.to(device).eval()
     else:
         model = None
 
@@ -581,6 +630,15 @@ def main(args):
         missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
+    elif args.classifier == 'pointMAE': # support only for shapenetcore
+        assert args.dataset.startswith('shapenetcore')
+        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+        from tools import builder
+        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        classifier = builder.model_builder(config.model)
+        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        classifier.cuda()
         classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
@@ -728,6 +786,15 @@ def vis(args):
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('shapenetcore'):
+        from datasets.tta_datasets import ShapeNetCore
+        test_dataset = ShapeNetCore(args)
+        #from datasets.ShapeNetCoreDataset import ShapeNetCore
+        #from utils.config import cfg_from_yaml_file
+        #config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        #config.ROOT = 'data/shapenetcorev2_hdf5_2048'
+        #config.subset = 'test'
+        #test_dataset = ShapeNetCore(config, split='test')
     elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
@@ -738,11 +805,19 @@ def vis(args):
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
-        model = get_model(args, device)
-        if args.diffusion_dir is not None:
-            model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
-        model = model.to(device).eval()
+        if args.dataset.startswith('shapenetcore'):
+            from models.lion import LION
+            from cfgs.default_config_lion import cfg as config_lion
+            config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
+            lion = LION(config_lion)
+            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            model = lion
+        else:
+            model = get_model(args, device)
+            if args.diffusion_dir is not None:
+                model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
+            model = nn.DataParallel(model)
+            model = model.to(device).eval()
     else:
         model = None
 
@@ -785,6 +860,15 @@ def vis(args):
         missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
+    elif args.classifier == 'pointMAE': # support only for shapenetcore
+        assert args.dataset.startswith('shapenetcore')
+        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+        from tools import builder
+        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        classifier = builder.model_builder(config.model)
+        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        classifier.cuda()
         classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')

@@ -8,48 +8,7 @@ import torch.nn.functional as F
 
 from pointnet2_ops import pointnet2_utils
 import numpy as np
-
-def scale_to_unit_cube_torch(x, only_mean=False, no_mean=False):
-    """
-    Input:
-       x: pointcloud data, [B, N=1024, C=3]
-    Return:
-       A point cloud scaled to unit cube
-    """
-    assert len(x.shape) == 3
-    if len(x) == 0:
-        return x
-    if not no_mean:
-        centroid = torch.mean(x, dim=1, keepdim=True)
-        x = x - centroid
-    if not only_mean:
-        furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
-            keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
-        #print(furthest_distance)
-        x = x / furthest_distance
-    return x
-
-def rotate_shape_tensor(x, axis, angle):
-    """
-    Input:
-        x: pointcloud data, [B, N, 3]
-        axis: axis to do rotation about
-        angle: rotation angle
-    Return:
-        A rotated shape
-    """
-    if axis == "x":
-        R_x = torch.tensor([[[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0,
-            np.sin(angle), np.cos(angle)]]]).to(x) # 1 x 3 x 3
-        return x @ R_x
-    elif axis == "y":
-        R_y = torch.tensor([[[np.cos(angle), 0, np.sin(angle)], [0, 1, 0],
-            [-np.sin(angle), 0, np.cos(angle)]]]).to(x)
-        return x @ R_y
-    else:
-        R_z = torch.tensor([[[np.cos(angle), -np.sin(angle), 0], [np.sin(angle),
-            np.cos(angle), 0], [0, 0, 1]]]).to(x)
-        return x @ R_z
+from utils.pc_utils import scale_to_unit_cube_torch, rotate_shape_tensor
 
 
 def get_activation(activation):

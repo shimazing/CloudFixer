@@ -321,7 +321,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     rotation.requires_grad_(True)
     optim = torch.optim.Adamax([
         {'params': [delta], 'lr': args.input_lr},
-        {'params':[rotation], 'lr': args.rotation*args.input_lr}, #, 'weight_decay': 0.0},
+        {'params':[rotation], 'lr': args.rotation}, #, 'weight_decay': 0.0},
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))
@@ -883,7 +883,7 @@ def vis(args):
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
     classifier = configure_model(args, classifier)
-    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
@@ -900,15 +900,19 @@ def vis(args):
         all_gt_list.extend(labels.cpu().tolist())
 
         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
-        rgbs = get_color(x.cpu().numpy())
-        # x_ori = x.detach()
-        x_ori = ours(args, model, x, mask, ind, classifier)
+        x_ori = x.detach()
+        rgbs_ori = get_color(x_ori.cpu().numpy())
+        #x_ori = ours(args, model, x, mask, ind, classifier)
+        if 'cloudfixer' in args.method:
+            x = cloudfixer(args, model, x, mask, ind, verbose=True)
+        #rgbs = get_color(x.cpu().numpy())
+        rgbs = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
 
         for b in range(len(x_ori)):
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
                 "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
-                    rgbs[b]), axis=1),
+                    rgbs_ori[b]), axis=1),
                 "boxes": np.array(
                     [
                         {
@@ -932,6 +936,34 @@ def vis(args):
                 ),
             })
             wandb.log({f'pc': obj3d}, step=b, commit=False)
+
+            obj3d = wandb.Object3D({
+                "type": "lidar/beta",
+                "points": np.concatenate((x[b].cpu().numpy().reshape(-1, 3),
+                    rgbs[b]), axis=1),
+                "boxes": np.array(
+                    [
+                        {
+                            "corners":
+                            (np.array([
+                                [-1, -1, -1],
+                                [-1, 1, -1],
+                                [-1, -1, 1],
+                                [1, -1, -1],
+                                [1, 1, -1],
+                                [-1, 1, 1],
+                                [1, -1, 1],
+                                [1, 1, 1]
+                            ])* 3
+                            ).tolist(),
+                            # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]}',
+                            "color": [123, 321, 111], # ???
+                        }
+                    ]
+                ),
+            })
+            wandb.log({f'adapted': obj3d}, step=b, commit=False)
 
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",

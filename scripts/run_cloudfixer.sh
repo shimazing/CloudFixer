@@ -11,17 +11,16 @@ imb_ratio=1
 
 # classifier
 classifier=DGCNN
-classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
 
-classifier=pointMLP
-classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+#classifier=pointMLP
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
 
 #classifier=pointNeXt
 #classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
 
 #classifier=point2vec
 #classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
-
 
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
@@ -144,7 +143,7 @@ run_cloudfixer_all_experiments() {
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="background" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="lidar" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -178,7 +177,8 @@ run_cloudfixer_adv() {
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="original" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="original" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="lidar density_inc uniform gaussian upsampling distortion_rbf distortion_rbf_inv" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -203,7 +203,7 @@ run_cloudfixer_adv() {
 
 
 GPUS=(0 1 2 3)
-NUM_GPUS=4
+NUM_GPUS=${#GPUS[@]}
 
 run_cloudfixer_all_experiments
 #run_cloudfixer_adv

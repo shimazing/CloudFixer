@@ -31,6 +31,8 @@ def load_model_and_optimizer(model, optimizer, scheduler, model_state, optimizer
 def setup_optimizer(args, params):
     if 'sar' in args.method:
         optimizer = SAM(params=params, base_optimizer=getattr(torch.optim, args.test_optim), lr=args.test_lr, rho=args.sar_eps_threshold)
+    if 'mate' in args.method:
+        optimizer = getattr(torch.optim, args.test_optim)(params, lr=args.test_lr, weight_decay=0.05)
     else:
         optimizer = getattr(torch.optim, args.test_optim)(params, lr=args.test_lr)
     return optimizer
@@ -109,6 +111,17 @@ def configure_model(args, model):
                 else:
                     m.track_running_stats = True
                     m.momentum = 1 - args.bn_stats_prior
+    if 'mate' in args.method:
+        model.eval()
+        model.requires_grad_(False)
+        for m in model.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
+        for n, p in model.module.named_parameters():
+            if 'class_head' in n:
+                p.requires_grad_(False)
     return model
 
 
@@ -267,7 +280,13 @@ def batch_evaluation(args, model, x):
     out = model(x).detach()
     unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
     # feats = F.normalize(model.get_feature(x), p=2, dim=-1).detach()
-    feats = F.normalize(model(x, return_feature=True), p=2, dim=-1).detach()
+    if isinstance(model, nn.DataParallel):
+        model = model.module
+    from classifier import pointMAE
+    if isinstance(model, pointMAE.Point_MAE):
+        feats = F.normalize(model(pts=x, return_feature=True), p=2, dim=-1).detach()
+    else:        
+        feats = F.normalize(model(x, return_feature=True), p=2, dim=-1).detach()
     affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)

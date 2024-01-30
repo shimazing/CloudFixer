@@ -76,7 +76,7 @@ run_baselines() {
     test_lr=1e-4 # placeholder
     params_to_adapt="all" # placeholder
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \

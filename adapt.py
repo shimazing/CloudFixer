@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, recall_score
 
 from data.dataloader import *
+from datasets.ModelNetDataset import *
 from diffusion.build_model import get_model
 from classifier import models
 from utils import logging
@@ -302,6 +303,14 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
     ################################################# End Scheduler
 
+    # if args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+    #     x = scale(x.cpu().numpy(), scale_mode='unit_std')
+    #     x = rotate_pc(x)
+    #     # for i in range(len(x)):
+    #     #     new_xi = scale(x[i].cpu().numpy(), 'unit_std')
+    #     #     new_xi = torch.tensor(rotate_pc(new_xi), device=x.device)
+    #     #     x[i] = new_xi
+
     _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
     knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
@@ -319,6 +328,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     rotation_base[:, 4] = 1
     delta.requires_grad_(True)
     rotation.requires_grad_(True)
+
     optim = torch.optim.Adamax([
         {'params': [delta], 'lr': args.input_lr},
         {'params':[rotation], 'lr': args.rotation*args.input_lr}, #, 'weight_decay': 0.0},
@@ -331,6 +341,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
                 args.n_update,
                 last_epoch=-1,
                 end_factor=args.optim_end_factor)
+
     iterator = tqdm(range(args.n_update)) if verbose else range(args.n_update)
     for iter in iterator:
         optim.zero_grad()
@@ -401,10 +412,13 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         print("LR", scheduler.get_last_lr())
         print("rotation", (rotation_base+rotation).abs().mean(dim=0))
         print('delta', (delta).norm(2,dim=-1).mean())
+
+    # if args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+    #     for i in range(len(x_trans)):
+    #         new_xi = scale(x_trans[i].cpu().detach().numpy(), 'unit_norm')
+    #         new_xi = torch.tensor(rotate_pc(new_xi, reverse=True), device=x.device)
+    #         x[i] = new_xi
     return x_trans
-
-
-
 
 
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
@@ -442,7 +456,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             _ = classifier(x)
 
         # model parameter adaptation
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
             logits = classifier(x)
@@ -480,7 +494,14 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'shot' in args.method:
             # pseudo-labeling
             # feats = classifier.get_feature(x).detach()
-            feats = classifier(x, return_feature=True).detach()
+            if isinstance(classifier, nn.DataParallel):
+                single_classifier = classifier.module
+            from classifier import pointMAE
+            print(f"type(single_classifier): {type(single_classifier)}")
+            if isinstance(single_classifier, pointMAE.Point_MAE):
+                feats = F.normalize(single_classifier(pts=x, return_feature=True), p=2, dim=-1).detach()
+            else:        
+                feats = F.normalize(single_classifier(x, return_feature=True), p=2, dim=-1).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -501,7 +522,15 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss += div_loss
 
             loss.backward()
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if 'mate' in args.method:
+            points = x.cuda()
+            points = low_pass_filtering(points, method='fps', scale=max(int(points.shape[1] / 1024), 1))
+            points = [points for _ in range(48)]
+            points = torch.squeeze(torch.vstack(points))
+            loss_recon, _, _ = classifier(pts=points, classification_only=False)
+            loss = loss_recon.mean()
+            loss.backward()
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.step()
 
     end = time.time()
@@ -515,8 +544,10 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif False: # 'dda' in args.method:
+    elif 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
+    elif 'mate' in args.method:
+        logits_after = classifier(pts=x.cuda(), classifiation_only=True)
     else:
         logits_after = classifier(x)
 
@@ -546,6 +577,12 @@ def main(args):
     wandb.save('*.txt')
 
     ########## load dataset ##########
+    if args.dataset.startswith('modelnet40c') and not args.classifier == "pointMAE":
+        test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+        # args.rotate = False # TODO: remove
+        args.rotate = True
+        test_dataset = ModelNet40C(args, partition='test')
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
     elif args.dataset.startswith('shapenetcore'):
@@ -632,14 +669,22 @@ def main(args):
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
     elif args.classifier == 'pointMAE': # support only for shapenetcore
-        assert args.dataset.startswith('shapenetcore')
-        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
-        from tools import builder
-        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
-        classifier = builder.model_builder(config.model)
-        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-        classifier.cuda()
-        classifier.eval()
+        if args.dataset.startswith("shapenetcore"):
+            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+            from tools import builder
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+            classifier.cuda()
+            classifier.eval()
+        else:
+            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+            from tools import builder
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/tta/tta_modelnet.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt(args.classifier_dir, False)
+            classifier.cuda()
+            classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     if 'pointMLP' not in args.classifier:
@@ -685,7 +730,7 @@ def main(args):
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
 
-    print(f"average adaptation time: {adaptation_time / len(test_dataset.pc_list)}")
+    print(f"total adaptation time: {adaptation_time}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 
@@ -868,8 +913,7 @@ def vis(args):
         config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
         classifier = builder.model_builder(config.model)
         classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-        classifier.cuda()
-        classifier.eval()
+        # classifier.cuda().eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     if 'pointMLP' not in args.classifier:

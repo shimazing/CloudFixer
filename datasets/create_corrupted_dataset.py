@@ -184,8 +184,8 @@ def get_default_camera_intrinsic(width=1920, height=1080):
 
 def get_meshes(args):
     if args.dataset == "modelnet40":
-        f_0 = open("./data/modelnet40_ply_hdf5_2048/ply_data_test_0_id2file.json")
-        f_1 = open("./data/modelnet40_ply_hdf5_2048/ply_data_test_1_id2file.json")
+        f_0 = open("modelnet40_ply_hdf5_2048/ply_data_test_0_id2file.json")
+        f_1 = open("modelnet40_ply_hdf5_2048/ply_data_test_1_id2file.json")
         lsit_0 = json.load(f_0)
         lsit_1 = json.load(f_1)
         f_0.close()
@@ -265,11 +265,20 @@ def visualize_point_cloud(data, mesh=False):
 
 def occlusion_1(mesh, type, severity, window_width=1080, window_height=720, n_points=None, downsample_ratio=None):
     points = get_points(mesh)
+    print(f"points.shape: {points.shape}")
+    if points.shape[0] == 0:
+        return None
     points = normalize(points)
     set_points(mesh, points)
 
     # visualize_point_cloud(points)
     # visualize_point_cloud(point_data[0])
+    # try:
+    #     new_pc, pose = occlusion_1(original_data, 'lidar', severity, n_points=ORIG_NUM)
+    #     new_pc = simulate_lidar(new_pc, pose, severity)
+    # except Exception as e:
+    #     print(f"e: {e}")
+
 
     initial = True
     while initial or points.shape[0] == 0:
@@ -586,10 +595,14 @@ def occlusion(severity):
     pointcloud = []
 
     meshes_sorted = get_meshes(args)
-    for mesh in meshes_sorted:
+    for i, mesh in enumerate(meshes_sorted):
+        print(f"occlusion {i}")
+
         original_data = load_mesh(mesh)
 
         new_pc = occlusion_1(original_data, 'occlusion', severity, n_points=ORIG_NUM)
+        if not new_pc:
+            continue
 
         theta = -np.pi / 2.
         gamma = 0
@@ -654,14 +667,17 @@ def simulate_lidar(pointcloud, pose, severity):
 def lidar(severity):
     ## severity here does not stand for real severity ##
     pointcloud = []
-
     meshes_sorted = get_meshes(args)
-    for mesh in meshes_sorted:
+    for i, mesh in enumerate(meshes_sorted):
+        print(f"lider {i}")
+
         original_data = load_mesh(mesh)
-        new_pc = np.empty(0)
-        while new_pc.shape[0] == 0:
-            new_pc, pose = occlusion_1(original_data, 'lidar', severity, n_points=ORIG_NUM)
-            new_pc = simulate_lidar(new_pc, pose, severity)
+
+        occlusion_1_output = occlusion_1(original_data, 'lidar', severity, n_points=ORIG_NUM)
+        if not occlusion_1_output:
+            continue
+        new_pc, pose = occlusion_1_output
+        new_pc = simulate_lidar(new_pc, pose, severity)
 
         theta = -np.pi / 2.
         gamma = 0
@@ -698,17 +714,21 @@ def load_data(args):
     if args.dataset == "modelnet40":
         # dir = args.main_path + "modelnet40_ply_hdf5_2048/"
         # test_file = os.path.join(dir, "test_files.txt")
-        #
+        
         # with open(test_file, "r") as f:
         #     test_paths = [l.strip() for l in f.readlines()]
-        #
+        
         # for test_path in test_paths:
         #     test_h5 = h5py.File(test_path, "r")
         # data.append(test_h5["data"][:])
         # labels.append(test_h5["label"][:])
-        base_path = args.main_path + "ModelNet/modelnet40_normal_resampled/modelnet40_test_8192pts_fps.dat"
+        # base_path = args.main_path + "ModelNet/modelnet40_normal_resampled/modelnet40_test_8192pts_fps.dat"
+        base_path = args.main_path + "modelnet40_test_8192pts_fps.dat"
         with open(base_path, 'rb') as f:
             data, labels = pickle.load(f)
+
+        print(f"data: {data}")
+        print(f"labels: {labels}")
 
         final_data = list()
         for d, l in zip(data, labels):
@@ -718,6 +738,8 @@ def load_data(args):
 
         data = np.stack(final_data)
         labels = np.squeeze(np.stack(labels))
+
+        print(f"labels: {labels}")
 
     if args.dataset == 'shapenet':
         all_paths = get_path(args.dataset_path, 'test')[0]
@@ -748,6 +770,7 @@ def save_data(args, data, corruption, severity, txt_file=None):
         new_data = np.stack(new_data, axis=0)
 
     if args.dataset != "partnet":
+        print(f"new_data.shape: {new_data.shape}")
         np.save(args.corrupted_dataset_path + "/data_" + corruption + "_" + str(severity) + ".npy", new_data)
     else:
         for index, pc in enumerate(new_data):
@@ -809,7 +832,7 @@ MAP = {
     'gaussian': gaussian_noise,
     'background': background_noise,
     'impulse': impulse_noise,
-    'scale': scale,
+    # 'scale': scale,
     'upsampling': upsampling,
     'shear': shear,
     'rotation': rotation,
@@ -819,9 +842,9 @@ MAP = {
     'distortion': ffd_distortion,
     'distortion_rbf': rbf_distortion,
     'distortion_rbf_inv': rbf_distortion_inv,
-    'clean': None,
-    'occlusion': occlusion,
-    'lidar': lidar
+    'original': None,
+    # 'occlusion': occlusion,
+    # 'lidar': lidar
 }
 
 ORIG_NUM = 4096
@@ -829,14 +852,14 @@ ORIG_NUM = 4096
 if __name__ == "__main__":
     args = get_args()
     if args.dataset == "modelnet40":
-        args.dataset_path = args.main_path + "ModelNet/modelnet40_normal_resampled/"
+        # args.dataset_path = args.main_path + "ModelNet/modelnet40_normal_resampled/"
+        args.dataset_path = args.main_path
     elif args.dataset == "scanobjectnn":
         args.dataset_path = args.main_path + "scanobjectnn/h5_files/main_split/"
     elif args.dataset == "partnet":
         args.dataset_path = args.main_path + "shapenetcore_partanno_segmentation_benchmark_v0_normal/"
         with open(args.dataset_path + "train_test_split/shuffled_test_file_list.json", "r") as f:
             cat = json.load(f)
-
     elif args.dataset == 'shapenet':
         args.dataset_path = args.main_path + "shapenetcorev2_hdf5_2048/"
 
@@ -863,7 +886,7 @@ if __name__ == "__main__":
             export_mesh(mesh, mesh_folder + str(index) + ".ply")
 
     for cor in MAP.keys():
-        for sev in [8]:
+        for sev in [5]:
             if args.dataset in ["scanobjectnn", "partnet", "shapenet"]:
                 ORIG_NUM = 2048
             else:

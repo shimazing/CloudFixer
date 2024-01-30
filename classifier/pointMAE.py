@@ -79,7 +79,7 @@ class Group(nn.Module):
 
     def forward(self, xyz):
         '''
-            input: B N 3    N  number of points ,  M is number of centers (number of groups )
+            input: B N 3    N  number of points ,  M is number of centers (number of groups)
             ---------------------------
             output: B G M 3     G is group size 32
             center : B G 3
@@ -88,7 +88,9 @@ class Group(nn.Module):
         # if len(xyz.shape) == 2:
         #     xyz = torch.unsqueeze(xyz, dim=0)
 
+        # print(f"xyz.shape: {xyz.shape}")
         batch_size, num_points, _ = xyz.shape
+        # print(f"batch_size: {batch_size}")
         # fps the centers out
         center = misc.fps(xyz, self.num_group)  # B G 3    sample 128 center points from 2048 points
         # knn to get the neighborhood
@@ -99,8 +101,17 @@ class Group(nn.Module):
         idx_base = torch.arange(0, batch_size, device=xyz.device).view(-1, 1, 1) * num_points  # idx_base  (8, 1, 1)
         idx = idx + idx_base  # for  batch 0 offset 0,   batch 1 ~7,  offset  1*2048
         idx = idx.view(-1)
+
+        # print(f"in group forward")
+        # print(f"xyz.shape: {xyz.shape}")
+        # print(f"batch_size: {batch_size}")
+        # print(f"num_points: {num_points}")
+
         neighborhood = xyz.view(batch_size * num_points, -1)[idx,
                        :]  # (8, 2048, 3) -> (8*2048, 3)   # todo sampling the neighborhoold points for each center in each batch
+
+        # print(f"neighborhood.shape: {neighborhood.shape}")
+
         neighborhood = neighborhood.view(batch_size, self.num_group, self.group_size,
                                          3).contiguous()  # (8, 128, 32, 3)  128 groups, each group has 32 points,
         # normalize
@@ -424,6 +435,8 @@ class Point_MAE(nn.Module):
 
         print_log(f'[Point_MAE] divide point cloud into G{self.num_group} x S{self.group_size} points ...',
                   logger='Point_MAE')
+        # print(f"self.num_group: {self.num_group}")
+        # print(f"self.group_size: {self.group_size}")
         self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
 
         # prediction head
@@ -497,17 +510,22 @@ class Point_MAE(nn.Module):
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
 
-    def classification_only(self, pts, only_unmasked=True):
+    def classification_only(self, pts, only_unmasked=True, return_feature=False):
         pts = scale_to_unit_cube_torch(pts)
         neighborhood, center = self.group_divider(pts)
         x_vis_w_token = self.MAE_encoder(neighborhood, center, only_unmasked=only_unmasked)[0]
         feat = torch.cat([x_vis_w_token[:, 0], x_vis_w_token[:, 1:].max(1)[0]], dim=-1)
+        if return_feature:
+            return feat
         class_ret = self.class_head(feat)
         return class_ret
 
-    def forward(self, pts, classification_only=True, vis=False, cyclic=False, **kwargs):
-        if classification_only:
-            return self.classification_only(pts, only_unmasked=False)
+    def forward(self, pts, classification_only=True, vis=False, cyclic=False, return_feature=False, **kwargs):
+        pts = scale_to_unit_cube_torch(pts)
+        pts = rotate_shape_tensor(pts, 'x', np.pi/2)
+
+        if classification_only or return_feature:
+            return self.classification_only(pts, only_unmasked=False, return_feature=return_feature)
 
         neighborhood, center = self.group_divider(pts)
 
@@ -914,6 +932,9 @@ class Point_MAE_PartSegmentation(nn.Module):
     def forward(self, pts, cls_label, cls_loss_masked=True, tta=False, vis=False, **kwargs):
         B_, N_, _ = pts.shape  # pts (8, 2048, 3),  cls_label (8,1,16) one-hot ,   partnet_cls
 
+        # pts = scale_to_unit_cube_torch(pts)
+        # pts = rotate_shape_tensor(pts, 'x', np.pi/2)
+
         neighborhood, center = self.group_divider(pts)  # normalized neighborhood  (8, 128, 32, 3) 128 groups, each group has 32 points,   center (8, 128, 3)  128 group centers
         x_vis_w_token, mask, feature_list, group_input_tokens = self.MAE_encoder(neighborhood, center)
         #  todo x_vis_w_token (8, 14, 384), mask (8,128) feature_list 3-level features:  a list of (8,14,384),  group_input_tokens (8,128,384)
@@ -987,7 +1008,6 @@ class Point_MAE_PartSegmentation(nn.Module):
             ret1 = full.reshape(-1, 3).unsqueeze(0)
             # return ret1, ret2
             return ret1, ret2, full_center
-
 
         # dummy = neighborhood[mask]
         gt_points = neighborhood[mask].reshape(B * M, -1, 3)

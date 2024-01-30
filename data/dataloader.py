@@ -122,13 +122,14 @@ class ModelNet40C(Dataset):
             data_dir = os.path.join(data_path, f'data_{corruption}_{severity}.npy')
             all_data = np.load(data_dir)
             label_dir = os.path.join(data_path, 'label.npy')
-            all_label = np.load(label_dir).squeeze(-1)
-
+            all_label = np.load(label_dir).squeeze()
         if self.scenario == "temporally_correlated":
             sorted_indices = np.argsort(all_label)
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
             print(f"all_label: {all_label}")
+
+        print(f"num_classes: {num_classes}")
 
         if num_classes == 40:
             return all_data, all_label
@@ -162,7 +163,6 @@ class ModelNet40C(Dataset):
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
         label = self.label_list[item]
-
         mask = np.ones((len(pointcloud), 1)).astype(pointcloud.dtype)
         ind = np.arange(len(pointcloud))
 
@@ -189,6 +189,7 @@ class ModelNet40C(Dataset):
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)
+
         if mask.sum() > self.subsample:
             valid = mask.nonzero()[0]
             pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
@@ -203,7 +204,6 @@ class ModelNet40C(Dataset):
             mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
             assert np.all(mask[mask_==1] == 1)
             mask = mask_
-
         if self.subsample < 2048:
             valid = mask.nonzero()[0]
             while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
@@ -213,13 +213,15 @@ class ModelNet40C(Dataset):
                     pointcloud,
                     pointcloud[chosen],
                 ), axis=0)
+                mask = np.concatenate((
+                    mask,
+                    np.zeros_like(mask[chosen])
+                ), axis=0)
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
+
         return (pointcloud, label, mask, ind)
 
-
-    def __len__(self):
-        return len(self.pc_list)
 
     def __len__(self):
         return len(self.pc_list)

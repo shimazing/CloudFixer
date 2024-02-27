@@ -10,8 +10,8 @@ scenario=normal
 imb_ratio=1
 
 # classifier
-classifier=DGCNN
-classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
+#classifier=DGCNN
+#classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
 
 #classifier=pointMLP
 #classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
@@ -19,8 +19,8 @@ classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
 #classifier=pointNeXt
 #classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
 
-#classifier=point2vec
-#classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
+classifier=point2vec
+classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
 
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
@@ -54,7 +54,7 @@ t_min=0.02
 t_len=0.1
 t_max=0.12
 pow=1
-lam_l=1
+lam_l=10
 lam_h=10
 lr=0.2
 steps=30
@@ -62,9 +62,9 @@ warmup=0.2
 wd=0
 optim=adamax
 optim_end_factor=0.05
-subsample=2048
+subsample=1024
 weighted_reg=True
-rotation=0
+rotation=0.02
 ######################################################
 
 
@@ -143,7 +143,7 @@ run_cloudfixer_all_experiments() {
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="lidar" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="gaussian" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do

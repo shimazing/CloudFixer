@@ -213,6 +213,10 @@ class ModelNet40C(Dataset):
                     pointcloud,
                     pointcloud[chosen],
                 ), axis=0)
+                mask = np.concatenate((
+                    mask,
+                    np.zeros_like(mask[chosen]),
+                    ),axis=0)
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
         return (pointcloud, label, mask, ind)

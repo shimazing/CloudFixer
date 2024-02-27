@@ -5,10 +5,12 @@ import numpy as np
 import torch
 import json
 import glob
-from utils.pc_utils import scale
+from utils.pc_utils import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join('./data/modelnet_c')
+
+NUM_POINTS = 2048
 
 
 def load_h5(h5_name):
@@ -438,17 +440,17 @@ class ShapeNetC(Dataset):
 class ShapeNetCore(Dataset):
     def __init__(self, args, root='data/shapenet_c/'):
         if len(args.dataset.split("_")) == 1:
-            self.corruption = 'original'
+            self.corruption = 'clean'
         elif len(args.dataset.split("_")) == 2:
             self.corruption = "_".join(args.dataset.split("_")[1:])
         else:
             self.corruption = "_".join(args.dataset.split("_")[1:-1])
-        if self.corruption != 'original':
-            #assert partition == 'test'
+        if self.corruption != 'clean':
             self.severity = args.dataset.split("_")[-1]
-        #self.corruption = args.corruption
         #self.severity = args.severity
         self.data, self.label = load_data(root, self.corruption, self.severity)
+        self.subsample = getattr(args, 'subsample', 2048)
+        self.label_list = self.label.reshape(-1)
 
         print(f'Loaded {self.data.shape} point clouds and {self.label.shape} labels')
 
@@ -474,6 +476,44 @@ class ShapeNetCore(Dataset):
                 mask[dup] = 0
 
         pointcloud = scale(pointcloud, 'unit_std')
+        # mean=[0.00064055 0.00258016 0.01304194], std=[0.17493314]
+
+        if mask.sum() > self.subsample:
+            valid = mask.nonzero()[0]
+            pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]
+            pointcloud_ = np.swapaxes(np.expand_dims(pointcloud_, 0), 1, 2)
+            centroids, pointcloud_, _ = \
+                farthest_point_sample_np(pointcloud_,
+                        None, self.subsample)
+            pointcloud_ = np.swapaxes(pointcloud_.squeeze(), 1, 0).astype('float32')
+            centroids = centroids.squeeze()
+            assert len(centroids) == self.subsample
+            if len(mask) > NUM_POINTS:
+                mask = np.ones_like(mask[:self.subsample])
+                pointcloud = pointcloud_
+                ind = np.arange(len(pointcloud))
+            else:
+                mask_ = np.zeros_like(mask)
+                mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
+                assert np.all(mask[mask_==1] == 1)
+                mask = mask_
+
+        if self.subsample < 4096:
+            valid = mask.nonzero()[0]
+            while len(pointcloud) < NUM_POINTS: # len(mask):# NUM_POINTS:
+                np.random.shuffle(valid)
+                chosen = valid[:NUM_POINTS - len(pointcloud)]
+                pointcloud = np.concatenate((
+                    pointcloud,
+                    pointcloud[chosen],
+                ), axis=0)
+                mask = np.concatenate((
+                    mask,
+                    np.zeros_like(mask[chosen]),
+                ), axis=0)
+                ind = np.concatenate((ind, chosen), axis=0)
+                assert len(pointcloud) == len(ind)
+
         return pointcloud, label.item(), mask, ind
 
     def __len__(self):

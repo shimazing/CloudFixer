@@ -66,7 +66,7 @@ class ModelNet40C(Dataset):
     def load_modelnet40(self, data_path, partition='train'):
         all_data = []
         all_label = []
-        for h5_name in glob.glob(os.path.join(data_path, f'ply_data_{partition}*.h5')):
+        for h5_name in glob.glob(os.path.join('data/modelnet40_ply_hdf5_2048', f'ply_data_{partition}*.h5')):
             f = h5py.File(h5_name.strip(), 'r')
             data = f['data'][:].astype('float32')
             label = f['label'][:].astype('int64')
@@ -203,6 +203,10 @@ class ModelNet40C(Dataset):
             mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
             assert np.all(mask[mask_==1] == 1)
             mask = mask_
+            if self.corruption == 'original':
+                pointcloud = pointcloud[mask.squeeze(-1).astype(bool)]
+                mask = mask[mask.squeeze(-1).astype(bool)]
+                ind = np.arange(len(pointcloud))
 
         if self.subsample < 2048:
             valid = mask.nonzero()[0]

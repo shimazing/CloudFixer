@@ -32,7 +32,7 @@ def parse_arguments():
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
     parser.add_argument('--exp_name', type=str, default='adaptation')
-    parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of worker for the dataloader')
     parser.add_argument('--online', type=bool, default=True, help='True = wandb online -- False = wandb offline')
     parser.add_argument('--wandb_usr', type=str, default='unknown')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb')
@@ -632,12 +632,17 @@ def main(args):
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
     elif args.classifier == 'pointMAE': # support only for shapenetcore
-        assert args.dataset.startswith('shapenetcore')
         from utils.config import cfg_from_yaml_file # , build_model_from_cfg
         from tools import builder
-        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
-        classifier = builder.model_builder(config.model)
-        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        if args.dataset.startswith('shapenetcore'):
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        else:
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
+            classifier.rotate = True
         classifier.cuda()
         classifier.eval()
     else:

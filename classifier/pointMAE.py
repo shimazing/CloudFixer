@@ -386,6 +386,7 @@ class Point_MAE(nn.Module):
         self.group_norm = config.group_norm
         self.num_hid_cls_layers = config.num_hid_cls_layers
         self.trans_dim = config.transformer_config.trans_dim
+        self.rotate = getattr(config, 'rotate', False)
 
         self.MAE_encoder = MaskTransformer(config)
         self.group_size = config.group_size
@@ -506,6 +507,9 @@ class Point_MAE(nn.Module):
         return class_ret
 
     def forward(self, pts, classification_only=True, vis=False, cyclic=False, **kwargs):
+        if self.rotate:
+            pts = rotate_shape_tensor(pts, 'x', np.pi/2)
+
         if classification_only:
             return self.classification_only(pts, only_unmasked=False)
 

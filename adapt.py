@@ -43,6 +43,7 @@ def parse_arguments():
     parser.add_argument('--adv_attack', type=eval, default=False)
     parser.add_argument('--scenario', type=str, default='normal')
     parser.add_argument('--imb_ratio', type=float, default=0)
+    parser.add_argument('--rotate', type=eval, default=True)
 
     # classifier
     parser.add_argument('--classifier', type=str, default='DGCNN')
@@ -642,7 +643,7 @@ def main(args):
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
-            classifier.rotate = True
+            classifier.rotate = args.rotate
         classifier.cuda()
         classifier.eval()
     else:

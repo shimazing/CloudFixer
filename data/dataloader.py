@@ -122,7 +122,10 @@ class ModelNet40C(Dataset):
             data_dir = os.path.join(data_path, f'data_{corruption}_{severity}.npy')
             all_data = np.load(data_dir)
             label_dir = os.path.join(data_path, 'label.npy')
-            all_label = np.load(label_dir).squeeze(-1)
+            all_label = np.load(label_dir) #.squeeze(-1)
+            print(all_label.shape)
+            if all_label.ndim == 2:
+               all_label = all_label.squeeze(-1)
 
         if self.scenario == "temporally_correlated":
             sorted_indices = np.argsort(all_label)

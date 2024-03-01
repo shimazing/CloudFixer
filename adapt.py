@@ -699,9 +699,6 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-        if iter_idx >= 1:
-            break
-
         import time
         current = time.time()
 

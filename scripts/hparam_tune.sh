@@ -977,11 +977,11 @@ num_max_jobs=1
 ##############################################
 
 # hparam_tune
-# hparam_tune_tent
+hparam_tune_tent
 # hparam_tune_lame
 # hparam_tune_sar
 # hparam_tune_pl
 # hparam_tune_memo
 # hparam_tune_dua
 # hparam_tune_shot
-hparam_tune_dda
+# hparam_tune_dda

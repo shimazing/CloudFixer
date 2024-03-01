@@ -3,6 +3,7 @@ from copy import deepcopy
 from tqdm import tqdm
 import wandb
 import gc
+import yaml
 
 import numpy as np
 import torch
@@ -28,6 +29,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='CloudFixer')
     parser.add_argument('--mode', nargs='+', type=str, required=True)
     parser.add_argument('--no-cuda', action='store_true', default=False, help='enables CUDA training')
+    parser.add_argument('--hparam_save_dir', type=str, default="cfgs/hparams")
+    parser.add_argument('--use_best_hparam', action='store_true', default=False)
 
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
@@ -122,6 +125,26 @@ def parse_arguments():
     if 'eval' in args.mode:
         args.no_wandb = True
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    if "modelnet40" in args.classifier_dir:
+        source_dataset = "modelnet40c_original"
+    elif "modelnet" in args.classifier_dir:
+        source_dataset = "modelnet"
+    elif "shapenet" in args.classifier_dir:
+        source_dataset = "shapenet"
+    elif "scannet" in args.classifier_dir:
+        source_dataset = "scannet"
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, source_dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    print(f"{yaml_dir=}")
+    
+    print(f"before {args=}")
+    
+    if args.use_best_hparam and os.path.exists(yaml_dir):
+        hparam_dict = yaml.load(open(yaml_dir, "r"), Loader=yaml.FullLoader)
+        for hparams_to_search_str, best_hparam in hparam_dict.items():
+            setattr(args, hparams_to_search_str, best_hparam)
+        print(f"after {args=}")
     return args
 
 
@@ -664,8 +687,8 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-        # if iter_idx < len(test_loader) - 1:
-        #     continue
+        if iter_idx >= 1:
+            break
 
         import time
         current = time.time()
@@ -792,6 +815,15 @@ def tune_tta_hparams(args):
             io.cprint(f"new best acc!: {test_acc}")
             best_acc = test_acc
         best_hparam = hparam_comb
+
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    hparam_dict = dict(zip(hparams_to_search_str, best_hparam))
+    if not os.path.exists(yaml_parent_dir):
+        os.makedirs(yaml_parent_dir)
+
+    with open(yaml_dir, 'w') as f:
+        yaml.dump(hparam_dict, f, sort_keys=False)
     io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
 
 

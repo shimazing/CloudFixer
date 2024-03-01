@@ -32,7 +32,7 @@ def parse_arguments():
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
     parser.add_argument('--exp_name', type=str, default='adaptation')
-    parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of worker for the dataloader')
     parser.add_argument('--online', type=bool, default=True, help='True = wandb online -- False = wandb offline')
     parser.add_argument('--wandb_usr', type=str, default='unknown')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb')
@@ -43,6 +43,7 @@ def parse_arguments():
     parser.add_argument('--adv_attack', type=eval, default=False)
     parser.add_argument('--scenario', type=str, default='normal')
     parser.add_argument('--imb_ratio', type=float, default=0)
+    parser.add_argument('--rotate', type=eval, default=True)
 
     # classifier
     parser.add_argument('--classifier', type=str, default='DGCNN')
@@ -99,7 +100,7 @@ def parse_arguments():
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
     parser.add_argument('--weighted_reg', type=eval, default=True)
-    parser.add_argument('--n_update', default=100, type=int)
+    parser.add_argument('--n_update', default=30, type=int)
     parser.add_argument('--warmup', default=0.2, type=float)
     parser.add_argument('--input_lr', type=float, default=1e-2)
     parser.add_argument('--rotation', default=0.1, type=float)
@@ -112,11 +113,11 @@ def parse_arguments():
     parser.add_argument('--lam_h', type=float, default=0)
     parser.add_argument('--t_min', type=float, default=0.02)
     parser.add_argument('--t_max', type=float, default=0.2)
-    parser.add_argument('--t_len', type=float, default=0.2)
+    parser.add_argument('--t_len', type=float, default=0.1)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--pow', type=int, default=1)
-    parser.add_argument('--denoising_thrs', type=int, default=100)
+    parser.add_argument('--denoising_thrs', type=int, default=0)
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True
@@ -269,7 +270,6 @@ def dda(args, model, x, mask, ind):
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        # dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         dist1, dist2, _, _ = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
@@ -321,7 +321,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     rotation.requires_grad_(True)
     optim = torch.optim.Adamax([
         {'params': [delta], 'lr': args.input_lr},
-        {'params':[rotation], 'lr': args.rotation*args.input_lr}, #, 'weight_decay': 0.0},
+        {'params':[rotation], 'lr': args.rotation}, #, 'weight_decay': 0.0},
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))
@@ -335,17 +335,49 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     for iter in iterator:
         optim.zero_grad()
         t = args.t_min + args.t_len * torch.rand(x.shape[0], 1).to(x.device)
-        t = (t * args.diffusion_steps).long().float() / args.diffusion_steps
-        gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
-        alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
-        sigma_t = model.module.sigma(gamma_t, x)
+        if args.dataset.startswith('shapenetcore'):
+            t = (t * model.cfg.sde.diffusion_steps).long()
+            t, var_t, alpha_t, _, _, _ = model.diffusion.iw_quantities_t(len(t), t)
+            sigma_t = torch.sqrt(var_t)
+        else:
+            t = (t * args.diffusion_steps).long().float() / args.diffusion_steps
+            gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
+            alpha_t = model.module.alpha(gamma_t, x) # batch_size x 1 x 1
+            sigma_t = model.module.sigma(gamma_t, x)
         eps = torch.randn_like(x)
         x_trans = (x+delta)
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
         with torch.no_grad():
-            x_trans_t = x_trans * alpha_t + sigma_t * eps
-            _, x_trans_est = model(x_trans_t, phi=True, return_x0_est=True,
+            if args.dataset.startswith('shapenetcore'):
+                # model is lion
+                num_classes = model.priors[1].num_classes
+                model.priors[1].num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
+                model.vae.decoder.num_points = num_points
+                all_z, _, _ = model.vae.encode(x_trans)
+                all_z = make_4d(all_z)
+                decomposed_z = model.vae.decompose_eps(all_z)
+                updated_z = []
+                for latent_id, z in enumerate(decomposed_z):
+                    noise = torch.randn_like(z)
+                    z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
+                    if latent_id == 0:
+                        pred_noise = model.priors[latent_id](z_t, t)
+                    else:
+                        #cond = decomposed_z[0] # or updated_z[0]
+                        cond = updated_z[0]
+                        cond = model.vae.global2style(cond) # squeeze
+                        pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
+                    est_z = (z_t - sigma_t * pred_noise) / alpha_t
+                    updated_z.append(est_z)
+
+                x_trans_est = model.vae.decoder(None, beta=None,
+                        context=updated_z[1].view(len(t),-1), # local
+                        style=updated_z[0].view(len(t), -1) # global
+                        )
+            else:
+                x_trans_t = x_trans * alpha_t + sigma_t * eps
+                _, x_trans_est = model(x_trans_t, phi=True, return_x0_est=True,
                     t=t, node_mask=node_mask,
                    )
         dist1, dist2, idx1, idx2 = chamfer_dist_fn(x_trans, x_trans_est)
@@ -504,18 +536,27 @@ def main(args):
     io = logging.IOStream(args)
     io.cprint(args)
     create_folders(args)
-    if args.no_wandb:
-        mode = 'disabled'
-    else:
-        mode = 'online' if args.online else 'offline'
-    kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
-            'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
-    wandb.init(**kwargs)
-    wandb.save('*.txt')
+    # if args.no_wandb:
+    #     mode = 'disabled'
+    # else:
+    #     mode = 'online' if args.online else 'offline'
+    # kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
+    #         'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
+    # wandb.init(**kwargs)
+    # wandb.save('*.txt')
 
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('shapenetcore'):
+        from datasets.tta_datasets import ShapeNetCore
+        test_dataset = ShapeNetCore(args)
+        #from datasets.ShapeNetCoreDataset import ShapeNetCore
+        #from utils.config import cfg_from_yaml_file
+        #config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        #config.ROOT = 'data/shapenetcorev2_hdf5_2048'
+        #config.subset = 'test'
+        #test_dataset = ShapeNetCore(config, split='test')
     elif args.dataset in ['modelnet', 'shapenet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
@@ -530,11 +571,19 @@ def main(args):
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
-        model = get_model(args, device)
-        if args.diffusion_dir is not None:
-            model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
-        model = model.to(device).eval()
+        if args.dataset.startswith('shapenetcore'):
+            from models.lion import LION
+            from cfgs.default_config_lion import cfg as config_lion
+            config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
+            lion = LION(config_lion)
+            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            model = lion
+        else:
+            model = get_model(args, device)
+            if args.diffusion_dir is not None:
+                model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
+            model = nn.DataParallel(model)
+            model = model.to(device).eval()
     else:
         model = None
 
@@ -542,13 +591,64 @@ def main(args):
     # TODO: add model architectures
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=np.max(test_dataset.label_list) + 1)
+        ckpt = torch.load(args.classifier_dir, map_location='cpu')
+        if 'model_state' in ckpt:
+            ckpt = ckpt['model_state']
+        classifier.load_state_dict(ckpt)
+    elif args.classifier == 'pointNeXt':
+        from classifier.openpoints.utils import EasyConfig, load_checkpoint
+        from classifier.openpoints.models import build_model_from_cfg
+        cfg = EasyConfig()
+        cfg.load('cfgs/modelnet40ply2048_pointnext-s.yaml')
+        classifier = build_model_from_cfg(cfg.model)#.to(cfg.rank)
+        load_checkpoint(classifier,
+            pretrained_path=args.classifier_dir
+            #'ckpt/pointNeXt_modelnet40.pth'
+            )
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'pointMLP':
+        from classifier.pointMLP.models import pointMLP
+        classifier = pointMLP()
+        classifier = torch.nn.DataParallel(classifier)
+        classifier.load_state_dict(torch.load(
+            args.classifier_dir,
+            #'ckpt/pointMLP_modelnet40.pth',
+            map_location='cpu')['net'])
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'point2vec':
+        from classifier.point2vec.models import Point2VecClassification
+        from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
+        classifier = Point2VecClassification()
+        classifier.cuda()
+        classifier.setup()
+        checkpoint = extract_model_checkpoint(
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
+        )
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
+        print(f"Missing keys: {missing_keys}")
+        print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
+    elif args.classifier == 'pointMAE': # support only for shapenetcore
+        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+        from tools import builder
+        if args.dataset.startswith('shapenetcore'):
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        else:
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
+            classifier.rotate = args.rotate
+        classifier.cuda()
+        classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
-    ckpt = torch.load(args.classifier_dir, map_location='cpu')
-    if 'model_state' in ckpt:
-        ckpt = ckpt['model_state']
-    classifier.load_state_dict(ckpt)
-    classifier = nn.DataParallel(classifier)
+    if 'pointMLP' not in args.classifier:
+        classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -681,7 +781,7 @@ def tune_tta_hparams(args):
     create_folders(args)
 
     best_acc, best_hparam = 0, None
-    for hparam_comb in hparam_space[:min(len(hparam_space), 10)]:
+    for hparam_comb in hparam_space[:min(len(hparam_space), 30)]:
         for hparam_str, hparam in zip(hparams_to_search_str, hparam_comb):
             setattr(args, hparam_str, hparam)
         io.cprint(f"hparams_to_search_str: {hparams_to_search_str}")
@@ -717,6 +817,15 @@ def vis(args):
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('shapenetcore'):
+        from datasets.tta_datasets import ShapeNetCore
+        test_dataset = ShapeNetCore(args)
+        #from datasets.ShapeNetCoreDataset import ShapeNetCore
+        #from utils.config import cfg_from_yaml_file
+        #config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        #config.ROOT = 'data/shapenetcorev2_hdf5_2048'
+        #config.subset = 'test'
+        #test_dataset = ShapeNetCore(config, split='test')
     elif args.dataset in ['modelnet', 'shapnet', 'scannet']:
         test_dataset = PointDA10(args=args, partition='test')
     elif args.dataset in ['synthetic', 'kinect', 'realsense']:
@@ -727,11 +836,19 @@ def vis(args):
 
     ########## load diffusion model ##########
     if 'pre_trans' in args.method or 'dda' in args.method or 'ours' in args.method or 'cloudfixer' in args.method:
-        model = get_model(args, device)
-        if args.diffusion_dir is not None:
-            model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
-        model = nn.DataParallel(model)
-        model = model.to(device).eval()
+        if args.dataset.startswith('shapenetcore'):
+            from models.lion import LION
+            from cfgs.default_config_lion import cfg as config_lion
+            config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
+            lion = LION(config_lion)
+            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            model = lion
+        else:
+            model = get_model(args, device)
+            if args.diffusion_dir is not None:
+                model.load_state_dict(torch.load(args.diffusion_dir, map_location='cpu'))
+            model = nn.DataParallel(model)
+            model = model.to(device).eval()
     else:
         model = None
 
@@ -739,10 +856,55 @@ def vis(args):
     # TODO: add model architectures
     if args.classifier == "DGCNN":
         classifier = models.DGCNNWrapper(args.dataset, output_channels=len(np.unique(test_dataset.label_list)))
+        classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
+    elif args.classifier == 'pointNeXt':
+        from classifier.openpoints.utils import EasyConfig, load_checkpoint
+        from classifier.openpoints.models import build_model_from_cfg
+        cfg = EasyConfig()
+        cfg.load('cfgs/modelnet40ply2048_pointnext-s.yaml')
+        classifier = build_model_from_cfg(cfg.model)#.to(cfg.rank)
+        load_checkpoint(classifier,
+            pretrained_path=args.classifier_dir
+            #'ckpt/pointNeXt_modelnet40.pth'
+            )
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'pointMLP':
+        from classifier.pointMLP.models import pointMLP
+        classifier = pointMLP()
+        classifier = torch.nn.DataParallel(classifier)
+        classifier.load_state_dict(torch.load(args.classifier_dir,
+            #'ckpt/pointMLP_modelnet40.pth',
+            map_location='cpu')['net'])
+        classifier.cuda()
+        classifier.eval()
+    elif args.classifier == 'point2vec':
+        from classifier.point2vec.models import Point2VecClassification
+        from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
+        classifier = Point2VecClassification()
+        classifier.cuda()
+        classifier.setup()
+        checkpoint = extract_model_checkpoint(
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
+        )
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
+        print(f"Missing keys: {missing_keys}")
+        print(f"Unexpected keys: {unexpected_keys}")
+        classifier.eval()
+    elif args.classifier == 'pointMAE': # support only for shapenetcore
+        assert args.dataset.startswith('shapenetcore')
+        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+        from tools import builder
+        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+        classifier = builder.model_builder(config.model)
+        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+        classifier.cuda()
+        classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
-    classifier.load_state_dict(torch.load(args.classifier_dir, map_location='cpu'))
-    classifier = nn.DataParallel(classifier)
+    if 'pointMLP' not in args.classifier:
+        classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
 
     global EMA, mom_pre
@@ -752,7 +914,7 @@ def vis(args):
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
     classifier = configure_model(args, classifier)
-    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
@@ -769,15 +931,19 @@ def vis(args):
         all_gt_list.extend(labels.cpu().tolist())
 
         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
-        rgbs = get_color(x.cpu().numpy())
-        # x_ori = x.detach()
-        x_ori = ours(args, model, x, mask, ind, classifier)
+        x_ori = x.detach()
+        rgbs_ori = get_color(x_ori.cpu().numpy())
+        #x_ori = ours(args, model, x, mask, ind, classifier)
+        if 'cloudfixer' in args.method:
+            x = cloudfixer(args, model, x, mask, ind, verbose=True)
+        #rgbs = get_color(x.cpu().numpy())
+        rgbs = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
 
         for b in range(len(x_ori)):
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
                 "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
-                    rgbs[b]), axis=1),
+                    rgbs_ori[b]), axis=1),
                 "boxes": np.array(
                     [
                         {
@@ -801,6 +967,34 @@ def vis(args):
                 ),
             })
             wandb.log({f'pc': obj3d}, step=b, commit=False)
+
+            obj3d = wandb.Object3D({
+                "type": "lidar/beta",
+                "points": np.concatenate((x[b].cpu().numpy().reshape(-1, 3),
+                    rgbs[b]), axis=1),
+                "boxes": np.array(
+                    [
+                        {
+                            "corners":
+                            (np.array([
+                                [-1, -1, -1],
+                                [-1, 1, -1],
+                                [-1, -1, 1],
+                                [1, -1, -1],
+                                [1, 1, -1],
+                                [-1, 1, 1],
+                                [1, -1, 1],
+                                [1, 1, 1]
+                            ])* 3
+                            ).tolist(),
+                            # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]}',
+                            "color": [123, 321, 111], # ???
+                        }
+                    ]
+                ),
+            })
+            wandb.log({f'adapted': obj3d}, step=b, commit=False)
 
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",

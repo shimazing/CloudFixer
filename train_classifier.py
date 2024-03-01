@@ -9,13 +9,13 @@ from torch.utils.data import DataLoader
 import sklearn.metrics as metrics
 import argparse
 import copy
-from data.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
+from data.dataloader import ModelNet40C, PointDA10, ImbalancedDatasetSampler
+import os
 
-from utils import pc_utils, loss, log
-from classifier.models import PointNet, DGCNN
-# from Models_Norm import PointNet, DGCNN
-# NWORKERS = 4
-# MAX_LOSS = 9 * (10 ** 9)
+from utils import logging as log
+from classifier.models import PointNet, DGCNNWrapper
+NWORKERS = 4
+MAX_LOSS = 9 * (10 ** 9)
 
 
 def str2bool(v):
@@ -39,7 +39,7 @@ def str2bool(v):
 # Argparse
 # ==================
 parser = argparse.ArgumentParser(description='DA on Point Clouds')
-parser.add_argument('--exp_name', type=str, default='GAST', help='Name of the experiment')
+parser.add_argument('--exp_name', type=str, default='classifier', help='Name of the experiment')
 parser.add_argument('--out_path', type=str, default='./experiments', help='log folder path')
 parser.add_argument('--dataroot', type=str, default='data', metavar='N', help='data path')
 parser.add_argument('--src_dataset', type=str, default='shapenet', choices=['modelnet', 'shapenet', 'scannet'])
@@ -112,30 +112,32 @@ def split_set(dataset, domain, set_type="source"):
 
 src_dataset = args.src_dataset
 trgt_dataset = args.trgt_dataset
-data_func = {'modelnet': ModelNet, 'scannet': ScanNet, 'shapenet': ShapeNet}
 
-src_trainset = data_func[src_dataset](io, args.dataroot, 'train')
-#trgt_trainset = data_func[trgt_dataset](io, args.dataroot, 'train')
-src_testset = data_func[src_dataset](io, args.dataroot, 'test')
-trgt_testset = data_func[trgt_dataset](io, args.dataroot, 'test')
-trgt_testset2 = data_func[args.trgt_dataset2](io, args.dataroot, 'test')
+args.dataset = args.src_dataset
+args.dataset_dir = os.path.join(args.dataroot, 'PointDA_data', args.dataset)
+src_trainset = PointDA10(args, partition='train')
+src_valset = PointDA10(args, partition='val')
+src_testset = PointDA10(args, partition='test')
+args.dataset = args.trgt_dataset
+args.dataset_dir = os.path.join(args.dataroot, 'PointDA_data', args.dataset)
+trgt_testset = PointDA10(args, partition='test')
+args.dataset = args.trgt_dataset2
+args.dataset_dir = os.path.join(args.dataroot, 'PointDA_data', args.dataset)
+trgt_testset2 = PointDA10(args, partition='test')
 
 # Creating data indices for training and validation splits:
-src_train_sampler, src_valid_sampler = split_set(src_trainset, src_dataset, "source")
+#src_train_sampler, src_valid_sampler = split_set(src_trainset, src_dataset, "source")
 #trgt_train_sampler, trgt_valid_sampler = split_set(trgt_trainset, trgt_dataset, "target")
 
 # dataloaders for source and target
 src_train_loader = DataLoader(src_trainset, num_workers=NWORKERS, batch_size=args.batch_size,
-                              sampler=src_train_sampler, drop_last=True)
-src_val_loader = DataLoader(src_trainset, num_workers=NWORKERS, batch_size=args.test_batch_size,
-                            sampler=src_valid_sampler)
-#trgt_train_loader = DataLoader(trgt_trainset, num_workers=NWORKERS, batch_size=args.batch_size,
-#                               sampler=trgt_train_sampler, drop_last=True)
-#trgt_val_loader = DataLoader(trgt_trainset, num_workers=NWORKERS, batch_size=args.test_batch_size,
-#                             sampler=trgt_valid_sampler)
+                              shuffle=True, drop_last=True)
+src_val_loader = DataLoader(src_valset, num_workers=NWORKERS,
+        batch_size=args.test_batch_size)
 src_test_loader = DataLoader(src_testset, num_workers=NWORKERS, batch_size=args.test_batch_size)
 trgt_test_loader = DataLoader(trgt_testset, num_workers=NWORKERS, batch_size=args.test_batch_size)
 trgt_test_loader2 = DataLoader(trgt_testset2, num_workers=NWORKERS, batch_size=args.test_batch_size)
+label_to_idx = src_trainset.label_to_idx
 
 # ==================
 # Init Model
@@ -143,7 +145,7 @@ trgt_test_loader2 = DataLoader(trgt_testset2, num_workers=NWORKERS, batch_size=a
 if args.model == 'pointnet':
     model = PointNet(args)
 elif args.model == 'dgcnn':
-    model = DGCNN(args)
+    model = DGCNNWrapper('pointda10', 10)
 else:
     raise Exception("Not implemented")
 
@@ -159,9 +161,8 @@ best_model = copy.deepcopy(model)
 # ==================
 opt = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.wd) if args.optimizer == "SGD" \
     else optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
-scheduler = CosineAnnealingLR(opt, args.epochs - 10)
+scheduler = CosineAnnealingLR(opt, args.epochs)
 criterion = nn.CrossEntropyLoss()  # return the mean of CE over the batch
-criterion_ls = loss.LabelSmoothingCrossEntropy()
 
 
 # ==================
@@ -177,17 +178,16 @@ def test(test_loader, model=None, set_type="Target", partition="Val", epoch=0):
         model.eval()
         test_pred = []
         test_true = []
-        for data, labels in test_loader:
-            data, labels = data.to(device), labels.to(device).squeeze()
-            data = data.permute(0, 2, 1)
+        for data in test_loader:
+            data, labels = data[0].to(device), data[1].to(device).squeeze()
             batch_size = data.size()[0]
 
             logits = model(data) #, activate_DefRec=False)
-            loss = criterion(logits["cls"], labels)
+            loss = criterion(logits, labels)
             print_losses['cls'] += loss.item() * batch_size
 
             # evaluation metrics
-            preds = logits["cls"].max(dim=1)[1]
+            preds = logits.max(dim=1)[1]
             test_true.append(labels.cpu().numpy())
             test_pred.append(preds.detach().cpu().numpy())
             count += batch_size
@@ -225,11 +225,10 @@ for epoch in range(args.epochs):
         #### source data ####
         src_data, src_label = data[0].to(device), data[1].to(device).squeeze()
         # change to [batch_size, num_coordinates, num_points]
-        src_data = src_data.permute(0, 2, 1)
         batch_size = src_data.size()[0]
         device = torch.device("cuda:" + str(src_data.get_device()) if args.cuda else "cpu")
         src_logits = model(src_data) #, activate_DefRec=False)
-        loss = args.cls_weight * criterion(src_logits["cls"], src_label)
+        loss = args.cls_weight * criterion(src_logits, src_label)
         src_print_losses['cls'] += loss.item() * batch_size
         src_print_losses['total'] += loss.item() * batch_size
         loss.backward()
@@ -271,19 +270,19 @@ io.cprint("Best model was found at epoch %d, source validation accuracy: %.4f, s
 model = best_model
 
 trgt_test_acc, trgt_test_loss, trgt_conf_mat = test(src_test_loader, model, "Source", "Test", 0)
-io.cprint("source test accuracy: %.4f, source test loss: %.4f" % (trgt_test_acc, trgt_best_val_loss))
+io.cprint("source test accuracy: %.4f, source test loss: %.4f" % (trgt_test_acc, trgt_test_loss))
 io.cprint(f'{args.src_dataset}')
 io.cprint("Test confusion matrix:")
 io.cprint('\n' + str(trgt_conf_mat))
 
 trgt_test_acc, trgt_test_loss, trgt_conf_mat = test(trgt_test_loader, model, "Target", "Test", 0)
-io.cprint("target test accuracy: %.4f, target test loss: %.4f" % (trgt_test_acc, trgt_best_val_loss))
+io.cprint("target test accuracy: %.4f, target test loss: %.4f" % (trgt_test_acc, trgt_test_loss))
 io.cprint(f'{args.trgt_dataset}')
 io.cprint("Test confusion matrix:")
 io.cprint('\n' + str(trgt_conf_mat))
 
 trgt_test_acc, trgt_test_loss, trgt_conf_mat = test(trgt_test_loader2, model, "Target", "Test", 0)
-io.cprint("target2 test accuracy: %.4f, target test loss: %.4f" % (trgt_test_acc, trgt_best_val_loss))
+io.cprint("target2 test accuracy: %.4f, target test loss: %.4f" % (trgt_test_acc, trgt_test_loss))
 io.cprint(f'{args.trgt_dataset2}')
 io.cprint("Test confusion matrix:")
 io.cprint('\n' + str(trgt_conf_mat))

@@ -1,5 +1,5 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
 # DATASET_ROOT_DIR=../nfs-client/datasets
@@ -303,7 +303,7 @@ run_baselines() {
         elif [ "$batch_size" == "8" ]; then
             test_lr=1e-2 # 1e-4 1e-3 1e-2
             num_steps=3 # 1 3 5 10
-        fi        
+        fi
     elif [ "$method" == "memo" ]; then
         episodic=True
         test_optim=AdamW
@@ -464,7 +464,7 @@ hparam_tune_modelnet40c() {
 }
 
 
-hparam_tune_pointda() { 
+hparam_tune_pointda() {
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
@@ -496,7 +496,7 @@ hparam_tune_pointda() {
 }
 
 
-hparam_tune_graspnet() { 
+hparam_tune_graspnet() {
     CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
 
     SEED_LIST="2"
@@ -561,7 +561,7 @@ run_baselines_modelnet40c() {
 }
 
 
-run_baselines_pointda() { 
+run_baselines_pointda() {
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
@@ -592,7 +592,7 @@ run_baselines_pointda() {
 }
 
 
-run_baselines_graspnet() { 
+run_baselines_graspnet() {
     CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
 
     SEED_LIST="2"
@@ -803,7 +803,7 @@ run_baselines_modelnet40c_small_batch() {
 }
 
 
-run_baselines_pointda_small_batch() { 
+run_baselines_pointda_small_batch() {
     CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
@@ -834,7 +834,7 @@ run_baselines_pointda_small_batch() {
 }
 
 
-run_baselines_graspnet_small_batch() { 
+run_baselines_graspnet_small_batch() {
     CLASSIFIER_LIST=(DGCNN) # (DGCNN PointNet)
 
     SEED_LIST="2"

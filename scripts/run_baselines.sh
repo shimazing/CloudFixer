@@ -1,8 +1,9 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
+#DATASET_ROOT_DIR=../nfs-client/datasets
+DATASET_ROOT_DIR=../e3_diffusion_for_molecules/data #../nfs-client/datasets
 CODE_BASE_DIR=../nfs-client/CloudFixer
 # DATASET_ROOT_DIR=../datasets
 # CODE_BASE_DIR=../CloudFixer
@@ -13,10 +14,11 @@ imb_ratio=1
 
 # classifier
 classifier=DGCNN
-classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+classifier_dir=../pointcloud_TTA/outputs/dgcnn_modelnet40_best_test.pth #${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+#diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=../pointcloud_TTA/outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy #${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 wait_n() {
   # limit the max number of jobs as NUM_MAX_JOB and wait
@@ -63,8 +65,9 @@ steps=400
 wd=0
 optim=adamax
 optim_end_factor=0.05
-subsample=700
+subsample=1024
 weighted_reg=True
+adv_attack=False
 ######################################################
 
 
@@ -428,6 +431,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
+        --adv_attack ${adv_attack} \
         2>&1
         i=$((i + 1))
     wait_n
@@ -447,8 +451,8 @@ hparam_tune_modelnet40c() {
             for classifier in ${CLASSIFIER_LIST}; do
                 dataset=modelnet40c_original
                 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048/
-                classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                #classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                #diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
                 for method in ${METHOD_LIST}; do
                     if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
                         continue
@@ -519,6 +523,42 @@ hparam_tune_graspnet() {
                         exp_name=hparam_tune_classifier_${classifier}_source_${SOURCE_DOMAIN_LIST[idx]}_target_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                         mode=hparam_tune
                         run_baselines
+                    done
+                done
+            done
+        done
+    done
+}
+
+
+run_baselines_modelnet40c_adv() {
+    CLASSIFIER_LIST=(DGCNN)
+
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="1" # 8 1"
+    CORRUPTION_LIST="original" #background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    SEVERITY_LIST="5"
+    METHOD_LIST="memo" #tent lame sar pl memo dua bn_stats shot" # dda"
+    adv_attack=True
+    #METHOD_LIST="tent"
+    # METHOD_LIST="bn_stats dua"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
+                        #classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                        #diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                        for method in ${METHOD_LIST}; do
+                            if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                                continue
+                            fi
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                            mode=eval
+                            run_baselines
+                        done
                     done
                 done
             done
@@ -1177,7 +1217,7 @@ run_label_distribution_shift_new() {
 ##############################################
 # CUDA_VISIBLE_DEVICES="4"
 # hparam_tune_modelnet40c
-# run_baselines_modelnet40c
+run_baselines_modelnet40c_adv
 ##############################################
 
 ##############################################

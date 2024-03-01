@@ -8,5 +8,5 @@ conda activate cloudfixer
 bash scripts/set_env.sh
 ```
 
-- Download and preprocess data by following https://github.com/zou-longkun/GAST in ./data/
+- Download and preprocess data by following https://github.com/jiachens/ModelNet40-C and https://github.com/zou-longkun/GAST in ./data/
 

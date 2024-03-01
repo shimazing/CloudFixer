@@ -1,29 +1,33 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=mazing
 
 # dataset
-DATASET_ROOT_DIR=../e3_diffusion_for_molecules/data/ #nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
-# DATASET_ROOT_DIR=../datasets
-# CODE_BASE_DIR=../CloudFixer
+DATASET_ROOT_DIR=./data
+CODE_BASE_DIR=./
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
 imb_ratio=1
 
 # classifier
-classifier=DGCNN
-classifier_dir=../pointcloud_TTA/outputs/dgcnn_modelnet40_best_test.pth
-#${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+#classifier=DGCNN
+#classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
+
+#classifier=pointMLP
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+
+#classifier=pointNeXt
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
+
+classifier=point2vec
+classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
 
 # diffusion model
-diffusion_dir="../e3_diffusion_for_molecules/outputs/modelnet40_unit_std_transformer_polynomial_2_500steps_nozeromean_LRExponentialDecay0.9995_finetune_resume_resume/generative_model_ema_1300.npy"
-#${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
 
 GPUS=(0 1 2 3)
 NUM_GPUS=4
 i=0
-
 
 #################### placeholders ####################
 # lame
@@ -46,31 +50,30 @@ bn_stats_prior=0
 shot_pl_loss_weight=0.3
 # cloudfixer
 t_min=0.02
-t_len=0.2
-t_max=0.22
+t_len=0.1
+t_max=0.12
 pow=1
-lam_l=1
+lam_l=10
 lam_h=10
-lr=0.02
-steps=100
+lr=0.2
+steps=30
 warmup=0.2
 wd=0
 optim=adamax
 optim_end_factor=0.05
-subsample=2048
+subsample=1024
 weighted_reg=True
-rotation=0.1
+rotation=0.02
 ######################################################
 
-
 run_baselines() {
-    num_steps=0 # placeholder
-    episodic=False # placeholder
-    test_optim=AdamW # placeholder
-    test_lr=1e-4 # placeholder
+    num_steps=0           # placeholder
+    episodic=False        # placeholder
+    test_optim=AdamW      # placeholder
+    test_lr=1e-4          # placeholder
     params_to_adapt="all" # placeholder
 
-CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
@@ -125,20 +128,18 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
         2>&1
-        #i=$((i + 1))
+    #i=$((i + 1))
 }
 
-
-
 run_cloudfixer_all_experiments() {
-    CLASSIFIER_LIST=(DGCNN)
+    CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
     BATCH_SIZE_LIST="64"
     METHOD_LIST="cloudfixer"
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="background" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="gaussian" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -151,7 +152,7 @@ run_cloudfixer_all_experiments() {
                             if [[ "$corruption" == "upsampling" ]]; then
                                 batch_size=16
                             else
-                                batch_size=16
+                                batch_size=64
                             fi
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval
@@ -164,9 +165,39 @@ run_cloudfixer_all_experiments() {
     done
 }
 
+run_cloudfixer_adv() {
+    CLASSIFIER_LIST=(DGCNN)
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64"
+    METHOD_LIST="cloudfixer"
 
+    scenario=normal
+    imb_ratio=1
+    # CORRUPTION_LIST="original" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="lidar density_inc uniform gaussian upsampling distortion_rbf distortion_rbf_inv" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    SEVERITY_LIST="5"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for corruption in ${CORRUPTION_LIST}; do
+                    for severity in ${SEVERITY_LIST}; do # "3 5"
+                        dataset=modelnet40c_${corruption}_${severity}
+                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
+                        for method in ${METHOD_LIST}; do
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_adv
+                            mode=eval
+                            adv_attack=True
+                            run_baselines
+                        done
+                    done
+                done
+            done
+        done
+    done
+}
 
 GPUS=(0 1 2 3)
-NUM_GPUS=4
+NUM_GPUS=${#GPUS[@]}
 
 run_cloudfixer_all_experiments
+#run_cloudfixer_adv

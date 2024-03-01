@@ -1,6 +1,6 @@
 visualize() {
     # logging
-    wandb_usr=drumpt
+    wandb_usr=unknown
 
     # dataset
     DATASET_ROOT_DIR=../datasets

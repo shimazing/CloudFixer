@@ -2,8 +2,8 @@
 wandb_usr=unknown
 
 # dataset
-#DATASET_ROOT_DIR=../nfs-client/datasets
-DATASET_ROOT_DIR=../e3_diffusion_for_molecules/data #../nfs-client/datasets
+DATASET_ROOT_DIR=../nfs-client/datasets
+# DATASET_ROOT_DIR=../e3_diffusion_for_molecules/data #../nfs-client/datasets
 CODE_BASE_DIR=../nfs-client/CloudFixer
 # DATASET_ROOT_DIR=../datasets
 # CODE_BASE_DIR=../CloudFixer
@@ -13,8 +13,10 @@ scenario=normal
 imb_ratio=1
 
 # classifier
-classifier=DGCNN
-classifier_dir=../pointcloud_TTA/outputs/dgcnn_modelnet40_best_test.pth #${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+# classifier=DGCNN
+# classifier_dir=../pointcloud_TTA/outputs/dgcnn_modelnet40_best_test.pth #${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+classifier=point2vec
+classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
 # diffusion model
 #diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
@@ -433,6 +435,7 @@ run_baselines() {
         --dda_lpf_scale ${dda_lpf_scale} \
         --exp_name ${exp_name} \
         --mode ${mode} \
+        --use_best_hparam \
         --model transformer \
         --n_update ${steps} \
         --weight_decay ${wd} \
@@ -582,7 +585,7 @@ run_baselines_modelnet40c_adv() {
 
 
 run_baselines_modelnet40c() {
-    CLASSIFIER_LIST=(DGCNN)
+    # CLASSIFIER_LIST=(DGCNN)
 
     SEED_LIST="2"
     # BATCH_SIZE_LIST="64 8 1"
@@ -591,35 +594,35 @@ run_baselines_modelnet40c() {
     CORRUPTION_LIST="distortion"
     SEVERITY_LIST="5"
     # METHOD_LIST="tent lame sar pl memo dua bn_stats shot dda"
-    METHOD_LIST="memo shot"
-    # METHOD_LIST="tent"
+    # METHOD_LIST="memo shot"
+    METHOD_LIST="tent"
     # # METHOD_LIST="bn_stats dua"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
-                        diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
-                        for method in ${METHOD_LIST}; do
-                            # if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
-                            #     continue
-                            # fi
-                            if [[ "$method" == "memo" ]]; then
-                                batch_size=1
-                            fi
-                            if [[ "$method" == "shot" ]]; then
-                                batch_size=64
-                            fi
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                            mode=eval
-                            run_baselines
-                        done
+            # for classifier in ${CLASSIFIER_LIST}; do
+            for corruption in ${CORRUPTION_LIST}; do
+                for severity in ${SEVERITY_LIST}; do # "3 5"
+                    dataset=modelnet40c_${corruption}_${severity}
+                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                    # classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+                    for method in ${METHOD_LIST}; do
+                        # if [[ "$method" == "dda" ]] && [[ "$batch_size" == "1" || "$batch_size" == "64" ]]; then
+                        #     continue
+                        # fi
+                        if [[ "$method" == "memo" ]]; then
+                            batch_size=1
+                        fi
+                        if [[ "$method" == "shot" ]]; then
+                            batch_size=64
+                        fi
+                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+                        mode=eval
+                        run_baselines
                     done
                 done
             done
+            # done
         done
     done
 }
@@ -1173,9 +1176,11 @@ run_label_distribution_shift_new() {
     BATCH_SIZE_LIST="64"
     scenario=label_distribution_shift
     imb_ratio=10
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl memo dua shot"
+    # METHOD_LIST="tent lame sar pl memo dua shot"
+    METHOD_LIST="dua"
 
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -1189,7 +1194,7 @@ run_label_distribution_shift_new() {
                         for method in ${METHOD_LIST}; do
                             if [[ "$method" == "memo" ]]; then
                                 batch_size=1
-                            elif [ "$method" == "dua" ]; then
+                            elif [ "$method" == "dda" ]; then
                                 batch_size=16
                             else
                                 batch_size=64
@@ -1229,12 +1234,12 @@ run_label_distribution_shift_new() {
 ##############################################
 # CUDA_VISIBLE_DEVICES="4"
 # hparam_tune_modelnet40c
-run_baselines_modelnet40c_adv
+# run_baselines_modelnet40c_adv
 ##############################################
 
 ##############################################
-# CUDA_VISIBLE_DEVICES="2,3"
-# run_baselines_pointda
+CUDA_VISIBLE_DEVICES="2,3"
+run_baselines_modelnet40c
 ##############################################
 
 ##############################################
@@ -1264,6 +1269,6 @@ run_baselines_modelnet40c_adv
 
 
 ##############################################
-CUDA_VISIBLE_DEVICES="0,1"
-run_label_distribution_shift_new
+CUDA_VISIBLE_DEVICES="1,2,3"
+# run_label_distribution_shift_new
 ##############################################

@@ -386,6 +386,7 @@ class Point_MAE(nn.Module):
         self.group_norm = config.group_norm
         self.num_hid_cls_layers = config.num_hid_cls_layers
         self.trans_dim = config.transformer_config.trans_dim
+        self.rotate = getattr(config, 'rotate', False)
 
         self.MAE_encoder = MaskTransformer(config)
         self.group_size = config.group_size
@@ -499,7 +500,6 @@ class Point_MAE(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
     def classification_only(self, pts, only_unmasked=True):
-        pts = scale_to_unit_cube_torch(pts)
         neighborhood, center = self.group_divider(pts)
         x_vis_w_token = self.MAE_encoder(neighborhood, center, only_unmasked=only_unmasked)[0]
         feat = torch.cat([x_vis_w_token[:, 0], x_vis_w_token[:, 1:].max(1)[0]], dim=-1)
@@ -507,6 +507,10 @@ class Point_MAE(nn.Module):
         return class_ret
 
     def forward(self, pts, classification_only=True, vis=False, cyclic=False, **kwargs):
+        if self.rotate:
+            pts = rotate_shape_tensor(pts, 'x', np.pi/2)
+            pts = scale_to_unit_cube_torch(pts)
+
         if classification_only:
             return self.classification_only(pts, only_unmasked=False)
 

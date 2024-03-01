@@ -8,11 +8,11 @@ from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from pytorch_lightning.loggers import WandbLogger
 from torchmetrics import Accuracy
 
-from point2vec.modules.feature_upsampling import PointNetFeatureUpsampling
-from point2vec.modules.pointnet import PointcloudTokenizer
-from point2vec.modules.transformer import TransformerEncoder, TransformerEncoderOutput
-from point2vec.utils import transforms
-from point2vec.utils.checkpoint import extract_model_checkpoint
+from classifier.point2vec.modules.feature_upsampling import PointNetFeatureUpsampling
+from classifier.point2vec.modules.pointnet import PointcloudTokenizer
+from classifier.point2vec.modules.transformer import TransformerEncoder, TransformerEncoderOutput
+from classifier.point2vec.utils import transforms
+from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
 
 
 class Point2VecPartSegmentation(pl.LightningModule):

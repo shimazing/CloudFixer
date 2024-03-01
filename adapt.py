@@ -3,6 +3,7 @@ from copy import deepcopy
 from tqdm import tqdm
 import wandb
 import gc
+import yaml
 
 import numpy as np
 import torch
@@ -28,11 +29,13 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description='CloudFixer')
     parser.add_argument('--mode', nargs='+', type=str, required=True)
     parser.add_argument('--no-cuda', action='store_true', default=False, help='enables CUDA training')
+    parser.add_argument('--hparam_save_dir', type=str, default="cfgs/hparams")
+    parser.add_argument('--use_best_hparam', action='store_true', default=False)
 
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
     parser.add_argument('--exp_name', type=str, default='adaptation')
-    parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of worker for the dataloader')
     parser.add_argument('--online', type=bool, default=True, help='True = wandb online -- False = wandb offline')
     parser.add_argument('--wandb_usr', type=str, default='unknown')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb')
@@ -43,6 +46,7 @@ def parse_arguments():
     parser.add_argument('--adv_attack', type=eval, default=False)
     parser.add_argument('--scenario', type=str, default='normal')
     parser.add_argument('--imb_ratio', type=float, default=0)
+    parser.add_argument('--rotate', type=eval, default=True)
 
     # classifier
     parser.add_argument('--classifier', type=str, default='DGCNN')
@@ -122,6 +126,26 @@ def parse_arguments():
     if 'eval' in args.mode:
         args.no_wandb = True
     args.cuda = not args.no_cuda and torch.cuda.is_available()
+
+    if "modelnet40" in args.classifier_dir:
+        source_dataset = "modelnet40c_original"
+    elif "modelnet" in args.classifier_dir:
+        source_dataset = "modelnet"
+    elif "shapenet" in args.classifier_dir:
+        source_dataset = "shapenet"
+    elif "scannet" in args.classifier_dir:
+        source_dataset = "scannet"
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, source_dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    print(f"{yaml_dir=}")
+    
+    print(f"before {args=}")
+    
+    if args.use_best_hparam and os.path.exists(yaml_dir):
+        hparam_dict = yaml.load(open(yaml_dir, "r"), Loader=yaml.FullLoader)
+        for hparams_to_search_str, best_hparam in hparam_dict.items():
+            setattr(args, hparams_to_search_str, best_hparam)
+        print(f"after {args=}")
     return args
 
 
@@ -270,7 +294,6 @@ def dda(args, model, x, mask, ind):
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        # dist1, dist2 = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         dist1, dist2, _, _ = chamfer_dist(low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale), low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale))
         cd_loss = torch.mean(dist1) + torch.mean(dist2)
         grad = torch.autograd.grad(
@@ -320,8 +343,8 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     delta.requires_grad_(True)
     rotation.requires_grad_(True)
     optim = torch.optim.Adamax([
-        {'params': [delta], 'lr': args.displacement * args.input_lr},
-        {'params':[rotation], 'lr': args.rotation * args.input_lr}, #, 'weight_decay': 0.0},
+        {'params': [delta], 'lr': args.input_lr},
+        {'params':[rotation], 'lr': args.rotation}, #, 'weight_decay': 0.0},
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))
@@ -548,14 +571,14 @@ def main(args):
     io = logging.IOStream(args)
     io.cprint(args)
     create_folders(args)
-    if args.no_wandb:
-        mode = 'disabled'
-    else:
-        mode = 'online' if args.online else 'offline'
-    kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
-            'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
-    wandb.init(**kwargs)
-    wandb.save('*.txt')
+    # if args.no_wandb:
+    #     mode = 'disabled'
+    # else:
+    #     mode = 'online' if args.online else 'offline'
+    # kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
+    #         'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
+    # wandb.init(**kwargs)
+    # wandb.save('*.txt')
 
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
@@ -644,19 +667,19 @@ def main(args):
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
     elif args.classifier == 'pointMAE': # support only for shapenetcore
+        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+        from tools import builder
         if args.dataset.startswith('shapenetcore'):
-            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
-            from tools import builder
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-            classifier = classifier.cuda().eval()
-        else: # modelnet40-c
-            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
-            from tools import builder
+        else:
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
             classifier = builder.model_builder(config.model)
-            classifier.load_model_from_ckpt(args.classifier_dir, False)
+            classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
+            classifier.rotate = args.rotate
+        classifier.cuda()
+        classifier.eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     if 'pointMLP' not in args.classifier:
@@ -676,23 +699,49 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
+        if iter_idx >= 1:
+            break
+
+        import time
+        current = time.time()
+
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         mask = data[-2].to(device)
         ind = data[-1].to(device)
+
+        print(f"x.shape: {x.shape}")
+
+        print(f"1: {time.time() - current}")
+        current = time.time()
+
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
+
+        print(f"2: {time.time() - current}")
+        current = time.time()
 
         # reset source model and optimizer
         if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
+        print(f"3: {time.time() - current}")
+        current = time.time()
+
+        print(f"original_classifier.device: {type(original_classifier)}")
+
         logits_before = original_classifier(x).detach()
         all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
 
+        print(f"4: {time.time() - current}")
+        current = time.time()
+
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
+
+        print(f"5: {time.time() - current}")
+        current = time.time()
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
@@ -767,7 +816,7 @@ def tune_tta_hparams(args):
     create_folders(args)
 
     best_acc, best_hparam = 0, None
-    for hparam_comb in hparam_space[:min(len(hparam_space), 10)]:
+    for hparam_comb in hparam_space[:min(len(hparam_space), 30)]:
         for hparam_str, hparam in zip(hparams_to_search_str, hparam_comb):
             setattr(args, hparam_str, hparam)
         io.cprint(f"hparams_to_search_str: {hparams_to_search_str}")
@@ -778,6 +827,15 @@ def tune_tta_hparams(args):
             io.cprint(f"new best acc!: {test_acc}")
             best_acc = test_acc
         best_hparam = hparam_comb
+
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    hparam_dict = dict(zip(hparams_to_search_str, best_hparam))
+    if not os.path.exists(yaml_parent_dir):
+        os.makedirs(yaml_parent_dir)
+
+    with open(yaml_dir, 'w') as f:
+        yaml.dump(hparam_dict, f, sort_keys=False)
     io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
 
 
@@ -900,7 +958,7 @@ def vis(args):
     original_classifier = deepcopy(classifier)
     original_classifier.eval().requires_grad_(False)
     classifier = configure_model(args, classifier)
-    params, _ = collect_params(classifier, train_params=args.params_to_adapt)
+    params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
@@ -917,15 +975,19 @@ def vis(args):
         all_gt_list.extend(labels.cpu().tolist())
 
         rgbs_wMask = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
-        rgbs = get_color(x.cpu().numpy())
-        # x_ori = x.detach()
-        x_ori = ours(args, model, x, mask, ind, classifier)
+        x_ori = x.detach()
+        rgbs_ori = get_color(x_ori.cpu().numpy())
+        #x_ori = ours(args, model, x, mask, ind, classifier)
+        if 'cloudfixer' in args.method:
+            x = cloudfixer(args, model, x, mask, ind, verbose=True)
+        #rgbs = get_color(x.cpu().numpy())
+        rgbs = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
 
         for b in range(len(x_ori)):
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
                 "points": np.concatenate((x_ori[b].cpu().numpy().reshape(-1, 3),
-                    rgbs[b]), axis=1),
+                    rgbs_ori[b]), axis=1),
                 "boxes": np.array(
                     [
                         {
@@ -949,6 +1011,34 @@ def vis(args):
                 ),
             })
             wandb.log({f'pc': obj3d}, step=b, commit=False)
+
+            obj3d = wandb.Object3D({
+                "type": "lidar/beta",
+                "points": np.concatenate((x[b].cpu().numpy().reshape(-1, 3),
+                    rgbs[b]), axis=1),
+                "boxes": np.array(
+                    [
+                        {
+                            "corners":
+                            (np.array([
+                                [-1, -1, -1],
+                                [-1, 1, -1],
+                                [-1, -1, 1],
+                                [1, -1, -1],
+                                [1, 1, -1],
+                                [-1, 1, 1],
+                                [1, -1, 1],
+                                [1, 1, 1]
+                            ])* 3
+                            ).tolist(),
+                            # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
+                            # "label": f'{labels[b]} {preds_label[b]}',
+                            "color": [123, 321, 111], # ???
+                        }
+                    ]
+                ),
+            })
+            wandb.log({f'adapted': obj3d}, step=b, commit=False)
 
             obj3d = wandb.Object3D({
                 "type": "lidar/beta",
@@ -983,6 +1073,8 @@ def vis(args):
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    print(f"args.mode: {args.mode}")
     if 'eval' in args.mode:
         main(args)
     if 'vis' in args.mode:

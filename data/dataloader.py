@@ -122,13 +122,15 @@ class ModelNet40C(Dataset):
             data_dir = os.path.join(data_path, f'data_{corruption}_{severity}.npy')
             all_data = np.load(data_dir)
             label_dir = os.path.join(data_path, 'label.npy')
-            all_label = np.load(label_dir).squeeze(-1)
+            all_label = np.load(label_dir) #.squeeze(-1)
+            print(all_label.shape)
+            if all_label.ndim == 2:
+               all_label = all_label.squeeze(-1)
 
         if self.scenario == "temporally_correlated":
             sorted_indices = np.argsort(all_label)
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
-            print(f"all_label: {all_label}")
 
         if num_classes == 40:
             return all_data, all_label
@@ -203,6 +205,10 @@ class ModelNet40C(Dataset):
             mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
             assert np.all(mask[mask_==1] == 1)
             mask = mask_
+            if self.corruption == 'original':
+                pointcloud = pointcloud[mask.squeeze(-1).astype(bool)]
+                mask = mask[mask.squeeze(-1).astype(bool)]
+                ind = np.arange(len(pointcloud))
 
         if self.subsample < 2048:
             valid = mask.nonzero()[0]
@@ -213,13 +219,14 @@ class ModelNet40C(Dataset):
                     pointcloud,
                     pointcloud[chosen],
                 ), axis=0)
+                mask = np.concatenate((
+                    mask,
+                    np.zeros_like(mask[chosen]),
+                    ),axis=0)
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
         return (pointcloud, label, mask, ind)
 
-
-    def __len__(self):
-        return len(self.pc_list)
 
     def __len__(self):
         return len(self.pc_list)
@@ -253,8 +260,6 @@ class PointDA10(Dataset):
         self.label_to_idx = self.get_label_to_idx(args)
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
         self.pc_list, self.label_list = self.get_data(args, partition)
-
-        print(f"self.label_list: {self.label_list}")
 
         # print dataset statistics
         unique, counts = np.unique(self.label_list, return_counts=True)
@@ -567,13 +572,11 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        weights = 1.0 / label_to_count[df["label"]].to_numpy()
-        labels = df["label"].to_numpy()
+        weights = 1.0 / label_to_count[df["label"]]
         if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
-            print(f"selected_idx: {selected_idx}")
             for idx in selected_idx:
-                weights[labels == idx] *= imb_ratio
+                weights[df["label"] == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
 
@@ -610,6 +613,7 @@ class ElasticDistortion:
         self._granularity = granularity
         self._magnitude = magnitude
 
+
     @staticmethod
     def elastic_distortion(coords, granularity, magnitude):
         if not isinstance(coords, np.ndarray):
@@ -640,7 +644,6 @@ class ElasticDistortion:
 
 
     def __call__(self, data):
-        # coords = data.pos / self._spatial_resolution
         if self._apply_distorsion:
             if random.random() < 0.95:
                 for i in range(len(self._granularity)):
@@ -649,6 +652,4 @@ class ElasticDistortion:
 
 
     def __repr__(self):
-        return "{}(apply_distorsion={}, granularity={}, magnitude={})".format(
-            self.__class__.__name__, self._apply_distorsion, self._granularity, self._magnitude,
-        )
+        return f"{self.__class__.__name__}(apply_distorsion={self._apply_distorsion}, granularity={self._granularity}, magnitude={self._magnitude})"

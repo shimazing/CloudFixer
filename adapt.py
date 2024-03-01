@@ -404,9 +404,6 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     return x_trans
 
 
-
-
-
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
     global EMA, mom_pre, adaptation_time
 
@@ -442,7 +439,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             _ = classifier(x)
 
         # model parameter adaptation
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
             logits = classifier(x)
@@ -501,11 +498,20 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss += div_loss
 
             loss.backward()
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if 'mate' in args.method:
+            points = x.cuda()
+            points = low_pass_filtering(points, 'fps', int(x.shape[1] // 1024))
+            print(f"int(x.shape[1] // 1024): {int(x.shape[1] // 1024)}")
+            print(f"points: {points.shape}")
+            x = [x for _ in range(48)] # TODO: where is 90% masking part?
+            x = torch.squeeze(torch.vstack(x))
+            loss = classifier(x, None, tta=True)[0] # TODO: debug this
+            loss = loss.mean()
+            loss.backward()
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.step()
 
     end = time.time()
-    print(f"end: {end - start}")
     adaptation_time += end - start
 
     # output adaptation
@@ -517,6 +523,12 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         logits_after = batch_evaluation(args, classifier, x)
     elif False: # 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
+    elif 'mate' in args.method:
+        logits_after = classifier.module.classification_only( # TODO: debug this
+            x.float().cuda(),
+            None,
+            only_unmasked=False
+        )
     else:
         logits_after = classifier(x)
 
@@ -632,14 +644,19 @@ def main(args):
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
     elif args.classifier == 'pointMAE': # support only for shapenetcore
-        assert args.dataset.startswith('shapenetcore')
-        from utils.config import cfg_from_yaml_file # , build_model_from_cfg
-        from tools import builder
-        config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
-        classifier = builder.model_builder(config.model)
-        classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-        classifier.cuda()
-        classifier.eval()
+        if args.dataset.startswith('shapenetcore'):
+            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+            from tools import builder
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+            classifier = classifier.cuda().eval()
+        else: # modelnet40-c
+            from utils.config import cfg_from_yaml_file # , build_model_from_cfg
+            from tools import builder
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
+            classifier = builder.model_builder(config.model)
+            classifier.load_model_from_ckpt(args.classifier_dir, False)
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     if 'pointMLP' not in args.classifier:

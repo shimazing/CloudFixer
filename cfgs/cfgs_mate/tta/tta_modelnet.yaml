@@ -10,11 +10,11 @@ scheduler: {
 }
 
 dataset : {
-  train : { _base_: cfgs/dataset_configs/ModelNet40.yaml,
+  train : { _base_: cfgs/cfgs_mate/dataset_configs/ModelNet40.yaml,
             others: {subset: 'train'}},
-  val : { _base_: cfgs/dataset_configs/ModelNet40.yaml,
+  val : { _base_: cfgs/cfgs_mate/dataset_configs/ModelNet40.yaml,
             others: {subset: 'test'}},
-  test : { _base_: cfgs/dataset_configs/ModelNet40.yaml,
+  test : { _base_: cfgs/cfgs_mate/dataset_configs/ModelNet40.yaml,
             others: {subset: 'test'}}}
 model : {
   NAME: Point_MAE,
@@ -36,7 +36,7 @@ model : {
     decoder_depth: 4,
     decoder_num_heads: 6,
   },
-  }
+}
 
 
 npoints: 1024

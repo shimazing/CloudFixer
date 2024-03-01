@@ -109,6 +109,19 @@ def configure_model(args, model):
                 else:
                     m.track_running_stats = True
                     m.momentum = 1 - args.bn_stats_prior
+    if 'mate' in args.method:
+        model.eval()
+        model.requires_grad_(False)
+        for m in model.modules():
+            if isinstance(m, nn.Dropout):
+                m.train()
+            elif isinstance(m, nn.modules.batchnorm._BatchNorm):
+                configure_bn_layer(args, m)
+        for n, p in model.named_parameters():
+            if 'class_head' in n:
+                print(f"n: {n}")
+                print(f"p: {p}")
+                p.requires_grad_(False)
     return model
 
 

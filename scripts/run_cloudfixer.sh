@@ -2,8 +2,8 @@
 wandb_usr=drumpt
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
+DATASET_ROOT_DIR=../datasets
+CODE_BASE_DIR=.
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -61,6 +61,16 @@ subsample=2048
 weighted_reg=True
 rotation=0
 ######################################################
+
+
+wait_n() {
+  # limit the max number of jobs as NUM_MAX_JOB and wait
+  background=($(jobs -p))
+  local num_max_jobs=4
+  if ((${#background[@]} >= num_max_jobs)); then
+    wait -n
+  fi
+}
 
 
 run_baselines() {
@@ -123,20 +133,21 @@ run_baselines() {
             --subsample ${subsample} \
             --weighted_reg ${weighted_reg} \
             --wandb_usr ${wandb_usr} \
-            2>&1
+        2>&1 &
             #i=$((i + 1))
+    wait_n
 }
 
 
 run_cloudfixer_all_experiments() {
     CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
-    BATCH_SIZE_LIST="64"
+    BATCH_SIZE_LIST="128"
     METHOD_LIST="cloudfixer"
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="background" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -292,7 +303,4 @@ run_cloudfixer_ablation_study() {
 GPUS=(0 1 2 3 4 5 6 7)
 NUM_GPUS=${#GPUS[@]}
 CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
-
-
-
-run_cloudfixer_ablation_study
+run_cloudfixer_all_experiments

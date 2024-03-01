@@ -460,6 +460,7 @@ class Point_MAE(nn.Module):
         return loss, acc * 100
 
     def load_model_from_ckpt(self, bert_ckpt_path, load_part_seg=None):
+        print(f"bert_ckpt_path: {bert_ckpt_path}")
         if bert_ckpt_path is not None:
             ckpt = torch.load(bert_ckpt_path)
             base_ckpt = {k.replace("module.", ""): v for k, v in ckpt['base_model'].items()}

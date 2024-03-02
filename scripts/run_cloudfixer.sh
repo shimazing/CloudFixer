@@ -1,9 +1,9 @@
 # logging
-wandb_usr=mazing
+wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=./data
-CODE_BASE_DIR=./
+DATASET_ROOT_DIR=../nfs-client/datasets
+CODE_BASE_DIR=../nfs-client/CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -23,7 +23,7 @@ classifier=point2vec
 classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 
 GPUS=(0 1 2 3)
 NUM_GPUS=4
@@ -51,9 +51,8 @@ shot_pl_loss_weight=0.3
 # cloudfixer
 t_min=0.02
 t_len=0.1
-t_max=0.12
 pow=1
-lam_l=10
+lam_l=1
 lam_h=10
 lr=0.2
 steps=30
@@ -61,10 +60,11 @@ warmup=0.2
 wd=0
 optim=adamax
 optim_end_factor=0.05
-subsample=1024
+subsample=2048
 weighted_reg=True
-rotation=0.02
+rotation=0.1
 ######################################################
+
 
 run_baselines() {
     num_steps=0           # placeholder
@@ -73,12 +73,13 @@ run_baselines() {
     test_lr=1e-4          # placeholder
     params_to_adapt="all" # placeholder
 
+    # CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
     CUDA_VISIBLE_DEVICES=0,1,2,3 python3 adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
+        --input_lr ${lr} \
         --rotation ${rotation} \
-        --t_max ${t_max} \
         --random_seed ${random_seed} \
         --pow ${pow} \
         --diffusion_steps 500 \
@@ -93,7 +94,7 @@ run_baselines() {
         --classifier ${classifier} \
         --classifier_dir ${classifier_dir} \
         --diffusion_dir ${diffusion_dir} \
-        --method cloudfixer \
+        --method ${method} \
         --adv_attack ${adv_attack} \
         --episodic ${episodic} \
         --test_optim ${test_optim} \
@@ -112,8 +113,14 @@ run_baselines() {
         --dua_decay_factor ${dua_decay_factor} \
         --bn_stats_prior ${bn_stats_prior} \
         --shot_pl_loss_weight ${shot_pl_loss_weight} \
+        --dda_steps ${dda_steps} \
+        --dda_guidance_weight ${dda_guidance_weight} \
+        --dda_lpf_method ${dda_lpf_method} \
+        --dda_lpf_scale ${dda_lpf_scale} \
+        --out_path ${out_path} \
         --exp_name ${exp_name} \
         --mode ${mode} \
+        --use_best_hparam \
         --model transformer \
         --input_lr ${lr} \
         --n_update ${steps} \
@@ -127,9 +134,11 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1
-    #i=$((i + 1))
+        2>&1 &
+        i=$((i + 1))
+    wait_n
 }
+
 
 run_cloudfixer_all_experiments() {
     CLASSIFIER_LIST=(${classifier})
@@ -139,7 +148,7 @@ run_cloudfixer_all_experiments() {
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="gaussian" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="gaussian cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
@@ -165,16 +174,16 @@ run_cloudfixer_all_experiments() {
     done
 }
 
+
 run_cloudfixer_adv() {
-    CLASSIFIER_LIST=(DGCNN)
+    CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
     BATCH_SIZE_LIST="64"
     METHOD_LIST="cloudfixer"
 
     scenario=normal
     imb_ratio=1
-    # CORRUPTION_LIST="original" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    CORRUPTION_LIST="lidar density_inc uniform gaussian upsampling distortion_rbf distortion_rbf_inv" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    CORRUPTION_LIST="cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do

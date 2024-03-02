@@ -1198,25 +1198,6 @@ run_label_distribution_shift_new() {
 }
 
 
-# run_baselines_modelnet40c_small_batch
-# run_baselines_pointda_small_batch
-# run_baselines_graspnet_small_batch
-
-# GPUS=(4 5 6 7)
-# NUM_GPUS=4
-# i=0
-
-# wait_n() {
-#   # limit the max number of jobs as NUM_MAX_JOB and wait
-#   background=($(jobs -p))
-#   local num_max_jobs=4
-#   echo $num_max_jobs
-#   if ((${#background[@]} >= num_max_jobs)); then
-#     wait -n
-#   fi
-# }
-
-
 ##############################################
 # CUDA_VISIBLE_DEVICES="4"
 # hparam_tune_modelnet40c

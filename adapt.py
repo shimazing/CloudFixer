@@ -19,8 +19,6 @@ from utils import logging
 from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
-# from utils.visualizer import visualize_pclist
-# from utils.chamfer_distance.chamfer_distance import ChamferDistance
 from chamfer_distance import ChamferDistance as chamfer_dist
 chamfer_dist_fn = chamfer_dist()
 
@@ -115,7 +113,6 @@ def parse_arguments():
     parser.add_argument('--lam_l', type=float, default=0)
     parser.add_argument('--lam_h', type=float, default=0)
     parser.add_argument('--t_min', type=float, default=0.02)
-    parser.add_argument('--t_max', type=float, default=0.2)
     parser.add_argument('--t_len', type=float, default=0.1)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
@@ -136,136 +133,22 @@ def parse_arguments():
         source_dataset = "scannet"
     yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, source_dataset)
     yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+
+    print(f"{args.use_best_hparam=}")
     print(f"{yaml_dir=}")
-    
-    print(f"before {args=}")
-    
+    print(f"{os.path.exists(yaml_dir)=}")
+
     if args.use_best_hparam and os.path.exists(yaml_dir):
         hparam_dict = yaml.load(open(yaml_dir, "r"), Loader=yaml.FullLoader)
         for hparams_to_search_str, best_hparam in hparam_dict.items():
             setattr(args, hparams_to_search_str, best_hparam)
-        print(f"after {args=}")
+        print(f"load best hyperparameters: {hparam_dict=}")
     return args
-
-
-@torch.enable_grad()
-def pre_trans(args, model, x, mask, ind, verbose=True):
-    #def knn(x, k=args.knn, mask=None, return_dist=False):
-    #    # mask : [B, N]
-    #    # x : [B, C=3, N]
-    #    inner = -2 * torch.matmul(x.transpose(2, 1), x)
-    #    xx = torch.sum(x ** 2, dim=1, keepdim=True)
-    #    pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
-    #    # B x N x N
-
-    #    if mask is not None:
-    #        B_ind, N_ind = (~mask).nonzero(as_tuple=True)
-    #        pairwise_distance[B_ind, N_ind] = -np.inf
-    #        pairwise_distance[B_ind, :, N_ind] = -np.inf
-    #    # (batch_size, num_points, k)
-    #    idx = pairwise_distance.topk(k=k, dim=-1)[1]
-    #    if return_dist:
-    #        B = x.shape[0]
-    #        N = x.shape[2]
-    #        dist =  -pairwise_distance[torch.arange(B)[:, None, None],
-    #                            torch.arange(N)[None, :, None],
-    #                idx] + 1e-8
-    #        is_valid = mask[torch.arange(B)[:, None, None], idx]
-    #        dist[~is_valid] = 0
-    #        n_valid = is_valid.float().sum(dim=-1)
-    #        return idx, (dist.sum(dim=-1) / (n_valid-1).clamp(min=1)).detach().clone()
-    #    return idx
-
-    def matching_loss(model, x, step, t=None):
-        if t is None:
-            t = (args.t_min * min(1, step/args.denoising_thrs) + (1 - min(1, step/args.denoising_thrs)) * max(args.t_min, args.t_max - 0.2)) + 0.2 * torch.rand(x.shape[0], 1).to(x.device)
-
-        if isinstance(model, nn.DataParallel):
-            model = model.module
-
-        gamma_t = model.inflate_batch_array(model.gamma(t), x)
-        alpha_t = model.alpha(gamma_t, x)
-        sigma_t = model.sigma(gamma_t, x)
-
-        node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
-        eps = model.sample_noise(n_samples=x.size(0),
-            n_nodes=x.size(1),
-            node_mask=node_mask,
-        )
-        z_t = x*alpha_t + eps*sigma_t
-        pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True)
-        loss = (pred_noise - eps).pow(2).mean()
-        return loss, z_t.detach().clone().cpu()
-
-    lr = args.input_lr
-    steps = args.n_update
-
-    delta = nn.Parameter(torch.zeros_like(x))
-    rotation = x.new_zeros((x.size(0), 6))
-    rotation[:, 0] = 1
-    rotation[:, 4] = 1
-    rotation = nn.Parameter(rotation)
-
-    optim = torch.optim.Adamax([
-        {
-            'params': [delta],
-            'lr':lr,
-        },
-        {
-            'params': [rotation],
-            'lr': 0.02,
-        }],
-        lr=lr,
-        weight_decay=args.weight_decay,
-        betas=(args.beta1, args.beta2)
-    )
-
-    scheduler = torch.optim.lr_scheduler.LinearLR(optim, start_factor=1,
-            end_factor=args.optim_end_factor, total_iters=steps)
-    _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
-            mask=(mask.squeeze(-1).bool()), return_dist=True)
-    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
-        None], ind]
-    weight = 1/knn_dist_square_mean.pow(args.pow)
-    if not args.weighted_reg:
-        weight = torch.ones_like(weight)
-    weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
-    for step in tqdm(range(steps), desc='pre trans', ncols=100):
-        rot = compute_rotation_matrix_from_ortho6d(rotation)
-        y = x + delta
-        if (step+1) == args.denoising_thrs: # completion stage
-            weight = weight * mask.squeeze(-1)
-            weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
-        y = y - y.mean(dim=1, keepdim=True)
-        if (step+1) >= args.denoising_thrs:
-            y = y @ rot
-        L21_norm = (torch.norm(delta, 2, dim=-1) * weight).sum(dim=1).mean() # B x N
-        matching, zt = matching_loss(model, y, step+1)
-        loss = matching + ((args.lam_h * np.cos(step/steps*np.pi/2) +
-            args.lam_l * (1-np.cos(step/steps*np.pi/2))) * L21_norm)
-        loss.backward()
-        optim.step()
-        optim.zero_grad()
-        scheduler.step()
-        if verbose and step % 10 == 0:
-            print()
-            print(step, "delta.abs()", delta.abs().mean())
-            print(step, "rotation", rotation.abs().mean(dim=0))
-            print(step, "mean", y.mean(dim=1).abs().mean())
-            print(step, "scale", y.flatten(1).std(1).mean())
-    rot = compute_rotation_matrix_from_ortho6d(rotation)
-    y = (x + delta)
-    y = y - y.mean(dim=1, keepdim=True)
-    y = y @ rot
-    return y
 
 
 def dda(args, model, x, mask, ind):
     from chamfer_distance import ChamferDistance
     chamfer_dist = ChamferDistance()
-
-    # if isinstance(model, nn.DataParallel):
-    #     model = model.module
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
     gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
@@ -286,7 +169,6 @@ def dda(args, model, x, mask, ind):
         sigma_t = model.module.sigma(gamma_t, x)
 
         t_m1 = torch.full((x.size(0), 1), (step - 1) / args.diffusion_steps).to(x.device)
-        #z_t_m1 = model.module.sample_p_zs_given_zt(t_m1, t, z_t, node_mask).detach()
         z_t_m1 = model(z_t, t, node_mask=node_mask,
                 sample_p_zs_given_zt=True,s=t_m1).detach()
 
@@ -427,21 +309,13 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     return x_trans
 
 
-
-
-
 def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind):
     global EMA, mom_pre, adaptation_time
 
     import time
     start = time.time()
 
-    # if isinstance(classifier, torch.nn.DataParallel):
-    #     classifier = classifier.module
-
     # input adaptation
-    if 'pre_trans' in args.method:
-        x = pre_trans(args, diffusion_model, x, mask, ind)
     if 'dda' in args.method:
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
@@ -528,7 +402,6 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             optimizer.step()
 
     end = time.time()
-    print(f"end: {end - start}")
     adaptation_time += end - start
 
     # output adaptation
@@ -559,14 +432,6 @@ def main(args):
     io = logging.IOStream(args)
     io.cprint(args)
     create_folders(args)
-    # if args.no_wandb:
-    #     mode = 'disabled'
-    # else:
-    #     mode = 'online' if args.online else 'offline'
-    # kwargs = {'entity': args.wandb_usr, 'name': args.exp_name, 'project': 'adapt', 'config': args,
-    #         'settings': wandb.Settings(_disable_stats=True), 'reinit': True, 'mode': mode}
-    # wandb.init(**kwargs)
-    # wandb.save('*.txt')
 
     ########## load dataset ##########
     if args.dataset.startswith('modelnet40c'):
@@ -687,46 +552,24 @@ def main(args):
 
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
-        import time
-        current = time.time()
-
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         mask = data[-2].to(device)
         ind = data[-1].to(device)
 
-        print(f"x.shape: {x.shape}")
-
-        print(f"1: {time.time() - current}")
-        current = time.time()
-
         if args.adv_attack:
             x = projected_gradient_descent(args, classifier, x, labels, F.cross_entropy, num_steps=10, step_size=4e-3, step_norm='inf', eps=0.16, eps_norm='inf')
         all_gt_list.extend(labels.cpu().tolist())
-
-        print(f"2: {time.time() - current}")
-        current = time.time()
 
         # reset source model and optimizer
         if args.episodic or ("sar" in args.method and EMA != None and EMA < 0.2):
             classifier, optimizer, _ = load_model_and_optimizer(classifier, optimizer, None, original_classifier_state, original_optimizer_state, None)
 
-        print(f"3: {time.time() - current}")
-        current = time.time()
-
-        print(f"original_classifier.device: {type(original_classifier)}")
-
         logits_before = original_classifier(x).detach()
-        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
-
-        print(f"4: {time.time() - current}")
-        current = time.time()
-
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
-        all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
-        print(f"5: {time.time() - current}")
-        current = time.time()
+        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
+        all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
@@ -735,8 +578,6 @@ def main(args):
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
-
-    print(f"average adaptation time: {adaptation_time / len(test_dataset.pc_list)}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 

@@ -4,6 +4,7 @@ from tqdm import tqdm
 import wandb
 import gc
 import yaml
+from itertools import combinations
 
 import numpy as np
 import torch
@@ -79,6 +80,11 @@ def parse_arguments():
     parser.add_argument('--dda_lpf_method', type=str, default='fps')
     parser.add_argument('--dda_lpf_scale', type=float, default=4)
 
+    parser.add_argument('--ours_steps', type=int, default=100)
+    parser.add_argument('--ours_guidance_weight', type=float, default=6)
+    parser.add_argument('--ours_lpf_method', type=str, default="")
+    parser.add_argument('--ours_lpf_scale', type=float, default=4)
+
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
     parser.add_argument('--probabilistic_model', type=str, default='diffusion', help='diffusion')
@@ -129,6 +135,10 @@ def parse_arguments():
         source_dataset = "scannet"
     yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, source_dataset)
     yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+
+    print(f"{args.use_best_hparam=}")
+    print(f"{yaml_dir=}")
+    print(f"{os.path.exists(yaml_dir)=}")
 
     if args.use_best_hparam and os.path.exists(yaml_dir):
         hparam_dict = yaml.load(open(yaml_dir, "r"), Loader=yaml.FullLoader)
@@ -198,16 +208,48 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
                 max(0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
     ################################################# End Scheduler
-
-    _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
+    knn_indices, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
     knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
         None], ind]
-    weight = 1/knn_dist_square_mean.pow(args.pow)
-    if not args.weighted_reg:
-        weight = torch.ones_like(weight)
+
+    if args.weighted_reg and args.reg_method == "inv_dist":
+        weight = 1 / knn_dist_square_mean.pow(args.pow)
+    elif args.weighted_reg and args.reg_method == "curvature_based":
+        knn_indices, knn_dist_square_mean = knn(x.transpose(2,1), k=5, mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
+
+        B, N, k, C = knn_indices.size(0), knn_indices.size(1), knn_indices.size(2), x.size(2)
+        knn_points = torch.gather(
+            x.unsqueeze(2).expand(B, N, k, C), dim=1, index=knn_indices.unsqueeze(-1).expand(B, N, k, C)
+        )
+        displacement_vectors = knn_points - x.unsqueeze(2).expand(B, N, k, C)
+        indices_combs = torch.tensor(list(combinations(range(k), 2)))
+        cross_products = torch.cross(
+            displacement_vectors[:, :, indices_combs[:, 0], :],
+            displacement_vectors[:, :, indices_combs[:, 1], :],
+            dim=-1
+        ) # (B, N, num_combs, C)
+        dot_products = torch.sum(cross_products * x.unsqueeze(2), dim=-1) # B, N, n_combs
+        negative_indices = dot_products < 0
+        cross_products[negative_indices.unsqueeze(-1).expand(B, N, len(indices_combs), C)] *= -1
+        cosine_similarity = torch.cosine_similarity(
+            cross_products.unsqueeze(2),
+            cross_products.unsqueeze(3),
+            dim=-1
+        )
+        average_cosine_similarity = torch.mean(cosine_similarity, dim=(2, 3))
+        weight = (average_cosine_similarity - average_cosine_similarity.min(dim=-1, keepdim=True)[0]) / (average_cosine_similarity.max(dim=-1, keepdim=True)[0] - average_cosine_similarity.min(dim=-1, keepdim=True)[0])
+         # weight = torch.ones_like(weight)
+        # print(f"{weight=}")
+        # print(f"{average_cosine_similarity=}")
+        # # weight = 1 - average_cosine_similarity
+        # print(f"2 {weight.shape=}")
+    else:
+        weight = torch.ones(x.shape[0], x.shape[1]).to(x.device)
+
     weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
     weight = weight * mask.squeeze(-1)
+
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
     delta = torch.nn.Parameter(torch.zeros_like(x))
     rotation = torch.nn.Parameter(x.new_zeros((x.size(0), 6)))
@@ -403,7 +445,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif 'dda' in args.method:
+    elif False: # 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     else:
         logits_after = classifier(x)
@@ -504,10 +546,10 @@ def main(args):
         classifier.cuda()
         classifier.setup()
         checkpoint = extract_model_checkpoint(
-            args.classifier_dir
-            #'ckpt/point2vec_modelnet40.ckpt'
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
         )
-        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False) # type: ignore
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
@@ -560,7 +602,7 @@ def main(args):
         logits_before = original_classifier(x).detach()
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
 
-        all_pred_before_list.extend(logits_before.argmax(dim=-1).cpu().tolist())
+        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
@@ -891,6 +933,8 @@ def vis(args):
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    print(f"args.mode: {args.mode}")
     if 'eval' in args.mode:
         main(args)
     if 'vis' in args.mode:

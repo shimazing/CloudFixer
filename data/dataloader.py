@@ -191,6 +191,7 @@ class ModelNet40C(Dataset):
 
         if self.jitter:
             pointcloud = jitter_pointcloud(pointcloud)
+
         if mask.sum() > self.subsample:
             valid = mask.nonzero()[0]
             pointcloud_ = pointcloud[mask.flatten()[:len(pointcloud)] > 0]

@@ -9,21 +9,12 @@ adv_attack=False # True, False
 scenario=normal
 imb_ratio=1
 
-# classifier
-#classifier=DGCNN
-#classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
-
-#classifier=pointMLP
-#classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
-
-#classifier=pointNeXt
-#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
-
 classifier=point2vec
-classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
+classifier_dir=${CODE_BASE_DIR}/ckpt/point2vec_modelnet40.ckpt
 
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+
 #################### placeholders ####################
 # lame
 lame_affinity=rbf
@@ -43,11 +34,6 @@ dua_decay_factor=0.94
 bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
-# dda
-dda_steps=50
-dda_guidance_weight=6
-dda_lpf_method=fps
-dda_lpf_scale=4
 # cloudfixer
 t_min=0.02
 t_len=0.1
@@ -62,10 +48,8 @@ optim=adamax
 optim_end_factor=0.05
 subsample=2048
 weighted_reg=True
-reg_method=inv_dist
-rotation=0.02
+rotation=0.1
 ######################################################
-
 
 run_baselines() {
     num_steps=0           # placeholder
@@ -74,7 +58,7 @@ run_baselines() {
     test_lr=1e-4          # placeholder
     params_to_adapt="all" # placeholder
 
-    CUDA_VISIBLE_DEVICES=4,5,6,7 python3 adapt_poc.py \
+    CUDA_VISIBLE_DEVICES=6,7 python3 adapt_poc.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
@@ -133,9 +117,8 @@ run_baselines() {
         --optim_end_factor ${optim_end_factor} \
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
-        --reg_method ${reg_method} \
         --wandb_usr ${wandb_usr} \
-        2>&1
+        2>&1 &
         i=$((i + 1))
     wait_n
 }
@@ -144,15 +127,13 @@ run_baselines() {
 run_cloudfixer_all_experiments() {
     CLASSIFIER_LIST=(${classifier})
     SEED_LIST="2"
-    BATCH_SIZE_LIST="128"
+    BATCH_SIZE_LIST="64"
     METHOD_LIST="cloudfixer"
 
     scenario=normal
     imb_ratio=1
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    # CORRUPTION_LIST="density"
     SEVERITY_LIST="5"
-
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -161,33 +142,13 @@ run_cloudfixer_all_experiments() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         for method in ${METHOD_LIST}; do
-                            subsample=2048
-                            rotation=0.02
-                            if [[ "$corruption" == "occlusion" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "cutout" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "rotation" ]]; then
-                                rotation=0.05
+                            if [[ "$corruption" == "upsampling" ]]; then
+                                batch_size=16
+                            else
+                                batch_size=64
                             fi
-
-                            batch_size=128
-
-                            # reg_method=uniform
-                            # out_path=./exps
-                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
-                            # mode=eval
-                            # run_baselines
-
-                            # reg_method=inv_dist
-                            # out_path=./exps
-                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
-                            # mode=eval
-                            # run_baselines
-
-                            reg_method=curvature_based
-                            out_path=./exps
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
+                            
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval
                             run_baselines
                         done
@@ -198,19 +159,10 @@ run_cloudfixer_all_experiments() {
     done
 }
 
-GPUS=(6 7)
-NUM_GPUS=${#GPUS[@]}
-i=0
-num_max_jobs=2
 ##############################################
-
-wait_n() {
-  # limit the max number of jobs as NUM_MAX_JOB and wait
-  background=($(jobs -p))
-  echo ${num_max_jobs}
-  if ((${#background[@]} >= num_max_jobs)); then
-    wait -n
-  fi
-}
+# GPUS=(6 7)
+# NUM_GPUS=${#GPUS[@]}
+# i=0
+##############################################
 
 run_cloudfixer_all_experiments

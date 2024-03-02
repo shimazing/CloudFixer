@@ -133,9 +133,11 @@ run_baselines() {
         --optim_end_factor ${optim_end_factor} \
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
-        --reg_method ${reg_method} \
         --wandb_usr ${wandb_usr} \
-        2>&1
+        --reg_method ${reg_method} \
+        --global_bias ${global_bias} \
+        --global_scaling ${global_scaling} \
+        2>&1 &
         i=$((i + 1))
     wait_n
 }
@@ -150,7 +152,6 @@ run_cloudfixer_all_experiments() {
     scenario=normal
     imb_ratio=1
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    # CORRUPTION_LIST="density"
     SEVERITY_LIST="5"
 
     for random_seed in ${SEED_LIST}; do
@@ -173,21 +174,43 @@ run_cloudfixer_all_experiments() {
 
                             batch_size=128
 
-                            # reg_method=uniform
-                            # out_path=./exps
-                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
-                            # mode=eval
-                            # run_baselines
+                            reg_method=uniform
+                            global_bias=false
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
 
-                            # reg_method=inv_dist
-                            # out_path=./exps
-                            # exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
-                            # mode=eval
-                            # run_baselines
+                            reg_method=inv_dist
+                            global_bias=false
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
 
                             reg_method=curvature_based
+                            global_bias=false
+                            global_scaling=false
                             out_path=./exps
-                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=inv_dist
+                            global_bias=true
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=inv_dist
+                            global_bias=false
+                            global_scaling=true
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
                             mode=eval
                             run_baselines
                         done
@@ -198,9 +221,9 @@ run_cloudfixer_all_experiments() {
     done
 }
 
-GPUS=(6 7)
-NUM_GPUS=${#GPUS[@]}
-i=0
+# GPUS=(6 7)
+# NUM_GPUS=${#GPUS[@]}
+# i=0
 num_max_jobs=2
 ##############################################
 

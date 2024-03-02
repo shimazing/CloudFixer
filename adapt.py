@@ -83,8 +83,6 @@ def parse_arguments():
     parser.add_argument('--model', type=str, default='transformer')
     parser.add_argument('--probabilistic_model', type=str, default='diffusion', help='diffusion')
     parser.add_argument('--diffusion_dir', type=str, default='outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy')
-
-    # diffusion model hyperparameters
     parser.add_argument('--diffusion_steps', type=int, default=500)
     parser.add_argument('--diffusion_noise_schedule', type=str, default='polynomial_2', help='learned, cosine, linear')
     parser.add_argument('--diffusion_noise_precision', type=float, default=1e-5)
@@ -92,27 +90,32 @@ def parse_arguments():
     parser.add_argument('--scale_mode', type=str, default='unit_std')
     parser.add_argument('--n_nodes', type=int, default=1024)
     parser.add_argument('--dp', type=eval, default=True, help='True | False')
-    parser.add_argument('--knn', type=int, default=5)
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
+
+    # cloudfixer hyperparameters
+    parser.add_argument('--input_lr', type=float, default=1e-2)
+    parser.add_argument('--n_update', default=30, type=int)
+    parser.add_argument('--rotation', default=0.1, type=float)
+    parser.add_argument('--knn', type=int, default=5)
     parser.add_argument('--weighted_reg', type=eval, default=True)
     parser.add_argument('--reg_method', type=str, default='inv_dist')
-    parser.add_argument('--n_update', default=30, type=int)
+    parser.add_argument('--pow', type=int, default=1)
+
     parser.add_argument('--warmup', default=0.2, type=float)
-    parser.add_argument('--input_lr', type=float, default=1e-2)
-    parser.add_argument('--rotation', default=0.1, type=float)
+    parser.add_argument('--lam_l', type=float, default=0)
+    parser.add_argument('--lam_h', type=float, default=0)
+    parser.add_argument('--t_min', type=float, default=0.02)
+    parser.add_argument('--t_len', type=float, default=0.1)
+
     parser.add_argument('--optim', type=str, default='adamax')
     parser.add_argument('--optim_end_factor', type=float, default=0.05)
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--beta1', type=float, default=0.9)
     parser.add_argument('--beta2', type=float, default=0.999)
-    parser.add_argument('--lam_l', type=float, default=0)
-    parser.add_argument('--lam_h', type=float, default=0)
-    parser.add_argument('--t_min', type=float, default=0.02)
-    parser.add_argument('--t_len', type=float, default=0.1)
+
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
-    parser.add_argument('--pow', type=int, default=1)
     parser.add_argument('--denoising_thrs', type=int, default=0)
     args = parser.parse_args()
     if 'eval' in args.mode:
@@ -203,7 +206,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
     knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
         None], ind]
-    weight = 1/knn_dist_square_mean.pow(args.pow)
+    weight = 1 / knn_dist_square_mean.pow(args.pow)
     if not args.weighted_reg:
         weight = torch.ones_like(weight)
     weight = weight / weight.sum(dim=-1, keepdim=True) # normalize

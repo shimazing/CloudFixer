@@ -102,7 +102,6 @@ def parse_arguments():
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
     parser.add_argument('--weighted_reg', type=eval, default=True)
-    parser.add_argument('--reg_method', type=str, default='inv_dist')
     parser.add_argument('--n_update', default=30, type=int)
     parser.add_argument('--warmup', default=0.2, type=float)
     parser.add_argument('--input_lr', type=float, default=1e-2)
@@ -120,6 +119,11 @@ def parse_arguments():
     parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--pow', type=int, default=1)
     parser.add_argument('--denoising_thrs', type=int, default=0)
+
+    parser.add_argument('--reg_method', type=str, default='inv_dist')
+    parser.add_argument('--global_bias', type=str, default='')
+    parser.add_argument('--global_scaling', type=str, default='')
+
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True
@@ -264,6 +268,32 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))
+
+    if args.global_bias == "true":
+        bias = torch.nn.Parameter(x.new_zeros((x.size(0), 1, 3)))
+        bias.requires_grad_(True)
+
+        optim = torch.optim.Adamax([
+            {'params': [delta], 'lr': args.input_lr},
+            {'params': [rotation], 'lr': args.rotation},
+            {'params': [bias], 'lr': args.input_lr},
+            ],
+            lr=args.input_lr, weight_decay=args.weight_decay,
+            betas=(args.beta1, args.beta2)
+        )
+    elif args.global_scaling == "true":
+        scaling = torch.nn.Parameter(torch.diag(x.new_ones(3)).unsqueeze(0).expand(x.size(0), 3, 3).clone())
+        scaling.requires_grad_(True)
+
+        optim = torch.optim.Adamax([
+            {'params': [delta], 'lr': args.input_lr},
+            {'params': [rotation], 'lr': args.rotation},
+            {'params': [scaling], 'lr': args.rotation},
+            ],
+            lr=args.input_lr, weight_decay=args.weight_decay,
+            betas=(args.beta1, args.beta2)
+        )
+
     scheduler = get_linear_schedule_with_warmup(
                 optim,
                 int(args.n_update*args.warmup),
@@ -285,6 +315,11 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
             sigma_t = model.module.sigma(gamma_t, x)
         eps = torch.randn_like(x)
         x_trans = (x+delta)
+        if args.global_bias == "true":
+            x_trans += bias
+        elif args.global_scaling == "true":
+            x_trans = x_trans @ scaling
+
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
         with torch.no_grad():

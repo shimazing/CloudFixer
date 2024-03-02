@@ -263,7 +263,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1
+        2>&1 &
         i=$((i + 1))
     wait_n
 }
@@ -276,38 +276,39 @@ run_method_all() {
     SEED_LIST="2"
 
     BATCH_SIZE_LIST="64"
-    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    CORRUPTION_LIST="background"
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    # METHOD_LIST="tent lame sar pl dua shot memo dda"
-    METHOD_LIST="sar"
+    # METHOD_LIST="pl tent shot sar dua lame memo dda"
+    METHOD_LIST="pl tent shot sar dua lame memo"
+
+    # placeholders
     episodic=False
     test_optim=AdamW
     params_to_adapt="LN BN GN"
     test_lr=1e-4 # 1e-4 1e-3 1e-2
     num_steps=10 # 1 3 5 10
 
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for corruption in ${CORRUPTION_LIST}; do
-                for severity in ${SEVERITY_LIST}; do
-                    dataset=modelnet40c_${corruption}_${severity}
-                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                    for method in ${METHOD_LIST}; do
-                        if [[ "$method" == "memo" ]]; then
-                            batch_size=1
-                        else
-                            batch_size=64
-                        fi
-                        out_path=${CODE_BASE_DIR}/exps_eccv
-                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for corruption in ${CORRUPTION_LIST}; do
+    #             for severity in ${SEVERITY_LIST}; do
+    #                 dataset=modelnet40c_${corruption}_${severity}
+    #                 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    #                 for method in ${METHOD_LIST}; do
+    #                     if [[ "$method" == "memo" ]]; then
+    #                         batch_size=1
+    #                     else
+    #                         batch_size=64
+    #                     fi
+    #                     out_path=${CODE_BASE_DIR}/exps_eccv
+    #                     exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+    #                     mode=eval
+    #                     run_baselines
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
     # BATCH_SIZE_LIST="64"
     # scenario=temporally_correlated
@@ -385,27 +386,27 @@ run_method_all() {
     #     done
     # done
 
-    scenario="normal"
-    BATCH_SIZE_LIST="1"
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
-    METHOD_LIST="tent lame sar pl dua shot"
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for corruption in ${CORRUPTION_LIST}; do
-                for severity in ${SEVERITY_LIST}; do
-                    dataset=modelnet40c_${corruption}_${severity}
-                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                    for method in ${METHOD_LIST}; do
-                        out_path=${CODE_BASE_DIR}/exps_eccv
-                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
+    # scenario="normal"
+    # BATCH_SIZE_LIST="1"
+    # CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    # SEVERITY_LIST="5"
+    # METHOD_LIST="tent lame sar pl dua shot"
+    # for random_seed in ${SEED_LIST}; do
+    #     for batch_size in ${BATCH_SIZE_LIST}; do
+    #         for corruption in ${CORRUPTION_LIST}; do
+    #             for severity in ${SEVERITY_LIST}; do
+    #                 dataset=modelnet40c_${corruption}_${severity}
+    #                 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    #                 for method in ${METHOD_LIST}; do
+    #                     out_path=${CODE_BASE_DIR}/exps_eccv
+    #                     exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
+    #                     mode=eval
+    #                     run_baselines
+    #                 done
+    #             done
+    #         done
+    #     done
+    # done
 
     # SOURCE_DOMAIN_LIST=(modelnet modelnet shapenet shapenet scannet scannet)
     # TARGET_DOMAIN_LIST=(shapenet scannet modelnet scannet modelnet shapenet)
@@ -461,7 +462,7 @@ run_dda() {
     classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
     SEED_LIST="2"
-    BATCH_SIZE_LIST="256"
+    BATCH_SIZE_LIST="128"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
     METHOD_LIST="dda"
@@ -474,9 +475,9 @@ run_dda() {
                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                     for method in ${METHOD_LIST}; do
                         if [[ "$corruption" ==  "upsampling" ]]; then
-                            batch_size=128
+                            batch_size=64
                         else
-                            batch_size=256
+                            batch_size=128
                         fi
                         out_path=${CODE_BASE_DIR}/exps_eccv
                         exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
@@ -489,7 +490,7 @@ run_dda() {
     done
 
     scenario=label_distribution_shift
-    imb_ratio=10
+    imb_ratio=100
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for corruption in ${CORRUPTION_LIST}; do
@@ -498,9 +499,9 @@ run_dda() {
                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                     for method in ${METHOD_LIST}; do
                         if [[ "$corruption" ==  "upsampling" ]]; then
-                            batch_size=128
+                            batch_size=64
                         else
-                            batch_size=256
+                            batch_size=128
                         fi
                         out_path=${CODE_BASE_DIR}/exps_eccv
                         exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
@@ -513,31 +514,31 @@ run_dda() {
         done
     done
 
-    # scenario=mixed
-    # CORRUPTION_LIST="background"
-    # SEVERITY_LIST="5"
-    # for random_seed in ${SEED_LIST}; do
-    #     for batch_size in ${BATCH_SIZE_LIST}; do
-    #         for corruption in ${CORRUPTION_LIST}; do
-    #             for severity in ${SEVERITY_LIST}; do # "3 5"
-    #                 dataset=modelnet40c_${corruption}_${severity}
-    #                 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-    #                 for method in ${METHOD_LIST}; do
-    #                     if [[ "$corruption" ==  "upsampling" ]]; then
-    #                         batch_size=128
-    #                     else
-    #                         batch_size=256
-    #                     fi
-    #                     out_path=${CODE_BASE_DIR}/exps_eccv
-    #                     exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-    #                     mode=eval
-    #                     scenario=${scenario}
-    #                     run_baselines
-    #                 done
-    #             done
-    #         done
-    #     done
-    # done
+    scenario=mixed
+    CORRUPTION_LIST="background"
+    SEVERITY_LIST="5"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for corruption in ${CORRUPTION_LIST}; do
+                for severity in ${SEVERITY_LIST}; do # "3 5"
+                    dataset=modelnet40c_${corruption}_${severity}
+                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                    for method in ${METHOD_LIST}; do
+                        if [[ "$corruption" ==  "upsampling" ]]; then
+                            batch_size=64
+                        else
+                            batch_size=128
+                        fi
+                        out_path=${CODE_BASE_DIR}/exps_eccv
+                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
+                        mode=eval
+                        scenario=${scenario}
+                        run_baselines
+                    done
+                done
+            done
+        done
+    done
 }
 
 
@@ -552,17 +553,17 @@ wait_n() {
   fi
 }
 
-GPUS=(0 1 2 3 4 5)
+GPUS=(0 1 2 3)
 NUM_GPUS=${#GPUS[@]}
 i=0
 ##############################################
-# WHOLE_DEVICES="0,1,2,3,4,5"
-# multi_gpu="true"
-# num_max_jobs=1
-# run_dda
-# python3 utils/send_email.py --message "finish modelnet40_c_dda"
+WHOLE_DEVICES="0,1,2,3"
+multi_gpu="true"
+num_max_jobs=1
+run_dda
+python3 utils/send_email.py --message "finish modelnet40_c_dda"
 
-num_max_jobs=6
+num_max_jobs=4
 multi_gpu="false"
 run_method_all
 python3 utils/send_email.py --message "finish modelnet40_c_all"

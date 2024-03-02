@@ -66,7 +66,7 @@ class ModelNet40C(Dataset):
     def load_modelnet40(self, data_path, partition='train'):
         all_data = []
         all_label = []
-        for h5_name in glob.glob(os.path.join('data/modelnet40_ply_hdf5_2048', f'ply_data_{partition}*.h5')):
+        for h5_name in glob.glob(os.path.join(data_path, f'ply_data_{partition}*.h5')):
             f = h5py.File(h5_name.strip(), 'r')
             data = f['data'][:].astype('float32')
             label = f['label'][:].astype('int64')
@@ -131,7 +131,6 @@ class ModelNet40C(Dataset):
             sorted_indices = np.argsort(all_label)
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
-            print(f"all_label: {all_label}")
 
         if num_classes == 40:
             return all_data, all_label
@@ -206,6 +205,7 @@ class ModelNet40C(Dataset):
             mask_[valid[centroids]] = 1 # reg줄  subsample 된 것! 나머지는
             assert np.all(mask[mask_==1] == 1)
             mask = mask_
+            #if self.subsample <= NUM_POINTS: # or
             if self.corruption == 'original':
                 pointcloud = pointcloud[mask.squeeze(-1).astype(bool)]
                 mask = mask[mask.squeeze(-1).astype(bool)]
@@ -228,9 +228,6 @@ class ModelNet40C(Dataset):
                 assert len(pointcloud) == len(ind)
         return (pointcloud, label, mask, ind)
 
-
-    def __len__(self):
-        return len(self.pc_list)
 
     def __len__(self):
         return len(self.pc_list)
@@ -264,8 +261,6 @@ class PointDA10(Dataset):
         self.label_to_idx = self.get_label_to_idx(args)
         self.idx_to_label = {idx:label for label, idx in self.label_to_idx.items()}
         self.pc_list, self.label_list = self.get_data(args, partition)
-
-        print(f"self.label_list: {self.label_list}")
 
         # print dataset statistics
         unique, counts = np.unique(self.label_list, return_counts=True)
@@ -578,13 +573,11 @@ class ImbalancedDatasetSampler(torch.utils.data.sampler.Sampler):
         df = df.sort_index()
 
         label_to_count = df["label"].value_counts()
-        weights = 1.0 / label_to_count[df["label"]].to_numpy()
-        labels = df["label"].to_numpy()
+        weights = 1.0 / label_to_count[df["label"]]
         if imb_ratio:
             selected_idx = np.random.choice(len(label_to_count), int(0.1 * len(label_to_count)), replace=False)
-            print(f"selected_idx: {selected_idx}")
             for idx in selected_idx:
-                weights[labels == idx] *= imb_ratio
+                weights[df["label"] == idx] *= imb_ratio
         self.weights = torch.DoubleTensor(weights.tolist())
 
 
@@ -621,6 +614,7 @@ class ElasticDistortion:
         self._granularity = granularity
         self._magnitude = magnitude
 
+
     @staticmethod
     def elastic_distortion(coords, granularity, magnitude):
         if not isinstance(coords, np.ndarray):
@@ -651,7 +645,6 @@ class ElasticDistortion:
 
 
     def __call__(self, data):
-        # coords = data.pos / self._spatial_resolution
         if self._apply_distorsion:
             if random.random() < 0.95:
                 for i in range(len(self._granularity)):
@@ -660,6 +653,4 @@ class ElasticDistortion:
 
 
     def __repr__(self):
-        return "{}(apply_distorsion={}, granularity={}, magnitude={})".format(
-            self.__class__.__name__, self._apply_distorsion, self._granularity, self._magnitude,
-        )
+        return f"{self.__class__.__name__}(apply_distorsion={self._apply_distorsion}, granularity={self._granularity}, magnitude={self._magnitude})"

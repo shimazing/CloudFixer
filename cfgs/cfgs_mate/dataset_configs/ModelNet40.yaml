@@ -1,5 +1,5 @@
 NAME: ModelNet
-DATA_PATH: ./data/modelnet40_normal_resampled
-N_POINTS: 8192
+DATA_PATH: ./data/modelnet40_c
+N_POINTS: 1024
 NUM_CATEGORY: 40
 USE_NORMALS: FALSE

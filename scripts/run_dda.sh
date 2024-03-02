@@ -12,8 +12,8 @@ scenario=normal
 imb_ratio=1
 
 # classifier
-classifier=DGCNN
-classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_modelnet40_best_test.pth
+classifier=point2vec
+classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
@@ -51,7 +51,7 @@ bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
 # dda
-dda_steps=100
+dda_steps=50
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
@@ -80,7 +80,7 @@ run_baselines() {
         params_to_adapt="all" # placeholder
         num_steps=1 # placeholder
 
-        dda_steps=100
+        dda_steps=50
         dda_guidance_weight=6
         dda_lpf_method=fps
         dda_lpf_scale=4
@@ -153,7 +153,7 @@ run_baselines() {
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        2>&1 &
+        2>&1
         i=$((i + 1))
     wait_n
 }

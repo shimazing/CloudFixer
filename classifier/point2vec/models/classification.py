@@ -204,7 +204,7 @@ class Point2VecClassification(pl.LightningModule):
                 logger.experiment.define_metric("val_top_3_acc", summary="last,max")
                 logger.experiment.define_metric("val_macc", summary="last,max")
 
-    def forward(self, points: torch.Tensor) -> torch.Tensor:
+    def forward(self, points: torch.Tensor, return_feature=False) -> torch.Tensor:
         # points: (B, N, 3)
         tokens: torch.Tensor  # (B, T, C)
         centers: torch.Tensor  # (B, T, 3)
@@ -240,6 +240,9 @@ class Point2VecClassification(pl.LightningModule):
                 embedding = torch.max(tokens, dim=1).values
             case _:
                 raise ValueError(f"Unknown cls_head_pooling: {self.hparams.cls_head_pooling}")  # type: ignore
+
+        if return_feature:
+            return embedding
         logits = (
             self.cls_head(embedding)  # type: ignore
             if isinstance(tokens, torch.Tensor)

@@ -65,9 +65,10 @@ warmup=0.2
 wd=0
 optim=adamax
 optim_end_factor=0.05
-subsample=2048
+subsample=4096
 weighted_reg=True
-rotation=0
+rotation=0.02
+num_workers=0
 ######################################################
 
 
@@ -132,6 +133,8 @@ python3 adapt.py \
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
+        --num_workers ${num_workers} \
+	--vote ${vote} \
         2>&1
         #i=$((i + 1))
 }
@@ -146,8 +149,9 @@ run_cloudfixer_all_experiments() {
 
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="gaussian" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="8"
+    CORRUPTION_LIST="uniform impulse" #"distortion_rbf distortion_rbf_inv" # cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    subsample=4096
+    SEVERITY_LIST="5"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
@@ -156,10 +160,21 @@ run_cloudfixer_all_experiments() {
                         dataset=shapenetcore_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/shapenet_c #modelnet40_c
                         for method in ${METHOD_LIST}; do
-                            if [[ "$corruption" == "upsampling" ]]; then
-                                batch_size=16
-                            else
-                                batch_size=64
+                            batch_size=64
+                            steps=30
+			    vote=5
+                            #if [[ "$corruption" == "upsampling" ]]; then
+                            #    batch_size=128
+                            if [[ "$corruption" == "lidar" ]]; then
+                                subsample=760
+                                #steps=30
+                            ##elif [[ "$corruption" == "occlusion" ]]; then
+                            ##    subsample=4096
+                            ##    steps=0
+                            ##elif [[ "$corruption" == "background" ]]; then
+                            ##    lam_l=1
+                            #else
+                            #    batch_size=128
                             fi
                             exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval

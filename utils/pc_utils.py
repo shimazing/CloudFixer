@@ -1285,7 +1285,7 @@ def low_pass_filtering(x, method, scale):
     if not method or scale == 1:
         return x
     elif method == 'fps':
-        return farthest_point_sample(x, npoint=int(x.shape[1] / scale), device=x.device)[-1]
+        return farthest_point_sample(x.swapaxes(1, 2), npoint=int(x.shape[1] / scale), device=x.device)[-1].swapaxes(1, 2)
     elif method == 'mean':
         return x
     elif method == 'median':

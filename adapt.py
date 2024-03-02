@@ -33,7 +33,7 @@ def parse_arguments():
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
     parser.add_argument('--exp_name', type=str, default='adaptation')
-    parser.add_argument('--num_workers', type=int, default=8, help='Number of worker for the dataloader')
+    parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
     parser.add_argument('--online', type=bool, default=True, help='True = wandb online -- False = wandb offline')
     parser.add_argument('--wandb_usr', type=str, default='unknown')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb')
@@ -117,6 +117,7 @@ def parse_arguments():
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--denoising_thrs', type=int, default=0)
+    parser.add_argument('--vote',type=int, default=1)
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True
@@ -248,30 +249,50 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         x_trans = (x+delta)
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
+        z_loss = 0
         with torch.no_grad():
             if args.dataset.startswith('shapenetcore'):
                 # model is lion
-                num_classes = model.priors[1].num_classes
-                model.priors[1].num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
-                model.vae.decoder.num_points = num_points
-                all_z, _, _ = model.vae.encode(x_trans)
-                all_z = make_4d(all_z)
-                decomposed_z = model.vae.decompose_eps(all_z)
-                updated_z = []
-                for latent_id, z in enumerate(decomposed_z):
-                    noise = torch.randn_like(z)
-                    z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
-                    if latent_id == 0:
-                        pred_noise = model.priors[latent_id](z_t, t)
-                    else:
-                        #cond = decomposed_z[0] # or updated_z[0]
-                        cond = updated_z[0]
-                        cond = model.vae.global2style(cond) # squeeze
-                        pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
-                    est_z = (z_t - sigma_t * pred_noise) / alpha_t
-                    updated_z.append(est_z)
+                num_classes = model.priors[1].module.num_classes
+                model.priors[1].module.num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
+                model.vae.module.decoder.num_points = num_points
+                #all_z, _, _ = model.vae.encode(x_trans)
+                with torch.no_grad(): #torch.enable_grad():
+                    #model.vae.train()
+                    all_z, _, _ = model.vae(encode=True, x=x_trans)
+                    all_z = make_4d(all_z)
+                    #decomposed_z = model.vae.decompose_eps(all_z)
+                    decomposed_z = model.vae.module.decompose_eps(all_z)
+                    updated_z = []
+                    for latent_id, z in enumerate(decomposed_z):
+                        noise = torch.randn_like(z)
+                        z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
+                        with torch.no_grad():
+                            if latent_id == 0:
+                                pred_noise = model.priors[latent_id](z_t, t)
+                            else:
+                                #cond = decomposed_z[0] # or updated_z[0]
+                                cond = updated_z[0]
+                                cond = model.vae(global2style=True,
+                                        style=cond) # squeeze
+                                pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
+                            est_z = (z_t - sigma_t * pred_noise) / alpha_t
+                        if latent_id == 0:
+                            #z_loss = z_loss #+ (z-est_z).pow(2).sum(dim=1).mean()
+                            #updated_z.append(z.clone().detach())
+                            updated_z.append(est_z)
+                        else:
+                            z_reshaped = z.view(*x_trans.shape[:2], -1)
+                            est_z_reshape = est_z.view(*x_trans.shape[:2], -1)
+                            dist1_z, dist2_z, _, _ = chamfer_dist_fn(z_reshaped[:, :, :3],
+                                est_z_reshape[:, :, :3])
+                            #z_loss = z_loss + dist1_z.mean() + dist2_z.mean()
+                            updated_z.append(est_z)
 
-                x_trans_est = model.vae.decoder(None, beta=None,
+                x_trans_est = model.vae(#.decoder(
+                        decoder=True,
+                        first_arg=None,
+                        beta=None,
                         context=updated_z[1].view(len(t),-1), # local
                         style=updated_z[0].view(len(t), -1) # global
                         )
@@ -284,7 +305,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         matching = dist1.mean() + dist2.mean()
         L2_norm = (delta.pow(2) * weight[:, :, None]).sum(dim=1).mean()
         norm = L2_norm * (args.lam_h * (1-iter/args.n_update) + args.lam_l * iter / args.n_update)
-        loss = matching + norm
+        loss = matching + norm + z_loss
         loss.backward()
         optim.step()
         scheduler.step()
@@ -315,7 +336,9 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
     if 'cloudfixer' in args.method:
-        x = cloudfixer(args, diffusion_model, x, mask, ind)
+        x_list = [cloudfixer(args, diffusion_model, x, mask, ind).detach().clone()
+                for v in range(args.vote)]
+        x = x_list[0] #cloudfixer(args, diffusion_model, x, mask, ind)
 
     # model adaptation
     for _ in range(1, args.num_steps + 1):
@@ -332,13 +355,19 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             _ = classifier(x)
         if 'bn_stats' in args.method:
             _ = classifier(x)
-
         # model parameter adaptation
         if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
-            logits = classifier(x)
-            loss = softmax_entropy(logits).mean()
+            if 'cloudfixer' in self.method and self.vote > 1:
+                loss = 0
+                for x_ in x_list:
+                    logits = classifier(x_)
+                    loss = loss + softmax_entropy(logits).mean()
+                loss /= selfvote
+            else:
+                logits = classifier(x)
+                loss = softmax_entropy(logits).mean()
             loss.backward()
         if 'sar' in args.method:
             logits = classifier(x)
@@ -408,6 +437,13 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         logits_after = batch_evaluation(args, classifier, x)
     elif 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
+    elif 'cloudfixer' in args.method:
+        probs = 0
+        for x_ in x_list:
+            probs = probs + classifier(x_).softmax(dim=-1)
+        probs /= args.vote
+        print("voting", args.vote)
+        logits_after = probs.log()
     else:
         logits_after = classifier(x)
 
@@ -459,7 +495,11 @@ def main(args):
             from cfgs.default_config_lion import cfg as config_lion
             config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
             lion = LION(config_lion)
-            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            lion.load_model('ckpt/lion_ckpt/epoch_7999_iters_1527999.pt')
+            #lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
+            lion.priors[0] = nn.DataParallel(lion.priors[0]).eval()
+            lion.priors[1] = nn.DataParallel(lion.priors[1]).eval()
+            lion.vae = nn.DataParallel(lion.vae).eval()
             model = lion
         else:
             model = get_model(args, device)
@@ -521,8 +561,12 @@ def main(args):
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+            #classifier.load_model_from_ckpt('ckpt/MATE_shapenet_jt.pth', False)
         else:
-            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
+            config = cfg_from_yaml_file(
+                    #'cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml'
+                    'cfgs/cfgs_mate/tta/tta_modelnet.yaml'
+                    )
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
             classifier.rotate = args.rotate

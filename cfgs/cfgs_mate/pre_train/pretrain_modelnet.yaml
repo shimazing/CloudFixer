@@ -22,7 +22,7 @@ dataset : {
 model : {
   NAME: Point_MAE,
   group_size: 32,
-  num_group: 64,
+  num_group: 32,
   loss: cdl2,
   cls_dim: 40,
   num_hid_cls_layers: 2,

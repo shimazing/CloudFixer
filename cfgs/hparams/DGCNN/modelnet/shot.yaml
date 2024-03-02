@@ -1,0 +1,3 @@
+test_lr: 0.01
+num_steps: 10
+shot_pl_loss_weight: 0

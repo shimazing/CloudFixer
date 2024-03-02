@@ -1,0 +1,4 @@
+test_lr: 0.0001
+num_steps: 3
+sar_ent_threshold: 0.6
+sar_eps_threshold: 0.1

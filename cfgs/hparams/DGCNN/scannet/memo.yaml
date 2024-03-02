@@ -1,0 +1,3 @@
+test_lr: 1.0e-06
+num_steps: 1
+memo_num_augs: 64

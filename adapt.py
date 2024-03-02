@@ -753,6 +753,11 @@ def main(args):
 
 
 def tune_tta_hparams(args):
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    print(f"{yaml_parent_dir=}")
+    print(f"{yaml_dir=}")
+
     import itertools, random
     if 'tent' in args.method:
         test_lr_list = [1e-4, 1e-3, 1e-2]

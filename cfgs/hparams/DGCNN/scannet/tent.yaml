@@ -1,0 +1,2 @@
+test_lr: 0.01
+num_steps: 10

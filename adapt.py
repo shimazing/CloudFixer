@@ -443,10 +443,11 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     elif 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
     elif 'mate' in args.method:
-        logits_after = classifier.module.classification_only( # TODO: debug this
-            x.float().cuda(),
-            None,
-        )
+        logits_after =classifier(pts=x.cuda(), classifiation_only=True)
+        # logits_after = classifier.module.classification_only( # TODO: debug this
+        #     x.float().cuda(),
+        #     None,
+        # )
     elif 'cloudfixer' in args.method:
         probs = 0
         for x_ in x_list:

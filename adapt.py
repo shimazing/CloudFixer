@@ -203,6 +203,14 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
     ################################################# End Scheduler
 
+    # if args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+    #     x = scale(x.cpu().numpy(), scale_mode='unit_std')
+    #     x = rotate_pc(x)
+    #     # for i in range(len(x)):
+    #     #     new_xi = scale(x[i].cpu().numpy(), 'unit_std')
+    #     #     new_xi = torch.tensor(rotate_pc(new_xi), device=x.device)
+    #     #     x[i] = new_xi
+
     _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
     knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
@@ -220,6 +228,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     rotation_base[:, 4] = 1
     delta.requires_grad_(True)
     rotation.requires_grad_(True)
+
     optim = torch.optim.Adamax([
         {'params': [delta], 'lr': args.input_lr},
         {'params':[rotation], 'lr': args.rotation}, #, 'weight_decay': 0.0},
@@ -232,6 +241,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
                 args.n_update,
                 last_epoch=-1,
                 end_factor=args.optim_end_factor)
+
     iterator = tqdm(range(args.n_update)) if verbose else range(args.n_update)
     for iter in iterator:
         optim.zero_grad()
@@ -322,6 +332,12 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         print("LR", scheduler.get_last_lr())
         print("rotation", (rotation_base+rotation).abs().mean(dim=0))
         print('delta', (delta).norm(2,dim=-1).mean())
+
+    # if args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+    #     for i in range(len(x_trans)):
+    #         new_xi = scale(x_trans[i].cpu().detach().numpy(), 'unit_norm')
+    #         new_xi = torch.tensor(rotate_pc(new_xi, reverse=True), device=x.device)
+    #         x[i] = new_xi
     return x_trans
 
 
@@ -356,7 +372,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'bn_stats' in args.method:
             _ = classifier(x)
         # model parameter adaptation
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
             # if 'cloudfixer' in self.method and self.vote > 1:
@@ -401,7 +417,13 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'shot' in args.method:
             # pseudo-labeling
             # feats = classifier.get_feature(x).detach()
-            feats = classifier(x, return_feature=True).detach()
+            if isinstance(classifier, nn.DataParallel):
+                single_classifier = classifier.module
+            from classifier import pointMAE
+            if isinstance(single_classifier, pointMAE.Point_MAE):
+                feats = F.normalize(classifier(pts=x, return_feature=True), p=2, dim=-1).detach()
+            else:        
+                feats = F.normalize(classifier(x, return_feature=True), p=2, dim=-1).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -422,7 +444,15 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss += div_loss
 
             loss.backward()
-        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
+        if 'mate' in args.method:
+            points = x.cuda()
+            points = low_pass_filtering(points, method='fps', scale=max(int(points.shape[1] / 1024), 1))
+            points = [points for _ in range(48)]
+            points = torch.squeeze(torch.vstack(points))
+            loss_recon, _, _ = classifier(pts=points, classification_only=False)
+            loss = loss_recon.mean()
+            loss.backward()
+        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.step()
 
     end = time.time()
@@ -444,6 +474,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         probs /= args.vote
         print("voting", args.vote)
         logits_after = probs.log()
+    elif 'mate' in args.method:
+        logits_after = classifier(pts=x.cuda(), classifiation_only=True)
     else:
         logits_after = classifier(x)
 
@@ -465,6 +497,12 @@ def main(args):
     create_folders(args)
 
     ########## load dataset ##########
+    if args.dataset.startswith('modelnet40c') and not args.classifier == "pointMAE":
+        test_dataset = ModelNet40C(args, partition='test')
+    elif args.dataset.startswith('modelnet40c') and args.classifier == "pointMAE":
+        # args.rotate = False # TODO: remove
+        args.rotate = True
+        test_dataset = ModelNet40C(args, partition='test')
     if args.dataset.startswith('modelnet40c'):
         test_dataset = ModelNet40C(args, partition='test')
     elif args.dataset.startswith('shapenetcore'):
@@ -560,7 +598,7 @@ def main(args):
         if args.dataset.startswith('shapenetcore'):
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
             classifier = builder.model_builder(config.model)
-            classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
+            classifier.load_model_from_ckpt(args.classifier_dir, False)
             #classifier.load_model_from_ckpt('ckpt/MATE_shapenet_jt.pth', False)
         else:
             config = cfg_from_yaml_file(
@@ -589,8 +627,12 @@ def main(args):
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(classifier, optimizer, None)
 
+    import time
+
     all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
+        current = time.time()
+
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
         mask = data[-2].to(device)
@@ -613,10 +655,13 @@ def main(args):
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+
     io.cprint(f"final metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
+
+    print(f"total adaptation time: {adaptation_time}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 
@@ -808,8 +853,8 @@ def vis(args):
         config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
         classifier = builder.model_builder(config.model)
         classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-        classifier.cuda()
-        classifier.eval()
+        classifier.rotate = False
+        # classifier.cuda().eval()
     else:
         raise ValueError('UNDEFINED CLASSIFIER')
     if 'pointMLP' not in args.classifier:

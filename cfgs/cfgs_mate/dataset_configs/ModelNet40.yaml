@@ -1,5 +1,6 @@
 NAME: ModelNet
-DATA_PATH: ./data/modelnet40_c
+DATA_PATH: null
+DATA_PATH: ../nfs-client/CloudFixer/modelnet40_c
 N_POINTS: 1024
 NUM_CATEGORY: 40
 USE_NORMALS: FALSE

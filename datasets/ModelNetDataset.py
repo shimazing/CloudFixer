@@ -49,25 +49,27 @@ def farthest_point_sample(point, npoint):
     point = point[centroids.astype(np.int32)]
     return point
 
+
 @DATASETS.register_module()
 class ModelNet(Dataset):
-    def __init__(self, config):
-        self.root = config.DATA_PATH
-        self.npoints = config.N_POINTS
-        self.use_normals = config.USE_NORMALS
-        self.num_category = config.NUM_CATEGORY
+    def __init__(self, args):
+        self.root = args.dataset_dir
+        self.npoints = 4096
+        self.use_normals = False
+        self.num_category = 40
         self.process_data = True
         self.uniform = True
-        split = config.subset
-        self.subset = config.subset
-
+        split = "test"
+        self.subset = "test"
         if self.num_category == 10:
             self.catfile = os.path.join(self.root, 'modelnet10_shape_names.txt')
         else:
             self.catfile = os.path.join(self.root, 'modelnet40_shape_names.txt')
 
         self.cat = [line.rstrip() for line in open(self.catfile)]
+        # print(f"self.cat: {self.cat}")
         self.classes = dict(zip(self.cat, range(len(self.cat))))
+        # print(f"self.classes: {self.classes}")
 
         shape_ids = {}
         if self.num_category == 10:
@@ -77,10 +79,14 @@ class ModelNet(Dataset):
             shape_ids['train'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_train.txt'))]
             shape_ids['test'] = [line.rstrip() for line in open(os.path.join(self.root, 'modelnet40_test.txt'))]
 
+        print(f"shape_ids: {shape_ids}")
+
         assert (split == 'train' or split == 'test')
         shape_names = ['_'.join(x.split('_')[0:-1]) for x in shape_ids[split]]
+        # print(f"shape_names: {shape_names}")
         self.datapath = [(shape_names[i], os.path.join(self.root, shape_names[i], shape_ids[split][i]) + '.txt') for i
                          in range(len(shape_ids[split]))]
+        # print(f"self.datapath: {self.datapath}")
         print_log('The size of %s data is %d' % (split, len(self.datapath)), logger = 'ModelNet')
 
         if self.uniform:
@@ -131,8 +137,10 @@ class ModelNet(Dataset):
                 point_set = farthest_point_sample(point_set, self.npoints)
             else:
                 point_set = point_set[0:self.npoints, :]
-                
+            
+        print(f"label: {label}")
         point_set[:, 0:3] = pc_normalize(point_set[:, 0:3])
+
         if not self.use_normals:
             point_set = point_set[:, 0:3]
 
@@ -146,5 +154,5 @@ class ModelNet(Dataset):
             np.random.shuffle(pt_idxs)
         current_points = points[pt_idxs].copy()
         current_points = torch.from_numpy(current_points).float()
-        return 'ModelNet', 'sample', (current_points, label)
-
+        return current_points, label
+        # return 'ModelNet', 'sample', (current_points, label)

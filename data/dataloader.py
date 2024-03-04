@@ -132,6 +132,8 @@ class ModelNet40C(Dataset):
             all_data = all_data[sorted_indices]
             all_label = all_label[sorted_indices]
 
+        print(f"num_classes: {num_classes}")
+
         if num_classes == 40:
             return all_data, all_label
 
@@ -164,7 +166,6 @@ class ModelNet40C(Dataset):
     def __getitem__(self, item):
         pointcloud = self.pc_list[item][:, :3]
         label = self.label_list[item]
-
         mask = np.ones((len(pointcloud), 1)).astype(pointcloud.dtype)
         ind = np.arange(len(pointcloud))
 
@@ -223,10 +224,11 @@ class ModelNet40C(Dataset):
                 ), axis=0)
                 mask = np.concatenate((
                     mask,
-                    np.zeros_like(mask[chosen]),
-                    ),axis=0)
+                    np.zeros_like(mask[chosen])
+                ), axis=0)
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
+
         return (pointcloud, label, mask, ind)
 
 

@@ -438,7 +438,8 @@ class ShapeNetC(Dataset):
 
 
 class ShapeNetCore(Dataset):
-    def __init__(self, args, root='data/shapenet_c/'):
+    def __init__(self, args):
+        self.args = args
         if len(args.dataset.split("_")) == 1:
             self.corruption = 'clean'
         elif len(args.dataset.split("_")) == 2:
@@ -448,7 +449,7 @@ class ShapeNetCore(Dataset):
         if self.corruption != 'clean':
             self.severity = args.dataset.split("_")[-1]
         #self.severity = args.severity
-        self.data, self.label = load_data(root, self.corruption, self.severity)
+        self.data, self.label = load_data(args.dataset_dir, self.corruption, self.severity)
         self.subsample = getattr(args, 'subsample', 4096)
         self.label_list = self.label.reshape(-1)
 
@@ -461,7 +462,7 @@ class ShapeNetCore(Dataset):
         mask = np.ones((len(pointcloud), 1)).astype(pointcloud.dtype)
         ind = np.arange(len(pointcloud))
 
-        if ('occlusion' in self.corruption or 'density_inc' in self.corruption  or 'lidar' in self.corruption):
+        if ('cloudfixer' in self.args.method) and ('occlusion' in self.corruption or 'density_inc' in self.corruption  or 'lidar' in self.corruption):
             dup_points = np.sum(np.power((pointcloud[None, :, :] - pointcloud[:,
                 None, :]), 2),
                     axis=-1) < 1e-8

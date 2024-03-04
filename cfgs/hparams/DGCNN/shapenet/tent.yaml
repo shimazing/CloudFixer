@@ -1,0 +1,2 @@
+test_lr: 0.0001
+num_steps: 3

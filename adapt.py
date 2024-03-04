@@ -113,7 +113,6 @@ def parse_arguments():
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--beta1', type=float, default=0.9)
     parser.add_argument('--beta2', type=float, default=0.999)
-
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
     parser.add_argument('--denoising_thrs', type=int, default=0)
@@ -213,8 +212,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
 
     _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
-    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
-        None], ind]
+    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:, None], ind]
     weight = 1 / knn_dist_square_mean.pow(args.pow)
     if not args.weighted_reg:
         weight = torch.ones_like(weight)
@@ -375,13 +373,6 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
-            # if 'cloudfixer' in self.method and self.vote > 1:
-            #     loss = 0
-            #     for x_ in x_list:
-            #         logits = classifier(x_)
-            #         loss = loss + softmax_entropy(logits).mean()
-            #     loss /= selfvote
-            # else:
             logits = classifier(x)
             loss = softmax_entropy(logits).mean()
             loss.backward()
@@ -417,13 +408,11 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'shot' in args.method:
             # pseudo-labeling
             # feats = classifier.get_feature(x).detach()
-            if isinstance(classifier, nn.DataParallel):
-                single_classifier = classifier.module
-            from classifier import pointMAE
-            if isinstance(single_classifier, pointMAE.Point_MAE):
-                feats = F.normalize(classifier(pts=x, return_feature=True), p=2, dim=-1).detach()
-            else:        
-                feats = F.normalize(classifier(x, return_feature=True), p=2, dim=-1).detach()
+            try:
+                feats = classifier(x, return_feature=True).detach()
+            except:
+                feats = classifier(pc=x, return_feature=True).detach()
+
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -467,6 +456,12 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         logits_after = batch_evaluation(args, classifier, x)
     elif 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
+    elif 'mate' in args.method:
+        logits_after =classifier(pts=x.cuda(), classifiation_only=True)
+        # logits_after = classifier.module.classification_only( # TODO: debug this
+        #     x.float().cuda(),
+        #     None,
+        # )
     elif 'cloudfixer' in args.method:
         probs = 0
         for x_ in x_list:
@@ -666,6 +661,11 @@ def main(args):
 
 
 def tune_tta_hparams(args):
+    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
+    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+    print(f"{yaml_parent_dir=}")
+    print(f"{yaml_dir=}")
+
     import itertools, random
     if 'tent' in args.method:
         test_lr_list = [1e-4, 1e-3, 1e-2]

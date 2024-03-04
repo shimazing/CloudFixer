@@ -377,6 +377,7 @@ run_dda_2() {
     done
 }
 
+
 run_kinect() {
     CLASSIFIER_LIST=(DGCNN)
     SEED_LIST="2"

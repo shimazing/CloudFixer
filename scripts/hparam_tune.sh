@@ -41,7 +41,7 @@ dda_lpf_method=fps
 dda_lpf_scale=4
 # cloudfixer
 t_min=0.02
-t_max=0.8
+t_len=0.1
 denoising_thrs=100
 pow=1
 lam_l=1
@@ -176,36 +176,6 @@ hparam_tune() {
     dda_lpf_method=fps # None, mean, median, fps
     dda_lpf_scale=4 # 2, 4, 8
 
-    # # hyperparameters for ours
-    # method=ours
-    # batch_size=16
-    # episodic=False        # placeholder
-    # test_optim=AdamW      # placeholder
-    # params_to_adapt="all" # placeholder
-    # num_steps=1           # placeholder
-    # test_lr=1e-4          # placeholder
-
-    # ours_steps=150           # default: 50
-    # ours_guidance_weight=0.1 # 3, 6, 9
-    # ours_lpf_method=fps      # None, mean, median, fps
-    # ours_lpf_scale=4         # 2, 4, 8
-
-    # hyperparameters for cloudfixer
-    # method=pre_trans
-    # t_min=0.02
-    # t_max=0.8
-    # denoising_thrs=100
-    # pow=1
-    # lam_l=1
-    # lam_h=10
-    # input_lr=0.2
-    # steps=400
-    # wd=0
-    # optim=adamax
-    # optim_end_factor=0.05
-    # subsample=700
-    # weighted_reg=True
-
     # logging
     exp_name=hparam_search_${classifier}_${dataset}_${method}
     SEEDS=2 # "0 1 2"
@@ -213,7 +183,7 @@ hparam_tune() {
     for random_seed in ${SEEDS}; do
         python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -291,7 +261,7 @@ hparam_tune_tent() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -382,7 +352,7 @@ hparam_tune_lame() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -457,7 +427,7 @@ hparam_tune_sar() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -530,7 +500,7 @@ hparam_tune_pl() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -605,7 +575,7 @@ hparam_tune_memo() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -679,9 +649,9 @@ hparam_tune_dua() {
     SEEDS=2 # "0 1 2"
 
     for random_seed in ${SEEDS}; do
-        CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
+        CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -755,7 +725,7 @@ hparam_tune_bn_stats() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -829,7 +799,7 @@ hparam_tune_shot() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -877,7 +847,7 @@ hparam_tune_shot() {
             --subsample ${subsample} \
             --weighted_reg ${weighted_reg} \
             --wandb_usr ${wandb_usr} \
-            2>&1 &
+            2>&1
         wait_n
         i=$((i + 1))
     done
@@ -906,7 +876,7 @@ hparam_tune_dda() {
     for random_seed in ${SEEDS}; do
         CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7" python3 adapt.py \
             --t_min ${t_min} \
-            --t_max ${t_max} \
+            --t_len ${t_len} \
             --denoising_thrs ${denoising_thrs} \
             --random_seed ${random_seed} \
             --pow ${pow} \
@@ -962,9 +932,58 @@ hparam_tune_dda() {
             --subsample ${subsample} \
             --weighted_reg ${weighted_reg} \
             --wandb_usr ${wandb_usr} \
-            2>&1 &
+            2>&1
         wait_n
         i=$((i + 1))
+    done
+}
+
+
+hparam_tune_pointda() {
+    CLASSIFIER_LIST=(DGCNN)
+
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="64"
+    SOURCE_DOMAIN_LIST=(modelnet shapenet scannet)
+    TARGET_DOMAIN_LIST=(modelnet shapenet scannet)
+    # METHOD_LIST="tent lame sar pl memo dua shot dda"
+    METHOD_LIST="dua"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                    dataset=${TARGET_DOMAIN_LIST[idx]}
+                    dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
+                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
+                    for method in ${METHOD_LIST}; do
+                        # hparam_tune_tent
+                        # hparam_tune_lame
+                        # hparam_tune_sar
+                        # hparam_tune_pl
+                        # hparam_tune_memo
+                        hparam_tune_dua
+                        # hparam_tune_shot
+                    done
+                done
+            done
+        done
+    done
+
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for classifier in ${CLASSIFIER_LIST}; do
+                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                    dataset=${TARGET_DOMAIN_LIST[idx]}
+                    dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
+                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    method="dda"
+
+                    hparam_tune_dda
+                done
+            done
+        done
     done
 }
 
@@ -977,7 +996,7 @@ num_max_jobs=1
 ##############################################
 
 # hparam_tune
-hparam_tune_tent
+# hparam_tune_tent
 # hparam_tune_lame
 # hparam_tune_sar
 # hparam_tune_pl
@@ -985,3 +1004,5 @@ hparam_tune_tent
 # hparam_tune_dua
 # hparam_tune_shot
 # hparam_tune_dda
+hparam_tune_pointda
+python3 utils/send_email.py --message "finish hparameter tuning on pointda"

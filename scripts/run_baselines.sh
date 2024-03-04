@@ -375,6 +375,20 @@ run_baselines() {
         dda_guidance_weight=6
         dda_lpf_method=fps
         dda_lpf_scale=4
+    elif [ "$method" == "mate" ]; then
+        # mate-standard
+        episodic=True # placeholder
+        test_optim=AdamW # placeholder
+        test_lr=5e-5 # placeholder
+        params_to_adapt="all" # placeholder
+        num_steps=20 # placeholder
+
+        # mate-online
+        episodic=False # placeholder
+        test_optim=AdamW # placeholder
+        test_lr=5e-5 # placeholder
+        params_to_adapt="all" # placeholder
+        num_steps=1 # placeholder
     fi
 
     # CUDA_VISIBLE_DEVICES=${GPUS[i % ${NUM_GPUS}]} python3 adapt.py \

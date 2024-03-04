@@ -37,7 +37,7 @@ model : {
     decoder_depth: 4,
     decoder_num_heads: 6,
   },
-  }
+}
 
 npoints: 1024
 total_bs : 32

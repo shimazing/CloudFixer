@@ -1,9 +1,9 @@
 # logging
-wandb_usr=unknown
+wandb_usr=drumpt
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
+DATASET_ROOT_DIR=../datasets
+CODE_BASE_DIR=.
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -13,11 +13,11 @@ imb_ratio=1
 #classifier=DGCNN
 #classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
 
-#classifier=pointMLP
-#classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
+# classifier=pointMLP
+# classifier_dir=${CODE_BASE_DIR}/outputs/pointMLP_modelnet40.pth
 
 #classifier=pointNeXt
-#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
+#classifier_dir=${CODE_BASE_DIR}/outputs/pointNeXt_modelnet40.pth
 
 classifier=point2vec
 classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
@@ -27,10 +27,6 @@ classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
 # diffusion model
 diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
-
-GPUS=(0 1 2 3)
-NUM_GPUS=4
-i=0
 
 #################### placeholders ####################
 # lame
@@ -215,5 +211,8 @@ wait_n() {
 GPUS=(0 1 2 3)
 NUM_GPUS=${#GPUS[@]}
 
+GPUS=(0 1 2 3 4 5 6 7)
+NUM_GPUS=${#GPUS[@]}
+CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 run_cloudfixer_all_experiments
 #run_cloudfixer_adv

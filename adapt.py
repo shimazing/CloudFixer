@@ -359,15 +359,15 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
-            if 'cloudfixer' in self.method and self.vote > 1:
-                loss = 0
-                for x_ in x_list:
-                    logits = classifier(x_)
-                    loss = loss + softmax_entropy(logits).mean()
-                loss /= selfvote
-            else:
-                logits = classifier(x)
-                loss = softmax_entropy(logits).mean()
+            # if 'cloudfixer' in self.method and self.vote > 1:
+            #     loss = 0
+            #     for x_ in x_list:
+            #         logits = classifier(x_)
+            #         loss = loss + softmax_entropy(logits).mean()
+            #     loss /= selfvote
+            # else:
+            logits = classifier(x)
+            loss = softmax_entropy(logits).mean()
             loss.backward()
         if 'sar' in args.method:
             logits = classifier(x)
@@ -568,7 +568,7 @@ def main(args):
                     'cfgs/cfgs_mate/tta/tta_modelnet.yaml'
                     )
             classifier = builder.model_builder(config.model)
-            classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
+            classifier.load_model_from_ckpt(args.classifier_dir, False)
             classifier.rotate = args.rotate
         classifier.cuda()
         classifier.eval()

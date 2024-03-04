@@ -4,6 +4,7 @@ from tqdm import tqdm
 import wandb
 import gc
 import yaml
+from itertools import combinations
 
 import numpy as np
 import torch
@@ -33,7 +34,7 @@ def parse_arguments():
     # experiments
     parser.add_argument('--out_path', type=str, default='./exps')
     parser.add_argument('--exp_name', type=str, default='adaptation')
-    parser.add_argument('--num_workers', type=int, default=0, help='Number of worker for the dataloader')
+    parser.add_argument('--num_workers', type=int, default=8, help='Number of worker for the dataloader')
     parser.add_argument('--online', type=bool, default=True, help='True = wandb online -- False = wandb offline')
     parser.add_argument('--wandb_usr', type=str, default='unknown')
     parser.add_argument('--no_wandb', action='store_true', help='Disable wandb')
@@ -79,10 +80,17 @@ def parse_arguments():
     parser.add_argument('--dda_lpf_method', type=str, default='fps')
     parser.add_argument('--dda_lpf_scale', type=float, default=4)
 
+    parser.add_argument('--ours_steps', type=int, default=100)
+    parser.add_argument('--ours_guidance_weight', type=float, default=6)
+    parser.add_argument('--ours_lpf_method', type=str, default="")
+    parser.add_argument('--ours_lpf_scale', type=float, default=4)
+
     # diffusion model
     parser.add_argument('--model', type=str, default='transformer')
     parser.add_argument('--probabilistic_model', type=str, default='diffusion', help='diffusion')
     parser.add_argument('--diffusion_dir', type=str, default='outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy')
+
+    # diffusion model hyperparameters
     parser.add_argument('--diffusion_steps', type=int, default=500)
     parser.add_argument('--diffusion_noise_schedule', type=str, default='polynomial_2', help='learned, cosine, linear')
     parser.add_argument('--diffusion_noise_precision', type=float, default=1e-5)
@@ -90,33 +98,32 @@ def parse_arguments():
     parser.add_argument('--scale_mode', type=str, default='unit_std')
     parser.add_argument('--n_nodes', type=int, default=1024)
     parser.add_argument('--dp', type=eval, default=True, help='True | False')
+    parser.add_argument('--knn', type=int, default=5)
     parser.add_argument('--accum_grad', type=int, default=1)
     parser.add_argument('--t', type=float, default=0.4)
-
-    # cloudfixer hyperparameters
-    parser.add_argument('--input_lr', type=float, default=1e-2)
-    parser.add_argument('--n_update', default=30, type=int)
-    parser.add_argument('--rotation', default=0.1, type=float)
-    parser.add_argument('--knn', type=int, default=5)
     parser.add_argument('--weighted_reg', type=eval, default=True)
-    parser.add_argument('--reg_method', type=str, default='inv_dist')
-    parser.add_argument('--pow', type=int, default=1)
-
+    parser.add_argument('--n_update', default=30, type=int)
     parser.add_argument('--warmup', default=0.2, type=float)
-    parser.add_argument('--lam_l', type=float, default=0)
-    parser.add_argument('--lam_h', type=float, default=0)
-    parser.add_argument('--t_min', type=float, default=0.02)
-    parser.add_argument('--t_len', type=float, default=0.1)
-
+    parser.add_argument('--input_lr', type=float, default=1e-2)
+    parser.add_argument('--rotation', default=0.1, type=float)
     parser.add_argument('--optim', type=str, default='adamax')
     parser.add_argument('--optim_end_factor', type=float, default=0.05)
     parser.add_argument('--weight_decay', type=float, default=0)
     parser.add_argument('--beta1', type=float, default=0.9)
     parser.add_argument('--beta2', type=float, default=0.999)
+    parser.add_argument('--lam_l', type=float, default=0)
+    parser.add_argument('--lam_h', type=float, default=0)
+    parser.add_argument('--t_min', type=float, default=0.02)
+    parser.add_argument('--t_len', type=float, default=0.1)
     parser.add_argument('--n_iters_per_update', type=int, default=1)
     parser.add_argument('--subsample', type=int, default=2048)
+    parser.add_argument('--pow', type=int, default=1)
     parser.add_argument('--denoising_thrs', type=int, default=0)
-    parser.add_argument('--vote',type=int, default=1)
+
+    parser.add_argument('--reg_method', type=str, default='inv_dist')
+    parser.add_argument('--global_bias', type=str, default='')
+    parser.add_argument('--global_scaling', type=str, default='')
+
     args = parser.parse_args()
     if 'eval' in args.mode:
         args.no_wandb = True
@@ -132,6 +139,10 @@ def parse_arguments():
         source_dataset = "scannet"
     yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, source_dataset)
     yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
+
+    print(f"{args.use_best_hparam=}")
+    print(f"{yaml_dir=}")
+    print(f"{os.path.exists(yaml_dir)=}")
 
     if args.use_best_hparam and os.path.exists(yaml_dir):
         hparam_dict = yaml.load(open(yaml_dir, "r"), Loader=yaml.FullLoader)
@@ -201,15 +212,48 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
                 max(0.0, float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps)))
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
     ################################################# End Scheduler
-
-    _, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
+    knn_indices, knn_dist_square_mean = knn(x.transpose(2,1), k=args.knn,
             mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
-    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:, None], ind]
-    weight = 1 / knn_dist_square_mean.pow(args.pow)
-    if not args.weighted_reg:
-        weight = torch.ones_like(weight)
+    knn_dist_square_mean = knn_dist_square_mean[torch.arange(x.size(0))[:,
+        None], ind]
+
+    if args.weighted_reg and args.reg_method == "inv_dist":
+        weight = 1 / knn_dist_square_mean.pow(args.pow)
+    elif args.weighted_reg and args.reg_method == "curvature_based":
+        knn_indices, knn_dist_square_mean = knn(x.transpose(2,1), k=5, mask=(mask.squeeze(-1).bool()), ind=ind, return_dist=True)
+
+        B, N, k, C = knn_indices.size(0), knn_indices.size(1), knn_indices.size(2), x.size(2)
+        knn_points = torch.gather(
+            x.unsqueeze(2).expand(B, N, k, C), dim=1, index=knn_indices.unsqueeze(-1).expand(B, N, k, C)
+        )
+        displacement_vectors = knn_points - x.unsqueeze(2).expand(B, N, k, C)
+        indices_combs = torch.tensor(list(combinations(range(k), 2)))
+        cross_products = torch.cross(
+            displacement_vectors[:, :, indices_combs[:, 0], :],
+            displacement_vectors[:, :, indices_combs[:, 1], :],
+            dim=-1
+        ) # (B, N, num_combs, C)
+        dot_products = torch.sum(cross_products * x.unsqueeze(2), dim=-1) # B, N, n_combs
+        negative_indices = dot_products < 0
+        cross_products[negative_indices.unsqueeze(-1).expand(B, N, len(indices_combs), C)] *= -1
+        cosine_similarity = torch.cosine_similarity(
+            cross_products.unsqueeze(2),
+            cross_products.unsqueeze(3),
+            dim=-1
+        )
+        average_cosine_similarity = torch.mean(cosine_similarity, dim=(2, 3))
+        weight = (average_cosine_similarity - average_cosine_similarity.min(dim=-1, keepdim=True)[0]) / (average_cosine_similarity.max(dim=-1, keepdim=True)[0] - average_cosine_similarity.min(dim=-1, keepdim=True)[0])
+         # weight = torch.ones_like(weight)
+        # print(f"{weight=}")
+        # print(f"{average_cosine_similarity=}")
+        # # weight = 1 - average_cosine_similarity
+        # print(f"2 {weight.shape=}")
+    else:
+        weight = torch.ones(x.shape[0], x.shape[1]).to(x.device)
+
     weight = weight / weight.sum(dim=-1, keepdim=True) # normalize
     weight = weight * mask.squeeze(-1)
+
     node_mask = x.new_ones(x.shape[:2]).to(x.device).unsqueeze(-1)
     delta = torch.nn.Parameter(torch.zeros_like(x))
     rotation = torch.nn.Parameter(x.new_zeros((x.size(0), 6)))
@@ -224,6 +268,32 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         ],
         lr=args.input_lr, weight_decay=args.weight_decay,
         betas=(args.beta1, args.beta2))
+
+    if args.global_bias == "true":
+        bias = torch.nn.Parameter(x.new_zeros((x.size(0), 1, 3)))
+        bias.requires_grad_(True)
+
+        optim = torch.optim.Adamax([
+            {'params': [delta], 'lr': args.input_lr},
+            {'params': [rotation], 'lr': args.rotation},
+            {'params': [bias], 'lr': args.input_lr},
+            ],
+            lr=args.input_lr, weight_decay=args.weight_decay,
+            betas=(args.beta1, args.beta2)
+        )
+    elif args.global_scaling == "true":
+        scaling = torch.nn.Parameter(torch.diag(x.new_ones(3)).unsqueeze(0).expand(x.size(0), 3, 3).clone())
+        scaling.requires_grad_(True)
+
+        optim = torch.optim.Adamax([
+            {'params': [delta], 'lr': args.input_lr},
+            {'params': [rotation], 'lr': args.rotation},
+            {'params': [scaling], 'lr': args.rotation},
+            ],
+            lr=args.input_lr, weight_decay=args.weight_decay,
+            betas=(args.beta1, args.beta2)
+        )
+
     scheduler = get_linear_schedule_with_warmup(
                 optim,
                 int(args.n_update*args.warmup),
@@ -245,52 +315,37 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
             sigma_t = model.module.sigma(gamma_t, x)
         eps = torch.randn_like(x)
         x_trans = (x+delta)
+        if args.global_bias == "true":
+            x_trans += bias
+        elif args.global_scaling == "true":
+            x_trans = x_trans @ scaling
+
         rot = compute_rotation_matrix_from_ortho6d(rotation+rotation_base)
         x_trans = x_trans @ rot
-        z_loss = 0
         with torch.no_grad():
             if args.dataset.startswith('shapenetcore'):
                 # model is lion
-                num_classes = model.priors[1].module.num_classes
-                model.priors[1].module.num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
-                model.vae.module.decoder.num_points = num_points
-                #all_z, _, _ = model.vae.encode(x_trans)
-                with torch.no_grad(): #torch.enable_grad():
-                    #model.vae.train()
-                    all_z, _, _ = model.vae(encode=True, x=x_trans)
-                    all_z = make_4d(all_z)
-                    #decomposed_z = model.vae.decompose_eps(all_z)
-                    decomposed_z = model.vae.module.decompose_eps(all_z)
-                    updated_z = []
-                    for latent_id, z in enumerate(decomposed_z):
-                        noise = torch.randn_like(z)
-                        z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
-                        with torch.no_grad():
-                            if latent_id == 0:
-                                pred_noise = model.priors[latent_id](z_t, t)
-                            else:
-                                #cond = decomposed_z[0] # or updated_z[0]
-                                cond = updated_z[0]
-                                cond = model.vae(global2style=True,
-                                        style=cond) # squeeze
-                                pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
-                            est_z = (z_t - sigma_t * pred_noise) / alpha_t
-                        if latent_id == 0:
-                            #z_loss = z_loss #+ (z-est_z).pow(2).sum(dim=1).mean()
-                            #updated_z.append(z.clone().detach())
-                            updated_z.append(est_z)
-                        else:
-                            z_reshaped = z.view(*x_trans.shape[:2], -1)
-                            est_z_reshape = est_z.view(*x_trans.shape[:2], -1)
-                            dist1_z, dist2_z, _, _ = chamfer_dist_fn(z_reshaped[:, :, :3],
-                                est_z_reshape[:, :, :3])
-                            #z_loss = z_loss + dist1_z.mean() + dist2_z.mean()
-                            updated_z.append(est_z)
+                num_classes = model.priors[1].num_classes
+                model.priors[1].num_points = num_points = x_trans.shape[1] #model.priors[1].num_points
+                model.vae.decoder.num_points = num_points
+                all_z, _, _ = model.vae.encode(x_trans)
+                all_z = make_4d(all_z)
+                decomposed_z = model.vae.decompose_eps(all_z)
+                updated_z = []
+                for latent_id, z in enumerate(decomposed_z):
+                    noise = torch.randn_like(z)
+                    z_t = model.diffusion.sample_q(z, noise, var_t, alpha_t)
+                    if latent_id == 0:
+                        pred_noise = model.priors[latent_id](z_t, t)
+                    else:
+                        #cond = decomposed_z[0] # or updated_z[0]
+                        cond = updated_z[0]
+                        cond = model.vae.global2style(cond) # squeeze
+                        pred_noise = model.priors[latent_id](z_t, t, condition_input=cond)
+                    est_z = (z_t - sigma_t * pred_noise) / alpha_t
+                    updated_z.append(est_z)
 
-                x_trans_est = model.vae(#.decoder(
-                        decoder=True,
-                        first_arg=None,
-                        beta=None,
+                x_trans_est = model.vae.decoder(None, beta=None,
                         context=updated_z[1].view(len(t),-1), # local
                         style=updated_z[0].view(len(t), -1) # global
                         )
@@ -303,7 +358,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         matching = dist1.mean() + dist2.mean()
         L2_norm = (delta.pow(2) * weight[:, :, None]).sum(dim=1).mean()
         norm = L2_norm * (args.lam_h * (1-iter/args.n_update) + args.lam_l * iter / args.n_update)
-        loss = matching + norm + z_loss
+        loss = matching + norm
         loss.backward()
         optim.step()
         scheduler.step()
@@ -334,9 +389,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
     if 'cloudfixer' in args.method:
-        x_list = [cloudfixer(args, diffusion_model, x, mask, ind).detach().clone()
-                for v in range(args.vote)]
-        x = x_list[0] #cloudfixer(args, diffusion_model, x, mask, ind)
+        x = cloudfixer(args, diffusion_model, x, mask, ind)
 
     # model adaptation
     for _ in range(1, args.num_steps + 1):
@@ -353,8 +406,9 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             _ = classifier(x)
         if 'bn_stats' in args.method:
             _ = classifier(x)
+
         # model parameter adaptation
-        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
+        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
             optimizer.zero_grad()
         if 'tent' in args.method:
             logits = classifier(x)
@@ -392,11 +446,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         if 'shot' in args.method:
             # pseudo-labeling
             # feats = classifier.get_feature(x).detach()
-            try:
-                feats = classifier(x, return_feature=True).detach()
-            except:
-                feats = classifier(pc=x, return_feature=True).detach()
-
+            feats = classifier(x, return_feature=True).detach()
             logits = classifier(x)
             probs = logits.softmax(dim=-1)
             centroids = (feats.T @ probs) / probs.sum(dim=0, keepdim=True)
@@ -417,17 +467,7 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss += div_loss
 
             loss.backward()
-        if 'mate' in args.method:
-            points = x.cuda()
-            points = low_pass_filtering(points, 'fps', int(x.shape[1] // 1024))
-            print(f"int(x.shape[1] // 1024): {int(x.shape[1] // 1024)}")
-            print(f"points: {points.shape}")
-            x = [x for _ in range(48)] # TODO: where is 90% masking part?
-            x = torch.squeeze(torch.vstack(x))
-            loss = classifier(x, None, tta=True)[0] # TODO: debug this
-            loss = loss.mean()
-            loss.backward()
-        if set(['tent', 'sar', 'pl', 'memo', 'shot', 'mate']).intersection(args.method):
+        if set(['tent', 'sar', 'pl', 'memo', 'shot']).intersection(args.method):
             optimizer.step()
 
     end = time.time()
@@ -440,20 +480,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
 
     if 'lame' in args.method:
         logits_after = batch_evaluation(args, classifier, x)
-    elif 'dda' in args.method:
+    elif False: # 'dda' in args.method:
         logits_after = ((classifier(x_ori).softmax(dim=-1) + classifier(x).softmax(dim=-1)) / 2).log()
-    elif 'mate' in args.method:
-        logits_after = classifier.module.classification_only( # TODO: debug this
-            x.float().cuda(),
-            None,
-        )
-    elif 'cloudfixer' in args.method:
-        probs = 0
-        for x_ in x_list:
-            probs = probs + classifier(x_).softmax(dim=-1)
-        probs /= args.vote
-        print("voting", args.vote)
-        logits_after = probs.log()
     else:
         logits_after = classifier(x)
 
@@ -505,11 +533,7 @@ def main(args):
             from cfgs.default_config_lion import cfg as config_lion
             config_lion.merge_from_file('ckpt/lion_ckpt/unconditional_all55_cfg.yml')
             lion = LION(config_lion)
-            lion.load_model('ckpt/lion_ckpt/epoch_7999_iters_1527999.pt')
-            #lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
-            lion.priors[0] = nn.DataParallel(lion.priors[0]).eval()
-            lion.priors[1] = nn.DataParallel(lion.priors[1]).eval()
-            lion.vae = nn.DataParallel(lion.vae).eval()
+            lion.load_model('ckpt/lion_ckpt/epoch_10999_iters_2100999.pt')
             model = lion
         else:
             model = get_model(args, device)
@@ -557,10 +581,10 @@ def main(args):
         classifier.cuda()
         classifier.setup()
         checkpoint = extract_model_checkpoint(
-            args.classifier_dir
-            #'ckpt/point2vec_modelnet40.ckpt'
+                args.classifier_dir
+                #'ckpt/point2vec_modelnet40.ckpt'
         )
-        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False) # type: ignore
+        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
         classifier.eval()
@@ -571,12 +595,8 @@ def main(args):
             config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_shapenetcore.yaml')
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_shapenet_src_only.pth', False)
-            #classifier.load_model_from_ckpt('ckpt/MATE_shapenet_jt.pth', False)
         else:
-            config = cfg_from_yaml_file(
-                    #'cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml'
-                    'cfgs/cfgs_mate/tta/tta_modelnet.yaml'
-                    )
+            config = cfg_from_yaml_file('cfgs/cfgs_mate/pre_train/pretrain_modelnet.yaml')
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt('ckpt/MATE_modelnet_jt.pth', False)
             classifier.rotate = args.rotate
@@ -617,7 +637,7 @@ def main(args):
         logits_before = original_classifier(x).detach()
         logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind).detach()
 
-        all_pred_before_list.extend(logits_before.argmax(dim=-1).cpu().tolist())
+        all_pred_before_list.extend(torch.argmax(logits_before, dim=-1).cpu().tolist())
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
@@ -631,11 +651,6 @@ def main(args):
 
 
 def tune_tta_hparams(args):
-    yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
-    yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
-    print(f"{yaml_parent_dir=}")
-    print(f"{yaml_dir=}")
-
     import itertools, random
     if 'tent' in args.method:
         test_lr_list = [1e-4, 1e-3, 1e-2]
@@ -953,6 +968,8 @@ def vis(args):
 
 if __name__ == "__main__":
     args = parse_arguments()
+
+    print(f"args.mode: {args.mode}")
     if 'eval' in args.mode:
         main(args)
     if 'vis' in args.mode:

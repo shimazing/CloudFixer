@@ -279,8 +279,10 @@ def laplacian_optimization(unary, kernel, bound_lambda=1, max_steps=100):
 def batch_evaluation(args, model, x):
     out = model(x).detach()
     unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
-    # feats = F.normalize(model.get_feature(x), p=2, dim=-1).detach()
-    feats = F.normalize(model(x, return_feature=True), p=2, dim=-1).detach()
+    try:
+        feats = F.normalize(model(x, return_feature=True), p=2, dim=-1).detach()
+    except:
+        feats = F.normalize(model(pc=x, return_feature=True), p=2, dim=-1).detach()
     affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)

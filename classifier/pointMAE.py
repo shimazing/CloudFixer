@@ -509,7 +509,7 @@ class Point_MAE(nn.Module):
     def forward(self, pts, classification_only=True, vis=False, cyclic=False, **kwargs):
         if self.rotate:
             pts = rotate_shape_tensor(pts, 'x', np.pi/2)
-            pts = scale_to_unit_cube_torch(pts)
+        pts = scale_to_unit_cube_torch(pts)
 
         if classification_only:
             return self.classification_only(pts, only_unmasked=False)

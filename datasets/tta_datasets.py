@@ -449,7 +449,7 @@ class ShapeNetCore(Dataset):
             self.severity = args.dataset.split("_")[-1]
         #self.severity = args.severity
         self.data, self.label = load_data(root, self.corruption, self.severity)
-        self.subsample = getattr(args, 'subsample', 2048)
+        self.subsample = getattr(args, 'subsample', 4096)
         self.label_list = self.label.reshape(-1)
 
         print(f'Loaded {self.data.shape} point clouds and {self.label.shape} labels')
@@ -513,7 +513,6 @@ class ShapeNetCore(Dataset):
                 ), axis=0)
                 ind = np.concatenate((ind, chosen), axis=0)
                 assert len(pointcloud) == len(ind)
-
         return pointcloud, label.item(), mask, ind
 
     def __len__(self):

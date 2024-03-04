@@ -42,7 +42,6 @@ def knn(x, k=5, mask=None, ind=None, return_dist=False):
         dist[~is_valid] = 0
         n_valid = is_valid.float().sum(dim=-1)
         return idx, (dist.sum(dim=-1) / (n_valid).clamp(min=1)).detach().clone()
-
     return idx
 
 

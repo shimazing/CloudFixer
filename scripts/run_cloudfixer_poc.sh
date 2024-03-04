@@ -1,9 +1,9 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=../datasets
-CODE_BASE_DIR=.
+DATASET_ROOT_DIR=../nfs-client/datasets
+CODE_BASE_DIR=../nfs-client/CloudFixer
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
@@ -13,21 +13,17 @@ imb_ratio=1
 #classifier=DGCNN
 #classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
 
-# classifier=pointMLP
-# classifier_dir=${CODE_BASE_DIR}/outputs/pointMLP_modelnet40.pth
+#classifier=pointMLP
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointMLP_modelnet40.pth
 
 #classifier=pointNeXt
-#classifier_dir=${CODE_BASE_DIR}/outputs/pointNeXt_modelnet40.pth
+#classifier_dir=${CODE_BASE_DIR}/ckpt/pointNeXt_modelnet40.pth
 
 classifier=point2vec
 classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
 
-#classifier=pointMAE
-#classifier_dir=ckpt/MATE_modelnet_jt.pth
-
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
-
+diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
 #################### placeholders ####################
 # lame
 lame_affinity=rbf
@@ -66,19 +62,19 @@ optim=adamax
 optim_end_factor=0.05
 subsample=2048
 weighted_reg=True
+reg_method=inv_dist
 rotation=0.02
-vote=5
 ######################################################
 
 
 run_baselines() {
-    num_steps=0 # 0 TODO for tent # placeholder
-    episodic=False # placeholder
-    test_optim=AdamW # placeholder
-    test_lr=0.01 # TODO for tent 1e-4 # placeholder
-    params_to_adapt="LN GN BN" # placeholder
+    num_steps=0           # placeholder
+    episodic=False        # placeholder
+    test_optim=AdamW      # placeholder
+    test_lr=1e-4          # placeholder
+    params_to_adapt="all" # placeholder
 
-python3 adapt.py \
+    CUDA_VISIBLE_DEVICES=4,5,6,7 python3 adapt_poc.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
@@ -138,9 +134,12 @@ python3 adapt.py \
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
         --wandb_usr ${wandb_usr} \
-        --vote ${vote} \
-        2>&1
-        #i=$((i + 1))
+        --reg_method ${reg_method} \
+        --global_bias ${global_bias} \
+        --global_scaling ${global_scaling} \
+        2>&1 &
+        i=$((i + 1))
+    wait_n
 }
 
 
@@ -149,6 +148,7 @@ run_cloudfixer_all_experiments() {
     SEED_LIST="2"
     BATCH_SIZE_LIST="128"
     METHOD_LIST="cloudfixer"
+
     scenario=normal
     imb_ratio=1
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
@@ -168,21 +168,49 @@ run_cloudfixer_all_experiments() {
                                 subsample=500
                             elif [[ "$corruption" == "cutout" ]]; then
                                 subsample=500
-                            #elif [[ "$corruption" == "lidar" ]]; then
-                            #    subsample=1024
-                            #elif [[ "$corruption" == "density_inc" ]]; then
-                            #    subsample=500
-                            #elif [[ "$corruption" == "density" ]]; then
-                            #    subsample=1024
                             elif [[ "$corruption" == "rotation" ]]; then
                                 rotation=0.05
-                            #elif [[ "$corruption" == "upsampling" ]]; then
-                            #    subsample=1024
                             fi
+
                             batch_size=128
-                            method="cloudfixer" #"cloudfixer tent"
-                            method_="cloudfixer_${vote}" #"cloudfixer+tent"
-                            exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method_}_seed_${random_seed}_batch_size_${batch_size}
+
+                            reg_method=uniform
+                            global_bias=false
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=inv_dist
+                            global_bias=false
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=curvature_based
+                            global_bias=false
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=inv_dist
+                            global_bias=true
+                            global_scaling=false
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
+                            mode=eval
+                            run_baselines
+
+                            reg_method=inv_dist
+                            global_bias=false
+                            global_scaling=true
+                            out_path=./exps
+                            exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_reg_method_${reg_method}_${global_bias}_${global_scaling}
                             mode=eval
                             run_baselines
                         done
@@ -208,11 +236,4 @@ wait_n() {
   fi
 }
 
-GPUS=(0 1 2 3)
-NUM_GPUS=${#GPUS[@]}
-
-GPUS=(0 1 2 3 4 5 6 7)
-NUM_GPUS=${#GPUS[@]}
-CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
 run_cloudfixer_all_experiments
-#run_cloudfixer_adv

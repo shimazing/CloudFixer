@@ -22,12 +22,5 @@ cd ../
 cd chamfer_dist/
 python setup.py install --user
 
-# pointMAE (MATE)
+# pointMAE
 pip install --upgrade https://github.com/unlimblue/KNN_CUDA/releases/download/0.2/KNN_CUDA-0.2-py3-none-any.whl
-
-# LION
-git clone git@github.com:nv-tlabs/LION.git
-cd LION
-pip install git+https://github.com/openai/CLIP.git
-pip install loguru einops comet_ml calmsize diffusers
-python build_pkg.py

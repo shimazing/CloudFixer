@@ -2,7 +2,6 @@ import argparse
 from copy import deepcopy
 from tqdm import tqdm
 import wandb
-import gc
 import yaml
 
 import numpy as np
@@ -11,6 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, recall_score
+from chamfer_distance import ChamferDistance as chamfer_dist
+
+chamfer_dist_fn = chamfer_dist()
 
 from datasets.dataloader import *
 from diffusion.build_model import get_model
@@ -19,9 +21,6 @@ from utils import logging
 from utils.utils import *
 from utils.pc_utils import *
 from utils.tta_utils import *
-from chamfer_distance import ChamferDistance as chamfer_dist
-
-chamfer_dist_fn = chamfer_dist()
 
 
 def parse_arguments():
@@ -34,7 +33,7 @@ def parse_arguments():
     parser.add_argument("--use_best_hparam", action="store_true", default=False)
 
     # experiments
-    parser.add_argument("--out_path", type=str, default="./exps")
+    parser.add_argument("--out_path", type=str, default="outputs")
     parser.add_argument("--exp_name", type=str, default="adaptation")
     parser.add_argument(
         "--num_workers", type=int, default=0, help="Number of worker for the dataloader"
@@ -59,7 +58,9 @@ def parse_arguments():
     # classifier
     parser.add_argument("--classifier", type=str, default="DGCNN")
     parser.add_argument(
-        "--classifier_dir", type=str, default="outputs/dgcnn_modelnet40_best_test.pth"
+        "--classifier_dir",
+        type=str,
+        default="checkpoints/dgcnn_modelnet40_best_test.pth",
     )
     parser.add_argument("--cls_scale_mode", type=str, default="unit_norm")
 
@@ -107,7 +108,7 @@ def parse_arguments():
     parser.add_argument(
         "--diffusion_dir",
         type=str,
-        default="outputs/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy",
+        default="checkpoints/diffusion_model_transformer_modelnet40/generative_model_ema_last.npy",
     )
     parser.add_argument("--diffusion_steps", type=int, default=500)
     parser.add_argument(
@@ -175,9 +176,8 @@ def parse_arguments():
 
 
 def dda(args, model, x, mask, ind):
-    from chamfer_distance import ChamferDistance
-
-    chamfer_dist = ChamferDistance()
+    # from chamfer_distance import ChamferDistance
+    # chamfer_dist = ChamferDistance()
 
     t = torch.full((x.size(0), 1), args.dda_steps / args.diffusion_steps).to(x.device)
     gamma_t = model.module.inflate_batch_array(model.module.gamma(t), x)
@@ -208,7 +208,7 @@ def dda(args, model, x, mask, ind):
         # content preservation with low-pass filtering
         pred_noise = model(z_t, t=t, node_mask=node_mask, phi=True).detach()
         x0_est = (z_t - pred_noise * sigma_t) / alpha_t
-        dist1, dist2, _, _ = chamfer_dist(
+        dist1, dist2, _, _ = chamfer_dist_fn(
             low_pass_filtering(x0_est, args.dda_lpf_method, args.dda_lpf_scale),
             low_pass_filtering(x, args.dda_lpf_method, args.dda_lpf_scale),
         )
@@ -224,7 +224,7 @@ def dda(args, model, x, mask, ind):
 
 @torch.enable_grad()
 def cloudfixer(args, model, x, mask, ind, verbose=False):
-    ################################################# Scheduler
+    ######################## Scheduler ########################
     def get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps,
@@ -247,8 +247,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
 
         return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda, last_epoch)
 
-    ################################################# End Scheduler
-
+    ######################## End Scheduler ########################
     _, knn_dist_square_mean = knn(
         x.transpose(2, 1),
         k=args.knn,
@@ -274,7 +273,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
     optim = torch.optim.Adamax(
         [
             {"params": [delta], "lr": args.input_lr},
-            {"params": [rotation], "lr": args.rotation},  # , 'weight_decay': 0.0},
+            {"params": [rotation], "lr": args.rotation},
         ],
         lr=args.input_lr,
         weight_decay=args.weight_decay,
@@ -315,7 +314,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
                 t=t,
                 node_mask=node_mask,
             )
-        dist1, dist2, idx1, idx2 = chamfer_dist_fn(x_trans, x_trans_est)
+        dist1, dist2, _, _ = chamfer_dist_fn(x_trans, x_trans_est)
         matching = dist1.mean() + dist2.mean()
         L2_norm = (delta.pow(2) * weight[:, :, None]).sum(dim=1).mean()
         norm = L2_norm * (
@@ -328,7 +327,7 @@ def cloudfixer(args, model, x, mask, ind, verbose=False):
         if verbose and (iter) % 10 == 0:
             print("LR", scheduler.get_last_lr())
             print("rotation", (rotation_base + rotation).abs().mean(dim=0))
-            print("delta", (delta).abs().mean().item())  # norm(2,dim=-1).mean())
+            print("delta", (delta).abs().mean().item())  # norm(2, dim=-1).mean()
             print(
                 delta[mask.expand_as(delta) == 1].abs().mean().item(),
                 delta[mask.expand_as(delta) == 0].abs().mean().item(),
@@ -522,6 +521,7 @@ def main(args):
         test_dataset = ModelNet40C(args, partition="test")
     elif args.dataset.startswith("shapenetcore"):
         from datasets.tta_datasets import ShapeNetCore
+
         test_dataset = ShapeNetCore(args)
     elif args.dataset in ["modelnet", "shapenet", "scannet"]:
         test_dataset = PointDA10(args=args, partition="test")
@@ -557,9 +557,7 @@ def main(args):
     ):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
-            model.load_state_dict(
-                torch.load(args.diffusion_dir, map_location="cpu")
-            )
+            model.load_state_dict(torch.load(args.diffusion_dir, map_location="cpu"))
         model = nn.DataParallel(model)
         model = model.to(device).eval()
     else:
@@ -581,10 +579,7 @@ def main(args):
         cfg = EasyConfig()
         cfg.load("cfgs/modelnet40_pointnext.yaml")
         classifier = build_model_from_cfg(cfg.model)  # .to(cfg.rank)
-        load_checkpoint(
-            classifier,
-            pretrained_path=args.classifier_dir
-        )
+        load_checkpoint(classifier, pretrained_path=args.classifier_dir)
         classifier.cuda()
         classifier.eval()
     elif args.classifier == "pointMLP":
@@ -607,9 +602,7 @@ def main(args):
         classifier = Point2VecClassification()
         classifier.cuda()
         classifier.setup()
-        checkpoint = extract_model_checkpoint(
-            args.classifier_dir
-        )
+        checkpoint = extract_model_checkpoint(args.classifier_dir)
         missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
         print(f"Missing keys: {missing_keys}")
         print(f"Unexpected keys: {unexpected_keys}")
@@ -625,9 +618,7 @@ def main(args):
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt(args.classifier_dir, False)
         else:
-            config = cfg_from_yaml_file(
-                "cfgs/cfgs_mate/tta/tta_modelnet.yaml"
-            )
+            config = cfg_from_yaml_file("cfgs/cfgs_mate/tta/tta_modelnet.yaml")
             classifier = builder.model_builder(config.model)
             classifier.load_model_from_ckpt(args.classifier_dir, False)
             classifier.rotate = args.rotate
@@ -916,7 +907,7 @@ def vis(args):
         classifier = build_model_from_cfg(cfg.model)  # .to(cfg.rank)
         load_checkpoint(
             classifier,
-            pretrained_path=args.classifier_dir
+            pretrained_path=args.classifier_dir,
             #'ckpt/pointNeXt_modelnet40.pth'
         )
         classifier.cuda()

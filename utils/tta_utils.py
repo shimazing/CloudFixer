@@ -18,7 +18,9 @@ def copy_model_and_optimizer(model, optimizer, scheduler):
         return model_state, optimizer_state, None
 
 
-def load_model_and_optimizer(model, optimizer, scheduler, model_state, optimizer_state, scheduler_state):
+def load_model_and_optimizer(
+    model, optimizer, scheduler, model_state, optimizer_state, scheduler_state
+):
     model.load_state_dict(model_state, strict=True)
     optimizer.load_state_dict(optimizer_state)
     if scheduler is not None:
@@ -29,14 +31,20 @@ def load_model_and_optimizer(model, optimizer, scheduler, model_state, optimizer
 
 
 def setup_optimizer(args, params):
-    if 'sar' in args.method:
-        optimizer = SAM(params=params, base_optimizer=getattr(torch.optim, args.test_optim), lr=args.test_lr, rho=args.sar_eps_threshold)
-    elif 'mate' in args.method:
-        optimizer = getattr(torch.optim, args.test_optim)(params, lr=args.test_lr, weight_decay=0.05)
+    if "sar" in args.method:
+        optimizer = SAM(
+            params=params,
+            base_optimizer=getattr(torch.optim, args.test_optim),
+            lr=args.test_lr,
+            rho=args.sar_eps_threshold,
+        )
+    elif "mate" in args.method:
+        optimizer = getattr(torch.optim, args.test_optim)(
+            params, lr=args.test_lr, weight_decay=0.05
+        )
     else:
         optimizer = getattr(torch.optim, args.test_optim)(params, lr=args.test_lr)
     return optimizer
-
 
 
 def configure_bn_layer(args, m):
@@ -48,7 +56,7 @@ def configure_bn_layer(args, m):
 
 
 def configure_model(args, model):
-    if 'pl' in args.method:
+    if "pl" in args.method:
         model.eval()
         model.requires_grad_(False)
         for m in model.modules():
@@ -56,7 +64,7 @@ def configure_model(args, model):
                 m.train()
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 configure_bn_layer(args, m)
-    if 'tent' in args.method:
+    if "tent" in args.method:
         model.eval()
         model.requires_grad_(False)
         for m in model.modules():
@@ -64,7 +72,7 @@ def configure_model(args, model):
                 m.train()
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 configure_bn_layer(args, m)
-    if 'sar' in args.method:
+    if "sar" in args.method:
         model.eval()
         model.requires_grad_(False)
         for m in model.modules():
@@ -74,13 +82,13 @@ def configure_model(args, model):
                 configure_bn_layer(args, m)
             elif isinstance(m, (nn.LayerNorm, nn.GroupNorm)):
                 m.requires_grad_(True)
-    if 'memo' in args.method:
+    if "memo" in args.method:
         model.eval()
         for m in model.modules():
             if isinstance(m, nn.modules.batchnorm._BatchNorm):
                 configure_bn_layer(args, m)
                 m.momentum = args.memo_bn_momentum
-    if 'shot' in args.method:
+    if "shot" in args.method:
         model.eval()
         for m in model.modules():
             if isinstance(m, nn.Dropout):
@@ -90,28 +98,28 @@ def configure_model(args, model):
         m = list(model.modules())[-1]
         m.eval()
         m.requires_grad_(False)
-    if 'dua' in args.method:
+    if "dua" in args.method:
         model.eval()
         for m in model.modules():
             if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
                 m.eval()
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 m.train()
-    if 'bn_stats' in args.method:
+    if "bn_stats" in args.method:
         model.eval()
         for m in model.modules():
             if args.batch_size == 1 and isinstance(m, nn.BatchNorm1d):
                 m.eval()
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 m.train()
-                if not args.bn_stats_prior: # do not use source statistics
+                if not args.bn_stats_prior:  # do not use source statistics
                     m.track_running_stats = False
                     m.running_mean = None
                     m.running_var = None
                 else:
                     m.track_running_stats = True
                     m.momentum = 1 - args.bn_stats_prior
-    if 'mate' in args.method:
+    if "mate" in args.method:
         model.eval()
         model.requires_grad_(False)
         for m in model.modules():
@@ -120,7 +128,7 @@ def configure_model(args, model):
             elif isinstance(m, nn.modules.batchnorm._BatchNorm):
                 m.train().requires_grad_(True)
         for n, p in model.module.named_parameters():
-            if 'class_head' in n:
+            if "class_head" in n:
                 p.requires_grad_(False)
     return model
 
@@ -128,31 +136,30 @@ def configure_model(args, model):
 def collect_params(args, model, train_params):
     params, names = [], []
     for nm, m in model.named_modules():
-        if 'all' in train_params:
+        if "all" in train_params:
             for np, p in m.named_parameters():
-                p.requires_grad = True # for SHOT
+                p.requires_grad = True  # for SHOT
                 if not f"{nm}.{np}" in names:
                     params.append(p)
                     names.append(f"{nm}.{np}")
-        if 'LN' in train_params:
+        if "LN" in train_params:
             if isinstance(m, nn.LayerNorm):
                 for np, p in m.named_parameters():
-                    if np in ['weight', 'bias']:
+                    if np in ["weight", "bias"]:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-        if 'BN' in train_params:
+        if "BN" in train_params:
             if isinstance(m, nn.modules.batchnorm._BatchNorm):
                 for np, p in m.named_parameters():
-                    if np in ['weight', 'bias']:
+                    if np in ["weight", "bias"]:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-        if 'GN' in train_params:
+        if "GN" in train_params:
             if isinstance(m, nn.GroupNorm):
                 for np, p in m.named_parameters():
-                    if np in ['weight', 'bias']:
+                    if np in ["weight", "bias"]:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-    print(f"parameters to adapt: {names}")
     return params, names
 
 
@@ -171,7 +178,7 @@ def softmax_entropy(x, dim=-1):
     return -(x.softmax(dim) * x.log_softmax(dim)).sum(dim)
 
 
-def softmax_diversity_regularizer(x): # shot
+def softmax_diversity_regularizer(x):  # shot
     x2 = x.softmax(-1).mean(0)  # [b, c] -> [c]
     return (x2 * safe_log(x2, ver=3)).sum()
 
@@ -179,7 +186,7 @@ def softmax_diversity_regularizer(x): # shot
 def marginal_entropy(args, logits):
     per_sample_logits = []
     for i in range(0, len(logits), args.memo_num_augs):
-        per_sample_logits.append(logits[i:i + args.memo_num_augs])
+        per_sample_logits.append(logits[i : i + args.memo_num_augs])
     per_sample_logits = torch.stack(per_sample_logits, dim=0)
     probs = per_sample_logits.softmax(dim=-1)
     probs = probs.mean(dim=1)
@@ -192,9 +199,9 @@ def _modified_bn_forward(self, input):
     nn.functional.batch_norm(input, est_mean, est_var, None, None, True, 1.0, self.eps)
     running_mean = self.prior * self.running_mean + (1 - self.prior) * est_mean
     running_var = self.prior * self.running_var + (1 - self.prior) * est_var
-    return nn.functional.batch_norm(input, running_mean, running_var, self.weight, self.bias, False, 0, self.eps)
-
-
+    return nn.functional.batch_norm(
+        input, running_mean, running_var, self.weight, self.bias, False, 0, self.eps
+    )
 
 
 class AffinityMatrix:
@@ -210,7 +217,6 @@ class AffinityMatrix:
 
     def symmetrize(self, mat):
         return 1 / 2 * (mat + mat.t())
-
 
 
 class kNN_affinity(AffinityMatrix):
@@ -229,21 +235,21 @@ class kNN_affinity(AffinityMatrix):
         return W
 
 
-
 class rbf_affinity(AffinityMatrix):
     def __init__(self, sigma: float, **kwargs):
         self.sigma = sigma
-        self.k = kwargs['knn']
+        self.k = kwargs["knn"]
 
     def __call__(self, X):
         N = X.size(0)
         dist = torch.norm(X.unsqueeze(0) - X.unsqueeze(1), dim=-1, p=2)  # [N, N]
         n_neighbors = min(self.k, N)
-        kth_dist = dist.topk(k=n_neighbors, dim=-1, largest=False).values[:, -1]  # compute k^th distance for each point, [N, knn + 1]
+        kth_dist = dist.topk(k=n_neighbors, dim=-1, largest=False).values[
+            :, -1
+        ]  # compute k^th distance for each point, [N, knn + 1]
         sigma = kth_dist.mean()
-        rbf = torch.exp(- dist ** 2 / (2 * sigma ** 2))
+        rbf = torch.exp(-(dist**2) / (2 * sigma**2))
         return rbf
-
 
 
 class linear_affinity(AffinityMatrix):
@@ -261,7 +267,7 @@ def entropy_energy(Y, unary, pairwise, bound_lambda):
 
 def laplacian_optimization(unary, kernel, bound_lambda=1, max_steps=100):
     E_list = []
-    oldE = float('inf')
+    oldE = float("inf")
     Y = (-unary).softmax(-1)  # [N, K]
     for i in range(max_steps):
         pairwise = bound_lambda * kernel.matmul(Y)  # [N, K]
@@ -269,7 +275,7 @@ def laplacian_optimization(unary, kernel, bound_lambda=1, max_steps=100):
         Y = exponent.softmax(-1)
         E = entropy_energy(Y, unary, pairwise, bound_lambda).item()
         E_list.append(E)
-        if (i > 1 and (abs(E - oldE) <= 1e-8 * abs(oldE))):
+        if i > 1 and (abs(E - oldE) <= 1e-8 * abs(oldE)):
             break
         else:
             oldE = E
@@ -283,7 +289,7 @@ def batch_evaluation(args, model, x):
         feats = F.normalize(model(x, return_feature=True), p=2, dim=-1).detach()
     except:
         feats = F.normalize(model(pc=x, return_feature=True), p=2, dim=-1).detach()
-    affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+    affinity = eval(f"{args.lame_affinity}_affinity")(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
     return Y
@@ -293,7 +299,7 @@ def batch_evaluation_with_source(args, model, x):
     out = model(x).detach()
     unary = -torch.log(out.softmax(-1) + 1e-10)  # softmax the output
     feats = F.normalize(model.get_feature(x), p=2, dim=-1).detach()
-    affinity = eval(f'{args.lame_affinity}_affinity')(sigma=1.0, knn=args.lame_knn)
+    affinity = eval(f"{args.lame_affinity}_affinity")(sigma=1.0, knn=args.lame_knn)
     kernel = affinity(feats)
     Y = laplacian_optimization(unary, kernel, max_steps=args.lame_max_steps)
     return Y

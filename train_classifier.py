@@ -12,20 +12,15 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch.utils.data import DataLoader
 
-from datasets.dataloader import ModelNet40C, PointDA10, ImbalancedDatasetSampler
+from datasets.dataloader import PointDA10
 from classifier.models import PointNet, DGCNNWrapper
 from utils import logging as log
 
 NWORKERS = 4
-MAX_LOSS = float('inf')
+MAX_LOSS = float("inf")
+
 
 def str2bool(v):
-    """
-    Input:
-        v - string
-    output:
-        True/False
-    """
     if isinstance(v, bool):
         return v
     if v.lower() in ("yes", "true", "t", "y", "1"):
@@ -36,9 +31,6 @@ def str2bool(v):
         raise argparse.ArgumentTypeError("Boolean value expected.")
 
 
-# ==================
-# Argparse
-# ==================
 parser = argparse.ArgumentParser(description="DA on Point Clouds")
 parser.add_argument(
     "--exp_name", type=str, default="classifier", help="Name of the experiment"
@@ -109,9 +101,6 @@ parser.add_argument("--dropout", type=float, default=0.5, help="dropout rate")
 
 args = parser.parse_args()
 
-# ==================
-# init
-# ==================
 io = log.IOStream(args)
 io.cprint(str(args))
 
@@ -136,18 +125,7 @@ else:
     io.cprint("Using CPU")
 
 
-# ==================
-# Read Data
-# ==================
 def split_set(dataset, domain, set_type="source"):
-    """
-    Input:
-        dataset
-        domain - modelnet/shapenet/scannet
-        type_set - source/target
-    output:
-        train_sampler, valid_sampler
-    """
     train_indices = dataset.train_ind
     val_indices = dataset.val_ind
     unique, counts = np.unique(dataset.label[train_indices], return_counts=True)
@@ -211,9 +189,6 @@ trgt_test_loader2 = DataLoader(
 )
 label_to_idx = src_trainset.label_to_idx
 
-# ==================
-# Init Model
-# ==================
 if args.model == "pointnet":
     model = PointNet(args)
 elif args.model == "dgcnn":
@@ -228,9 +203,6 @@ if (device.type == "cuda") and len(args.gpus) > 1:
     model = nn.DataParallel(model, args.gpus)
 best_model = copy.deepcopy(model)
 
-# ==================
-# Optimizer
-# ==================
 opt = (
     optim.SGD(
         model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.wd
@@ -239,11 +211,9 @@ opt = (
     else optim.Adam(model.parameters(), lr=args.lr, weight_decay=args.wd)
 )
 scheduler = CosineAnnealingLR(opt, args.epochs)
-criterion = nn.CrossEntropyLoss() # return the mean of CE over the batch
+criterion = nn.CrossEntropyLoss()  # return the mean of CE over the batch
 
-# ==================
-# Validation/test
-# ==================
+
 def test(test_loader, model=None, set_type="Target", partition="Val", epoch=0):
     # Run on cpu or gpu
     count = 0.0
@@ -282,9 +252,6 @@ def test(test_loader, model=None, set_type="Target", partition="Val", epoch=0):
     return test_acc, print_losses["cls"], conf_mat
 
 
-# ==================
-# Train
-# ==================
 src_best_val_acc = best_val_epoch = 0
 src_best_val_loss = MAX_LOSS
 src_val_acc_list = []
@@ -324,9 +291,6 @@ for epoch in range(args.epochs):
     src_print_losses = {k: v * 1.0 / src_count for (k, v) in src_print_losses.items()}
     src_acc = io.print_progress("Source", "Trn", epoch, src_print_losses)
 
-    # ===================
-    # Validation
-    # ===================
     src_val_acc, src_val_loss, src_conf_mat = test(
         src_val_loader, model, "Source", "Val", epoch
     )
@@ -345,9 +309,6 @@ io.cprint(
     % (best_val_epoch, src_best_val_acc, src_best_val_loss)
 )
 
-# ===================
-# Test
-# ===================
 model = best_model
 
 trgt_test_acc, trgt_test_loss, trgt_conf_mat = test(

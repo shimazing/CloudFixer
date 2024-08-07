@@ -1,32 +1,22 @@
 # logging
-wandb_usr=drumpt
+wandb_usr=unknown
 
 # dataset
 DATASET_ROOT_DIR=../datasets
-CODE_BASE_DIR=.
+CHECKPOINT_DIR=checkpoints
+OUTPUT_DIR=outputs
+
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
 adv_attack=False # True, False
 scenario=normal
 imb_ratio=1
 
 # classifier
-#classifier=DGCNN
-#classifier_dir=${CODE_BASE_DIR}/ckpt/dgcnn_modelnet40_best_test.pth
-
-# classifier=pointMLP
-# classifier_dir=${CODE_BASE_DIR}/outputs/pointMLP_modelnet40.pth
-
-#classifier=pointNeXt
-#classifier_dir=${CODE_BASE_DIR}/outputs/pointNeXt_modelnet40.pth
-
 classifier=point2vec
-classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
-
-#classifier=pointMAE
-#classifier_dir=ckpt/MATE_modelnet_jt.pth
+classifier_dir=${CHECKPOINT_DIR}/point2vec_modelnet40.ckpt
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/ckpt/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_modelnet40.npy
 
 #################### placeholders ####################
 # lame
@@ -67,18 +57,17 @@ optim_end_factor=0.05
 subsample=2048
 weighted_reg=True
 rotation=0.02
-vote=5
+vote=1
 ######################################################
 
-
 run_baselines() {
-    num_steps=0 # 0 TODO for tent # placeholder
-    episodic=False # placeholder
-    test_optim=AdamW # placeholder
-    test_lr=0.01 # TODO for tent 1e-4 # placeholder
+    num_steps=0                # 0 TODO for tent # placeholder
+    episodic=False             # placeholder
+    test_optim=AdamW           # placeholder
+    test_lr=0.01               # TODO for tent 1e-4 # placeholder
     params_to_adapt="LN GN BN" # placeholder
 
-python3 adapt.py \
+    python3 adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
@@ -140,9 +129,7 @@ python3 adapt.py \
         --wandb_usr ${wandb_usr} \
         --vote ${vote} \
         2>&1
-        #i=$((i + 1))
 }
-
 
 run_cloudfixer_all_experiments() {
     CLASSIFIER_LIST=(${classifier})
@@ -168,22 +155,14 @@ run_cloudfixer_all_experiments() {
                                 subsample=500
                             elif [[ "$corruption" == "cutout" ]]; then
                                 subsample=500
-                            #elif [[ "$corruption" == "lidar" ]]; then
-                            #    subsample=1024
-                            #elif [[ "$corruption" == "density_inc" ]]; then
-                            #    subsample=500
-                            #elif [[ "$corruption" == "density" ]]; then
-                            #    subsample=1024
                             elif [[ "$corruption" == "rotation" ]]; then
                                 rotation=0.05
-                            #elif [[ "$corruption" == "upsampling" ]]; then
-                            #    subsample=1024
                             fi
-                            batch_size=128
-                            method="cloudfixer" #"cloudfixer tent"
-                            method_="cloudfixer_${vote}" #"cloudfixer+tent"
-                            exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method_}_seed_${random_seed}_batch_size_${batch_size}
                             mode=eval
+                            batch_size=128
+                            method="cloudfixer"
+                            out_path=${OUTPUT_DIR}
+                            exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                             run_baselines
                         done
                     done
@@ -193,26 +172,19 @@ run_cloudfixer_all_experiments() {
     done
 }
 
-# GPUS=(6 7)
-# NUM_GPUS=${#GPUS[@]}
-# i=0
-num_max_jobs=2
 ##############################################
-
 wait_n() {
-  # limit the max number of jobs as NUM_MAX_JOB and wait
-  background=($(jobs -p))
-  echo ${num_max_jobs}
-  if ((${#background[@]} >= num_max_jobs)); then
-    wait -n
-  fi
+    # limit the max number of jobs as NUM_MAX_JOB and wait
+    background=($(jobs -p))
+    echo ${num_max_jobs}
+    if ((${#background[@]} >= num_max_jobs)); then
+        wait -n
+    fi
 }
-
-GPUS=(0 1 2 3)
-NUM_GPUS=${#GPUS[@]}
-
+num_max_jobs=2
 GPUS=(0 1 2 3 4 5 6 7)
 NUM_GPUS=${#GPUS[@]}
 CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+##############################################
+
 run_cloudfixer_all_experiments
-#run_cloudfixer_adv

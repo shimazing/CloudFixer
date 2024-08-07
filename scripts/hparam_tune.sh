@@ -1,8 +1,8 @@
 wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=../nfs-client/datasets
-CODE_BASE_DIR=../nfs-client/CloudFixer
+DATASET_ROOT_DIR=../datasets
+CHECKPOINT_DIR=checkpoints
 
 dataset=modelnet40c_original
 dataset_dir=${DATASET_ROOT_DIR}/modelnet40_ply_hdf5_2048
@@ -10,10 +10,10 @@ adv_attack=False # True, False
 
 # classifier
 classifier=point2vec
-classifier_dir=${CODE_BASE_DIR}/outputs/point2vec_modelnet40.ckpt
+classifier_dir=${CHECKPOINT_DIR}/point2vec_modelnet40.ckpt
 
 # diffusion model
-diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_modelnet40.npy
+diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_modelnet40.npy
 
 #################### placeholders ####################
 # lame
@@ -82,15 +82,15 @@ hparam_tune() {
 
     # hyperparameters for lame
     method=lame
-    episodic=False # placeholder
-    test_optim=AdamW # placeholder
-    test_lr=1e-4 # palceholder
+    episodic=False             # placeholder
+    test_optim=AdamW           # placeholder
+    test_lr=1e-4               # palceholder
     params_to_adapt="LN BN GN" # placeholder
-    num_steps=0 # placeholder
-    batch_size=64 # important
+    num_steps=0                # placeholder
+    batch_size=64              # important
     ### hyperparameters to tune for lame
     lame_affinity=kNN # rbf, kNN, linear
-    lame_knn=1 # 1, 3, 5, 10
+    lame_knn=1        # 1, 3, 5, 10
     lame_max_steps=10 # 1, 10, 100
 
     # hyperparameters for sar
@@ -100,8 +100,8 @@ hparam_tune() {
     params_to_adapt="LN BN GN" # placeholder
     batch_size=64
     # hyperparameters to tune for sar
-    test_lr=1e-2 # 1e-4 1e-3 1e-2
-    num_steps=3 # 1 3 5 10
+    test_lr=1e-2          # 1e-4 1e-3 1e-2
+    num_steps=3           # 1 3 5 10
     sar_ent_threshold=0.2 # 0.4, 0.2, 0.6, 0.8
     sar_eps_threshold=0.1 # 0.01, 0.05, 0.1
 
@@ -123,21 +123,21 @@ hparam_tune() {
     batch_size=1
     memo_bn_momentum=1/17
     ### hyperparameters to tune for memo
-    test_lr=1e-4 # 1e-6 1e-5 1e-4 1e-3
-    num_steps=2 # "1, 2"
+    test_lr=1e-4     # 1e-6 1e-5 1e-4 1e-3
+    num_steps=2      # "1, 2"
     memo_num_augs=16 # "16 32 64"
 
     # hyperparameters for dua
     method=dua
     episodic=False
-    test_optim=AdamW # placeholder
+    test_optim=AdamW           # placeholder
     params_to_adapt="LN BN GN" # placeholder
-    test_lr=1e-4 # placeholder
+    test_lr=1e-4               # placeholder
     dua_mom_pre=0.1
     dua_min_mom=0.005
     batch_size=64
     ### hyperparameters to tune for dua
-    num_steps=5 # 1, 3, 5, 10
+    num_steps=5          # 1, 3, 5, 10
     dua_decay_factor=0.9 # 0.9, 0.94, 0.99
 
     # hyperparameters for bn_stats
@@ -158,23 +158,23 @@ hparam_tune() {
     params_to_adapt="all"
     batch_size=32
     # hyperparameters to tune for shot
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=5 # 1 3 5 10
+    test_lr=1e-4          # 1e-4 1e-3 1e-2
+    num_steps=5           # 1 3 5 10
     shot_pl_loss_weight=0 # 0 0.1, 0.3, 0.5, 1
 
     # hyperparameters for dda
     method=dda
     batch_size=16
-    episodic=False # placeholder
-    test_optim=AdamW # placeholder
+    episodic=False        # placeholder
+    test_optim=AdamW      # placeholder
     params_to_adapt="all" # placeholder
-    num_steps=1 # placeholder
-    test_lr=1e-4 # placeholder
+    num_steps=1           # placeholder
+    test_lr=1e-4          # placeholder
     # hyperparameters to tune for dda
-    dda_steps=50 # default: 50
+    dda_steps=50          # default: 50
     dda_guidance_weight=6 # 3, 6, 9
-    dda_lpf_method=fps # None, mean, median, fps
-    dda_lpf_scale=4 # 2, 4, 8
+    dda_lpf_method=fps    # None, mean, median, fps
+    dda_lpf_scale=4       # 2, 4, 8
 
     # logging
     exp_name=hparam_search_${classifier}_${dataset}_${method}
@@ -938,7 +938,6 @@ hparam_tune_dda() {
     done
 }
 
-
 hparam_tune_pointda() {
     CLASSIFIER_LIST=(DGCNN)
 
@@ -951,19 +950,19 @@ hparam_tune_pointda() {
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                for ((idx = 0; idx < ${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
+                    classifier_dir=${CHECKPOINT_DIR}/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}/generative_model_ema_last.npy
                     for method in ${METHOD_LIST}; do
-                        # hparam_tune_tent
-                        # hparam_tune_lame
-                        # hparam_tune_sar
-                        # hparam_tune_pl
-                        # hparam_tune_memo
+                        hparam_tune_tent
+                        hparam_tune_lame
+                        hparam_tune_sar
+                        hparam_tune_pl
+                        hparam_tune_memo
                         hparam_tune_dua
-                        # hparam_tune_shot
+                        hparam_tune_shot
                     done
                 done
             done
@@ -973,11 +972,11 @@ hparam_tune_pointda() {
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for classifier in ${CLASSIFIER_LIST}; do
-                for ((idx=0; idx<${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
+                for ((idx = 0; idx < ${#SOURCE_DOMAIN_LIST[@]}; ++idx)); do
                     dataset=${TARGET_DOMAIN_LIST[idx]}
                     dataset_dir=${DATASET_ROOT_DIR}/PointDA_data/${TARGET_DOMAIN_LIST[idx]}
-                    classifier_dir=${CODE_BASE_DIR}/outputs/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
-                    diffusion_dir=${CODE_BASE_DIR}/outputs/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
+                    classifier_dir=${CHECKPOINT_DIR}/dgcnn_${SOURCE_DOMAIN_LIST[idx]}_best_test.pth
+                    diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_${SOURCE_DOMAIN_LIST[idx]}.npy
                     method="dda"
 
                     hparam_tune_dda
@@ -987,7 +986,6 @@ hparam_tune_pointda() {
     done
 }
 
-
 ############# run in single GPU ##############
 GPUS=(0 1 2 3 4 5 6 7)
 NUM_GPUS=8
@@ -995,14 +993,13 @@ i=0
 num_max_jobs=1
 ##############################################
 
-# hparam_tune
-# hparam_tune_tent
-# hparam_tune_lame
-# hparam_tune_sar
-# hparam_tune_pl
-# hparam_tune_memo
-# hparam_tune_dua
-# hparam_tune_shot
-# hparam_tune_dda
+hparam_tune_tent
+hparam_tune_lame
+hparam_tune_sar
+hparam_tune_pl
+hparam_tune_memo
+hparam_tune_dua
+hparam_tune_shot
+hparam_tune_dda
 hparam_tune_pointda
 python3 utils/send_email.py --message "finish hparameter tuning on pointda"

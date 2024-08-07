@@ -8,24 +8,27 @@ eps = 10e-4
 eps2 = 10e-6
 KL_SCALER = 10.0
 MIN_POINTS = 20
-RADIUS = 0.5 # 0.5 * 3
+RADIUS = 0.5  # 0.5 * 3
 NREGIONS = 3
 NROTATIONS = 4
 N = 16
 K = 4
 NUM_FEATURES = K * 3 + 1
 
+
 def knn(x, k=5, mask=None, ind=None, return_dist=False):
     # mask : [B, N]
     # x : [B, C=3, N]
     inner = -2 * torch.matmul(x.transpose(2, 1), x)
-    xx = torch.sum(x ** 2, dim=1, keepdim=True)
-    pairwise_distance = -xx - inner - xx.transpose(2, 1)  #거리 가장 가까운거 골라야하니까 음수 붙여줌
+    xx = torch.sum(x**2, dim=1, keepdim=True)
+    pairwise_distance = (
+        -xx - inner - xx.transpose(2, 1)
+    )  # 거리 가장 가까운거 골라야하니까 음수 붙여줌
     # B x N x N
 
     if ind is not None:
         # update mask only to consider duplicated points
-        mask = (ind == torch.arange(ind.shape[1]).to(ind.device))
+        mask = ind == torch.arange(ind.shape[1]).to(ind.device)
     if mask is not None:
         B_ind, N_ind = (~mask).nonzero(as_tuple=True)
         pairwise_distance[B_ind, N_ind] = -np.inf
@@ -35,9 +38,12 @@ def knn(x, k=5, mask=None, ind=None, return_dist=False):
     if return_dist:
         B = x.shape[0]
         N = x.shape[2]
-        dist =  -pairwise_distance[torch.arange(B)[:, None, None],
-                            torch.arange(N)[None, :, None],
-                idx] + 1e-8
+        dist = (
+            -pairwise_distance[
+                torch.arange(B)[:, None, None], torch.arange(N)[None, :, None], idx
+            ]
+            + 1e-8
+        )
         is_valid = mask[torch.arange(B)[:, None, None], idx]
         dist[~is_valid] = 0
         n_valid = is_valid.float().sum(dim=-1)
@@ -76,7 +82,12 @@ def index_points(points, idx):
     view_shape[1:] = [1] * (len(view_shape) - 1)
     repeat_shape = list(idx.shape)
     repeat_shape[0] = 1
-    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+    batch_indices = (
+        torch.arange(B, dtype=torch.long)
+        .to(device)
+        .view(view_shape)
+        .repeat(repeat_shape)
+    )
     new_points = points[batch_indices, idx, :]
     return new_points
 
@@ -95,7 +106,7 @@ def region_mean(num_regions):
     #  construct all possibilities on the line [-1, 1] in the 3 axes
     for i in range(n - 1, -1, -1):
         for j in range(n - 1, -1, -1):
-            for k in range(n-1, -1, -1):
+            for k in range(n - 1, -1, -1):
                 lookup.append([1 - d * (i + 0.5), 1 - d * (j + 0.5), 1 - d * (k + 0.5)])
     lookup = np.array(lookup)  # n**3 x 3
     return lookup
@@ -121,7 +132,7 @@ def region_mean(num_regions):
 #     return lookup
 
 
-def assign_region_to_point(X, device='cuda:0', NREGIONS=3):
+def assign_region_to_point(X, device="cuda:0", NREGIONS=3):
     """
     Input:
         X: point cloud [B, C, N]
@@ -134,7 +145,9 @@ def assign_region_to_point(X, device='cuda:0', NREGIONS=3):
     d = 2 / n
     X_clip = torch.clamp(X, -0.99999999, 0.99999999)  # [B, C, N]
     batch_size, _, num_points = X.shape
-    Y = torch.zeros((batch_size, num_points), device=device, dtype=torch.long)  # label matrix  [B, N]
+    Y = torch.zeros(
+        (batch_size, num_points), device=device, dtype=torch.long
+    )  # label matrix  [B, N]
 
     # The code below partitions all points in the shape to voxels.
     # At each iteration find per axis the lower threshold and the upper threshold values
@@ -145,16 +158,20 @@ def assign_region_to_point(X, device='cuda:0', NREGIONS=3):
         for y in range(n):
             for z in range(n):
                 # lt= lower threshold, ut = upper threshold
-                x_axis_lt = -1 + x * d < X_clip[:, 0, :]        # [B, 1, N]
+                x_axis_lt = -1 + x * d < X_clip[:, 0, :]  # [B, 1, N]
                 x_axis_ut = X_clip[:, 0, :] < -1 + (x + 1) * d  # [B, 1, N]
-                y_axis_lt = -1 + y * d < X_clip[:, 1, :]        # [B, 1, N]
+                y_axis_lt = -1 + y * d < X_clip[:, 1, :]  # [B, 1, N]
                 y_axis_ut = X_clip[:, 1, :] < -1 + (y + 1) * d  # [B, 1, N]
-                z_axis_lt = -1 + z * d < X_clip[:, 2, :]        # [B, 1, N]
+                z_axis_lt = -1 + z * d < X_clip[:, 2, :]  # [B, 1, N]
                 z_axis_ut = X_clip[:, 2, :] < -1 + (z + 1) * d  # [B, 1, N]
                 # get a mask indicating for each coordinate of each point of each shape whether
                 # it falls inside the current inspected ranges
-                in_range = torch.cat([x_axis_lt, x_axis_ut, y_axis_lt, y_axis_ut,
-                                      z_axis_lt, z_axis_ut], dim=1).view(batch_size, 6, -1)  # [B, 6, N]
+                in_range = torch.cat(
+                    [x_axis_lt, x_axis_ut, y_axis_lt, y_axis_ut, z_axis_lt, z_axis_ut],
+                    dim=1,
+                ).view(
+                    batch_size, 6, -1
+                )  # [B, 6, N]
                 # per each point decide if it falls in the current region only if in all
                 # ranges the value is 1 (i.e., it falls inside all the inspected ranges)
                 mask, _ = torch.min(in_range, dim=1)  # [B, N]
@@ -184,7 +201,6 @@ def assign_region_to_point(X, device='cuda:0', NREGIONS=3):
 #     return Y
 
 
-
 def collapse_to_point(x, device):
     """
     Input:
@@ -197,13 +213,13 @@ def collapse_to_point(x, device):
     """
     # get pairwise distances
     inner = -2 * torch.matmul(x.transpose(1, 0), x)
-    xx = torch.sum(x ** 2, dim=0, keepdim=True)
+    xx = torch.sum(x**2, dim=0, keepdim=True)
     pairwise_distance = xx + inner + xx.transpose(1, 0)
 
     # get mask of points in threshold
     mask = pairwise_distance.clone()
-    mask[mask > RADIUS ** 2] = 100
-    mask[mask <= RADIUS ** 2] = 1
+    mask[mask > RADIUS**2] = 100
+    mask[mask <= RADIUS**2] = 1
     mask[mask == 100] = 0
 
     # Choose only from points that have more than MIN_POINTS within a RADIUS of them
@@ -219,7 +235,9 @@ def collapse_to_point(x, device):
 
     # draw a gaussian centered at the point for points falling in the region
     indices = (point_mask != 0).nonzero().squeeze()
-    x[:, indices] = torch.tensor(draw_from_gaussian(point.cpu().numpy(), len(indices)), dtype=torch.float).to(device)
+    x[:, indices] = torch.tensor(
+        draw_from_gaussian(point.cpu().numpy(), len(indices)), dtype=torch.float
+    ).to(device)
     return x, indices
 
 
@@ -246,7 +264,7 @@ def draw_from_uniform(gap, region_mean, num_points):
     return np.random.uniform(region_mean - gap, region_mean + gap, (num_points, 3)).T
 
 
-def farthest_point_sample(xyz, npoint, device='cuda:0'):
+def farthest_point_sample(xyz, npoint, device="cuda:0"):
     """
     Input:
         xyz: pointcloud data, [B, C, N]
@@ -263,12 +281,22 @@ def farthest_point_sample(xyz, npoint, device='cuda:0'):
     centroids_vals = torch.zeros(B, C, npoint).to(device)
     for i in range(npoint):
         centroids[:, i] = farthest  # save current chosen point index
-        centroid = xyz[batch_indices, :, farthest].view(B, C, 1)  # get the current chosen point value
+        centroid = xyz[batch_indices, :, farthest].view(
+            B, C, 1
+        )  # get the current chosen point value
         centroids_vals[:, :, i] = centroid[:, :, 0].clone()
-        dist = torch.sum((xyz - centroid) ** 2, 1)  # euclidean distance of points from the current centroid
-        mask = dist < distance  # save index of all point that are closer than the current max distance
-        distance[mask] = dist[mask]  # save the minimal distance of each point from all points that were chosen until now
-        farthest = torch.max(distance, -1)[1]  # get the index of the point farthest away
+        dist = torch.sum(
+            (xyz - centroid) ** 2, 1
+        )  # euclidean distance of points from the current centroid
+        mask = (
+            dist < distance
+        )  # save index of all point that are closer than the current max distance
+        distance[mask] = dist[
+            mask
+        ]  # save the minimal distance of each point from all points that were chosen until now
+        farthest = torch.max(distance, -1)[
+            1
+        ]  # get the index of the point farthest away
     return centroids, centroids_vals
 
 
@@ -292,23 +320,33 @@ def farthest_point_sample_np(xyz, norm_curv=None, npoint=1024):
         centroids_norm_curv_vals = np.zeros((B, norm_curv.shape[1], npoint))
     for i in range(npoint):
         centroids[:, i] = farthest  # save current chosen point index
-        centroid = xyz[batch_indices, :, farthest].reshape(B, C, 1)  # get the current chosen point value
+        centroid = xyz[batch_indices, :, farthest].reshape(
+            B, C, 1
+        )  # get the current chosen point value
         centroids_vals[:, :, i] = centroid[:, :, 0].copy()
         if norm_curv is not None:
             centroid_norm_curv = norm_curv[batch_indices, :, farthest].reshape(B, -1, 1)
             centroids_norm_curv_vals[:, :, i] = centroid_norm_curv[:, :, 0].copy()
-        dist = np.sum((xyz - centroid) ** 2, 1)  # euclidean distance of points from the current centroid
-        mask = dist < distance  # save index of all point that are closer than the current max distance
-        distance[mask] = dist[mask]  # save the minimal distance of each point from all points that were chosen until now
-        farthest = np.argmax(distance, axis=1)  # get the index of the point farthest away
+        dist = np.sum(
+            (xyz - centroid) ** 2, 1
+        )  # euclidean distance of points from the current centroid
+        mask = (
+            dist < distance
+        )  # save index of all point that are closer than the current max distance
+        distance[mask] = dist[
+            mask
+        ]  # save the minimal distance of each point from all points that were chosen until now
+        farthest = np.argmax(
+            distance, axis=1
+        )  # get the index of the point farthest away
     return centroids, centroids_vals, centroids_norm_curv_vals
 
 
 def rotate_pc(pointcloud, reverse=False):
     if reverse:
-        pointcloud = rotate_shape(pointcloud, 'x', np.pi / 2)
+        pointcloud = rotate_shape(pointcloud, "x", np.pi / 2)
     else:
-        pointcloud = rotate_shape(pointcloud, 'x', -np.pi / 2)
+        pointcloud = rotate_shape(pointcloud, "x", -np.pi / 2)
     return pointcloud
 
 
@@ -321,16 +359,34 @@ def rotate_shape(x, axis, angle):
     Return:
         A rotated shape
     """
-    R_x = np.asarray([[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0, np.sin(angle), np.cos(angle)]])
-    R_y = np.asarray([[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]])
-    R_z = np.asarray([[np.cos(angle), -np.sin(angle), 0], [np.sin(angle), np.cos(angle), 0], [0, 0, 1]])
+    R_x = np.asarray(
+        [
+            [1, 0, 0],
+            [0, np.cos(angle), -np.sin(angle)],
+            [0, np.sin(angle), np.cos(angle)],
+        ]
+    )
+    R_y = np.asarray(
+        [
+            [np.cos(angle), 0, np.sin(angle)],
+            [0, 1, 0],
+            [-np.sin(angle), 0, np.cos(angle)],
+        ]
+    )
+    R_z = np.asarray(
+        [
+            [np.cos(angle), -np.sin(angle), 0],
+            [np.sin(angle), np.cos(angle), 0],
+            [0, 0, 1],
+        ]
+    )
 
     if axis == "x":
-        return x.dot(R_x).astype('float32')
+        return x.dot(R_x).astype("float32")
     elif axis == "y":
-        return x.dot(R_y).astype('float32')
+        return x.dot(R_y).astype("float32")
     else:
-        return x.dot(R_z).astype('float32')
+        return x.dot(R_z).astype("float32")
 
 
 def rotate_shape_tensor(x, axis, angle):
@@ -343,16 +399,39 @@ def rotate_shape_tensor(x, axis, angle):
         A rotated shape
     """
     if axis == "x":
-        R_x = torch.tensor([[[1, 0, 0], [0, np.cos(angle), -np.sin(angle)], [0,
-            np.sin(angle), np.cos(angle)]]]).to(x) # 1 x 3 x 3
+        R_x = torch.tensor(
+            [
+                [
+                    [1, 0, 0],
+                    [0, np.cos(angle), -np.sin(angle)],
+                    [0, np.sin(angle), np.cos(angle)],
+                ]
+            ]
+        ).to(
+            x
+        )  # 1 x 3 x 3
         return x @ R_x
     elif axis == "y":
-        R_y = torch.tensor([[[np.cos(angle), 0, np.sin(angle)], [0, 1, 0],
-            [-np.sin(angle), 0, np.cos(angle)]]]).to(x)
+        R_y = torch.tensor(
+            [
+                [
+                    [np.cos(angle), 0, np.sin(angle)],
+                    [0, 1, 0],
+                    [-np.sin(angle), 0, np.cos(angle)],
+                ]
+            ]
+        ).to(x)
         return x @ R_y
     else:
-        R_z = torch.tensor([[[np.cos(angle), -np.sin(angle), 0], [np.sin(angle),
-            np.cos(angle), 0], [0, 0, 1]]]).to(x)
+        R_z = torch.tensor(
+            [
+                [
+                    [np.cos(angle), -np.sin(angle), 0],
+                    [np.sin(angle), np.cos(angle), 0],
+                    [0, 0, 1],
+                ]
+            ]
+        ).to(x)
         return x @ R_z
 
 
@@ -368,19 +447,19 @@ def random_rotate_one_axis(X, axis):
     rotation_angle = np.random.uniform() * 2 * np.pi
     cosval = np.cos(rotation_angle)
     sinval = np.sin(rotation_angle)
-    if axis == 'x':
+    if axis == "x":
         R_x = [[1, 0, 0], [0, cosval, -sinval], [0, sinval, cosval]]
         X = np.matmul(X, R_x)
-    elif axis == 'y':
+    elif axis == "y":
         R_y = [[cosval, 0, sinval], [0, 1, 0], [-sinval, 0, cosval]]
         X = np.matmul(X, R_y)
     else:
         R_z = [[cosval, -sinval, 0], [sinval, cosval, 0], [0, 0, 1]]
         X = np.matmul(X, R_z)
-    return X.astype('float32')
+    return X.astype("float32")
 
 
-def random_rotate_one_axis_torch(X, axis='z'):
+def random_rotate_one_axis_torch(X, axis="z"):
     """
     Apply random rotation about one axis
     Input:
@@ -389,34 +468,46 @@ def random_rotate_one_axis_torch(X, axis='z'):
     Return:
         A rotated shape
     """
-    #rotation_angle = np.random.uniform() * 2 * np.pi
+    # rotation_angle = np.random.uniform() * 2 * np.pi
     rotation_angle = torch.rand(len(X)).to(X.device) * 2 * np.pi
-    cosval = torch.cos(rotation_angle) # (batch_size,)
-    sinval = torch.sin(rotation_angle) # (batch_size,)
+    cosval = torch.cos(rotation_angle)  # (batch_size,)
+    sinval = torch.sin(rotation_angle)  # (batch_size,)
     ones = torch.ones_like(cosval)
     zeros = torch.zeros_like(cosval)
-    if axis == 'x':
-        R_x = torch.stack([
-            torch.stack([ones, zeros, zeros], dim=-1), # batch_size x 3
-            torch.stack([zeros, cosval, -sinval], dim=-1),
-            torch.stack([zeros, sinval, cosval], dim=-1)], dim=1)
-        #R_x = [[1, 0, 0], [0, cosval, -sinval], [0, sinval, cosval]]
+    if axis == "x":
+        R_x = torch.stack(
+            [
+                torch.stack([ones, zeros, zeros], dim=-1),  # batch_size x 3
+                torch.stack([zeros, cosval, -sinval], dim=-1),
+                torch.stack([zeros, sinval, cosval], dim=-1),
+            ],
+            dim=1,
+        )
+        # R_x = [[1, 0, 0], [0, cosval, -sinval], [0, sinval, cosval]]
         X = torch.matmul(X, R_x)
-    elif axis == 'y':
-        R_y = torch.stack([
-            torch.stack([cosval, zeros, sinval], dim=-1), # batch_size x 3
-            torch.stack([zeros, ones, zeros], dim=-1),
-            torch.stack([-sinval, zeros, cosval], dim=-1)], dim=1)
-        #R_y = [[cosval, 0, sinval], [0, 1, 0], [-sinval, 0, cosval]]
+    elif axis == "y":
+        R_y = torch.stack(
+            [
+                torch.stack([cosval, zeros, sinval], dim=-1),  # batch_size x 3
+                torch.stack([zeros, ones, zeros], dim=-1),
+                torch.stack([-sinval, zeros, cosval], dim=-1),
+            ],
+            dim=1,
+        )
+        # R_y = [[cosval, 0, sinval], [0, 1, 0], [-sinval, 0, cosval]]
         X = torch.matmul(X, R_y)
     else:
-        R_z = torch.stack([
-            torch.stack([cosval, -sinval, zeros], dim=-1), # batch_size x 3
-            torch.stack([sinval, cosval, zeros], dim=-1),
-            torch.stack([zeros, zeros, ones], dim=-1)], dim=1)
-        #R_z = [[cosval, -sinval, 0], [sinval, cosval, 0], [0, 0, 1]]
+        R_z = torch.stack(
+            [
+                torch.stack([cosval, -sinval, zeros], dim=-1),  # batch_size x 3
+                torch.stack([sinval, cosval, zeros], dim=-1),
+                torch.stack([zeros, zeros, ones], dim=-1),
+            ],
+            dim=1,
+        )
+        # R_z = [[cosval, -sinval, 0], [sinval, cosval, 0], [0, 0, 1]]
         X = torch.matmul(X, R_z)
-    return X.float() #astype('float32')
+    return X.float()  # astype('float32')
 
 
 def translate_pointcloud(pointcloud):
@@ -426,10 +517,12 @@ def translate_pointcloud(pointcloud):
     Return:
         A translated shape
     """
-    xyz1 = np.random.uniform(low=2./3., high=3./2., size=[3])
+    xyz1 = np.random.uniform(low=2.0 / 3.0, high=3.0 / 2.0, size=[3])
     xyz2 = np.random.uniform(low=-0.2, high=0.2, size=[3])
 
-    translated_pointcloud = np.add(np.multiply(pointcloud, xyz1), xyz2).astype('float32')
+    translated_pointcloud = np.add(np.multiply(pointcloud, xyz1), xyz2).astype(
+        "float32"
+    )
     return translated_pointcloud
 
 
@@ -444,7 +537,7 @@ def jitter_pointcloud(pointcloud, sigma=0.01, clip=0.02):
     """
     # N, C = pointcloud.shape
     pointcloud += np.clip(sigma * np.random.randn(*pointcloud.shape), -clip, clip)
-    return pointcloud.astype('float32')
+    return pointcloud.astype("float32")
 
 
 def jitter_pointcloud_adaptive(pointcloud):
@@ -459,10 +552,10 @@ def jitter_pointcloud_adaptive(pointcloud):
     N, C = pointcloud.shape
 
     inner = np.matmul(pointcloud, np.transpose(pointcloud, (1, 0)))
-    pc_2 = np.sum(pointcloud ** 2, axis = 1, keepdims=True)
+    pc_2 = np.sum(pointcloud**2, axis=1, keepdims=True)
     pairwise_distances = pc_2 - 2 * inner + np.transpose(pc_2, (1, 0))
     zero_mask = np.where(pairwise_distances <= 1e-4)
-    pairwise_distances[zero_mask] = 9999.
+    pairwise_distances[zero_mask] = 9999.0
     min_distances = np.min(pairwise_distances, axis=1)
     min_distances = np.sqrt(min_distances)
 
@@ -470,20 +563,24 @@ def jitter_pointcloud_adaptive(pointcloud):
     min_distances_expdim = np.repeat(min_distances_expdim, C, axis=1)
 
     # pointcloud += np.clip(min_distances_expdim * np.random.randn(N, C), -1 * min_distances_expdim, min_distances_expdim) # normal sampling
-    pointcloud += np.clip(min_distances_expdim * (np.random.rand(N, C) * 2. - 1.), -1 * min_distances_expdim, min_distances_expdim) # uniform sampling
-    return pointcloud.astype('float32')
+    pointcloud += np.clip(
+        min_distances_expdim * (np.random.rand(N, C) * 2.0 - 1.0),
+        -1 * min_distances_expdim,
+        min_distances_expdim,
+    )  # uniform sampling
+    return pointcloud.astype("float32")
 
 
 def scale(pc, scale_mode):
     pc = pc - pc.mean(0, keepdims=True)
-    if scale_mode == 'unit_std':
+    if scale_mode == "unit_std":
         pc /= np.std(pc)
-    elif scale_mode == 'unit_val':
+    elif scale_mode == "unit_val":
         pc /= np.amax(np.abs(pc))
-    elif scale_mode == 'unit_norm':
+    elif scale_mode == "unit_norm":
         pc = scale_to_unit_cube(pc)
     else:
-        raise ValueError('UNDEFINED SCALE MODE')
+        raise ValueError("UNDEFINED SCALE MODE")
     return pc
 
 
@@ -498,7 +595,7 @@ def scale_to_unit_cube(x):
         return x
     centroid = np.mean(x, axis=0)
     x -= centroid
-    furthest_distance = np.max(np.sqrt(np.sum(x ** 2, axis=-1)))
+    furthest_distance = np.max(np.sqrt(np.sum(x**2, axis=-1)))
     x /= furthest_distance
     return x
 
@@ -517,20 +614,21 @@ def scale_to_unit_cube_torch(x, only_mean=False, no_mean=False):
         centroid = torch.mean(x, dim=1, keepdim=True)
         x = x - centroid
     if not only_mean:
-        furthest_distance = torch.max(torch.sqrt(torch.sum(x ** 2, dim=-1,
-            keepdim=True)), dim=1, keepdim=True).values # B x 1 x 1
+        furthest_distance = torch.max(
+            torch.sqrt(torch.sum(x**2, dim=-1, keepdim=True)), dim=1, keepdim=True
+        ).values  # B x 1 x 1
         x = x / furthest_distance
     return x
 
 
 def dropout_points(x, norm_curv, num_points):
     """
-    Randomly dropout num_points, and randomly duplicate num_points
-   Input:
-       x: pointcloud data, [B, C, N]
-   Return:
-       A point cloud dropouted num_points
-   """
+     Randomly dropout num_points, and randomly duplicate num_points
+    Input:
+        x: pointcloud data, [B, C, N]
+    Return:
+        A point cloud dropouted num_points
+    """
     ind = random.sample(range(0, x.shape[1]), num_points)
     ind_dpl = random.sample(range(0, x.shape[1]), num_points)
     x[:, ind, :] = x[:, ind_dpl, :]
@@ -578,17 +676,17 @@ def remove(points, p_keep=0.7):
 
 def remove_region_points(x, norm_curv, device):
     """
-        Remove all points of a randomly selected region in the point cloud.
-        Input:
-            X - Point cloud [B, N, C]
-            norm_curv: norm and curvature, [B, N, C]
-        Return:
-            X - Point cloud where points in a certain region are removed
-        """
+    Remove all points of a randomly selected region in the point cloud.
+    Input:
+        X - Point cloud [B, N, C]
+        norm_curv: norm and curvature, [B, N, C]
+    Return:
+        X - Point cloud where points in a certain region are removed
+    """
     # get points' regions
     regions = assign_region_to_point(x, device)  # [B, N] N:the number of region_id
     n = NREGIONS
-    region_ids = np.random.permutation(n ** 3)
+    region_ids = np.random.permutation(n**3)
     for b in range(x.shape[0]):
         for i in region_ids:
             ind = regions[b, :] == i  # [N]
@@ -604,12 +702,12 @@ def remove_region_points(x, norm_curv, device):
 
 def extract_feature_points(x, norm_curv, num_points, device="cuda:0"):
     """
-   Input:
-       x: pointcloud data, [B, N, C]
-       norm_curv: norm and curvature, [B, N, C]
-   Return:
-       Feature points, [B, num_points, C]
-   """
+    Input:
+        x: pointcloud data, [B, N, C]
+        norm_curv: norm and curvature, [B, N, C]
+    Return:
+        Feature points, [B, num_points, C]
+    """
     IND = torch.zeros([x.size(0), num_points]).to(device)
     fea_pc = torch.zeros([x.size(0), num_points, x.size(2)]).to(device)
     for b in range(x.size(0)):
@@ -646,17 +744,27 @@ def pc2voxel(x):
                 elif len(L[u]) >= K:
                     choice = np.random.choice(L[u], size=K, replace=False)
                     local_points = x[choice, :] - np.array(
-                        [-1.0 + (i + 0.5) * 2.0 / N, -1.0 + (j + 0.5) * 2.0 / N,
-                         -1.0 + (k + 0.5) * 2.0 / N], dtype=np.float32)
-                    data[i, j, k, 0: K * 3] = np.reshape(local_points, (K * 3))
+                        [
+                            -1.0 + (i + 0.5) * 2.0 / N,
+                            -1.0 + (j + 0.5) * 2.0 / N,
+                            -1.0 + (k + 0.5) * 2.0 / N,
+                        ],
+                        dtype=np.float32,
+                    )
+                    data[i, j, k, 0 : K * 3] = np.reshape(local_points, (K * 3))
                     data[i, j, k, K * 3] = 1.0
                     index[i, j, k, :] = choice
                 else:
                     choice = np.random.choice(L[u], size=K, replace=True)
                     local_points = x[choice, :] - np.array(
-                        [-1.0 + (i + 0.5) * 2.0 / N, -1.0 + (j + 0.5) * 2.0 / N,
-                         -1.0 + (k + 0.5) * 2.0 / N], dtype=np.float32)
-                    data[i, j, k, 0: K * 3] = np.reshape(local_points, (K * 3))
+                        [
+                            -1.0 + (i + 0.5) * 2.0 / N,
+                            -1.0 + (j + 0.5) * 2.0 / N,
+                            -1.0 + (k + 0.5) * 2.0 / N,
+                        ],
+                        dtype=np.float32,
+                    )
+                    data[i, j, k, 0 : K * 3] = np.reshape(local_points, (K * 3))
                     data[i, j, k, K * 3] = 1.0
                     index[i, j, k, :] = choice
     return data, index
@@ -664,12 +772,12 @@ def pc2voxel(x):
 
 def pc2voxel_B(x):
     """
-   Input:
-       x: pointcloud data, [B, num_points, C]
-   Return:
-       voxel: N x N x N x (K x 3 + 1)
-       index: N x N x N x K
-   """
+    Input:
+        x: pointcloud data, [B, num_points, C]
+    Return:
+        voxel: N x N x N x (K x 3 + 1)
+        index: N x N x N x K
+    """
     batch_size = x.shape[0]
     Data = np.zeros((batch_size, N, N, N, NUM_FEATURES), dtype=np.float32)
     Index = np.zeros((batch_size, N, N, N, K), dtype=np.float32)
@@ -695,51 +803,63 @@ def pc2image(X, axis, RESOLUTION=32):
     d = 2 / n
     X_clip = np.clip(X, -0.99999999, 0.99999999)  # [N, C]
     Y = np.zeros((n, n), dtype=np.float32)  # label matrix  [n, n]
-    if axis == 'x':
+    if axis == "x":
         for y in range(n):
             for z in range(n):
                 # lt= lower threshold, ut = upper threshold
-                y_axis_lt = -1 + y * d < X_clip[:, 1]        # [N]
+                y_axis_lt = -1 + y * d < X_clip[:, 1]  # [N]
                 y_axis_ut = X_clip[:, 1] < -1 + (y + 1) * d  # [N]
-                z_axis_lt = -1 + z * d < X_clip[:, 2]        # [N]
+                z_axis_lt = -1 + z * d < X_clip[:, 2]  # [N]
                 z_axis_ut = X_clip[:, 2] < -1 + (z + 1) * d  # [N]
                 # get a mask indicating for each coordinate of each point of each shape whether
                 # it falls inside the current inspected ranges
-                in_range = np.concatenate([y_axis_lt, y_axis_ut, z_axis_lt, z_axis_ut], 0).reshape(4, -1)  # [4, N]
+                in_range = np.concatenate(
+                    [y_axis_lt, y_axis_ut, z_axis_lt, z_axis_ut], 0
+                ).reshape(
+                    4, -1
+                )  # [4, N]
                 # per each point decide if it falls in the current region only if in all
                 # ranges the value is 1 (i.e., it falls inside all the inspected ranges)
                 mask = np.min(in_range, 0)  # [N]: [False, ..., True, ...]
                 if np.sum(mask) == 0:
                     continue
                 Y[y, z] = (X_clip[mask, 0] + 1).mean()
-    if axis == 'y':
+    if axis == "y":
         for x in range(n):
             for z in range(n):
                 # lt= lower threshold, ut = upper threshold
-                x_axis_lt = -1 + x * d < X_clip[:, 0]        # [N]
+                x_axis_lt = -1 + x * d < X_clip[:, 0]  # [N]
                 x_axis_ut = X_clip[:, 0] < -1 + (x + 1) * d  # [N]
-                z_axis_lt = -1 + z * d < X_clip[:, 2]        # [N]
+                z_axis_lt = -1 + z * d < X_clip[:, 2]  # [N]
                 z_axis_ut = X_clip[:, 2] < -1 + (z + 1) * d  # [N]
                 # get a mask indicating for each coordinate of each point of each shape whether
                 # it falls inside the current inspected ranges
-                in_range = np.concatenate([x_axis_lt, x_axis_ut, z_axis_lt, z_axis_ut], 0).reshape(4, -1)  # [4, N]
+                in_range = np.concatenate(
+                    [x_axis_lt, x_axis_ut, z_axis_lt, z_axis_ut], 0
+                ).reshape(
+                    4, -1
+                )  # [4, N]
                 # per each point decide if it falls in the current region only if in all
                 # ranges the value is 1 (i.e., it falls inside all the inspected ranges)
                 mask = np.min(in_range, 0)  # [N]
                 if np.sum(mask) == 0:
                     continue
                 Y[x, z] = (X_clip[mask, 1] + 1).mean()
-    if axis == 'z':
+    if axis == "z":
         for x in range(n):
             for y in range(n):
                 # lt= lower threshold, ut = upper threshold
-                x_axis_lt = -1 + x * d < X_clip[:, 0]        # [N]
+                x_axis_lt = -1 + x * d < X_clip[:, 0]  # [N]
                 x_axis_ut = X_clip[:, 0] < -1 + (x + 1) * d  # [N]
-                y_axis_lt = -1 + y * d < X_clip[:, 1]        # [N]
+                y_axis_lt = -1 + y * d < X_clip[:, 1]  # [N]
                 y_axis_ut = X_clip[:, 1] < -1 + (y + 1) * d  # [N]
                 # get a mask indicating for each coordinate of each point of each shape whether
                 # it falls inside the current inspected ranges
-                in_range = np.concatenate([x_axis_lt, x_axis_ut, y_axis_lt, y_axis_ut], 0).reshape(4, -1)  # [4, N]
+                in_range = np.concatenate(
+                    [x_axis_lt, x_axis_ut, y_axis_lt, y_axis_ut], 0
+                ).reshape(
+                    4, -1
+                )  # [4, N]
                 # per each point decide if it falls in the current region only if in all
                 # ranges the value is 1 (i.e., it falls inside all the inspected ranges)
                 mask = np.min(in_range, 0)  # [N]
@@ -750,7 +870,7 @@ def pc2image(X, axis, RESOLUTION=32):
     return Y
 
 
-def pc2image_B(X, axis, device='cuda:0', RESOLUTION=32):
+def pc2image_B(X, axis, device="cuda:0", RESOLUTION=32):
     """
     Input:
         X: point cloud [B, C, N]
@@ -785,7 +905,7 @@ def CPL(x, ratio):
     _, d = np.unique(idx, return_index=True)
     uidx = np.argsort(d)
     for i in uidx:
-        mask = (i == idx)
+        mask = i == idx
         val = fmax[mask].sum()
         fs = np.append(fs, val)
         fr = np.append(fr, mask.sum())
@@ -803,7 +923,11 @@ def CPL(x, ratio):
     return fout
 
 
-def CPL_B(X, ratio, device='cuda:0',):
+def CPL_B(
+    X,
+    ratio,
+    device="cuda:0",
+):
     """
     Input:
         X: points feature [B, C, N]
@@ -871,8 +995,8 @@ def square_distance(src, dst):
     B, N, _ = src.shape
     _, M, _ = dst.shape
     dist = -2 * torch.matmul(src, dst.permute(0, 2, 1))
-    dist += torch.sum(src ** 2, -1).view(B, N, 1)
-    dist += torch.sum(dst ** 2, -1).view(B, 1, M)
+    dist += torch.sum(src**2, -1).view(B, N, 1)
+    dist += torch.sum(dst**2, -1).view(B, 1, M)
     return dist
 
 
@@ -890,7 +1014,12 @@ def index_points(points, idx):
     view_shape[1:] = [1] * (len(view_shape) - 1)
     repeat_shape = list(idx.shape)
     repeat_shape[0] = 1
-    batch_indices = torch.arange(B, dtype=torch.long).to(device).view(view_shape).repeat(repeat_shape)
+    batch_indices = (
+        torch.arange(B, dtype=torch.long)
+        .to(device)
+        .view(view_shape)
+        .repeat(repeat_shape)
+    )
     new_points = points[batch_indices, idx, :]
     return new_points
 
@@ -908,9 +1037,11 @@ def query_ball_point(radius, nsample, xyz, new_xyz):
     device = xyz.device
     B, N, C = xyz.shape
     _, S, _ = new_xyz.shape
-    group_idx = torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+    group_idx = (
+        torch.arange(N, dtype=torch.long).to(device).view(1, 1, N).repeat([B, S, 1])
+    )
     sqrdists = square_distance(new_xyz, xyz)
-    group_idx[sqrdists > radius ** 2] = N
+    group_idx[sqrdists > radius**2] = N
     group_idx = group_idx.sort(dim=-1)[0][:, :, :nsample]
     group_first = group_idx[:, :, 0].view(B, S, 1).repeat([1, 1, nsample])
     mask = group_idx == N
@@ -932,15 +1063,17 @@ def sample_and_group(npoint, radius, nsample, xyz, points, returnfps=False):
     """
     B, N, C = xyz.shape
     S = npoint
-    fps_idx = farthest_point_sample(xyz, npoint) # [B, npoint, C]
+    fps_idx = farthest_point_sample(xyz, npoint)  # [B, npoint, C]
     new_xyz = index_points(xyz, fps_idx)
     idx = query_ball_point(radius, nsample, xyz, new_xyz)
-    grouped_xyz = index_points(xyz, idx) # [B, npoint, nsample, C]
+    grouped_xyz = index_points(xyz, idx)  # [B, npoint, nsample, C]
     grouped_xyz_norm = grouped_xyz - new_xyz.view(B, S, 1, C)
 
     if points is not None:
         grouped_points = index_points(points, idx)
-        new_points = torch.cat([grouped_xyz_norm, grouped_points], dim=-1) # [B, npoint, nsample, C+D]
+        new_points = torch.cat(
+            [grouped_xyz_norm, grouped_points], dim=-1
+        )  # [B, npoint, nsample, C+D]
     else:
         new_points = grouped_xyz_norm
     if returnfps:
@@ -996,11 +1129,18 @@ def sample_and_ball_group(s, radius, n, coords, features):
     grouped_features = index_points(features, idx)  # [B, s, n, D]
 
     # Matrix sub
-    grouped_features_norm = grouped_features - new_features.view(batch_size, s, 1, -1)  # [B, s, n, D]
+    grouped_features_norm = grouped_features - new_features.view(
+        batch_size, s, 1, -1
+    )  # [B, s, n, D]
 
     # Concat, my be different in many networks
-    aggregated_features = torch.cat([grouped_features_norm, new_features.view(batch_size, s, 1, -1).repeat(1, 1, n, 1)],
-                                    dim=-1)  # [B, s, n, 2D]
+    aggregated_features = torch.cat(
+        [
+            grouped_features_norm,
+            new_features.view(batch_size, s, 1, -1).repeat(1, 1, n, 1),
+        ],
+        dim=-1,
+    )  # [B, s, n, 2D]
 
     return new_coords, aggregated_features  # [B, s, 3], [B, s, n, 2D]
 
@@ -1032,16 +1172,25 @@ def sample_and_knn_group(k, features, lg, hard=False):
     grouped_features = index_points(features, idx)  # [B, s, k, D]
 
     # Matrix subtraction
-    grouped_features_norm = grouped_features - new_features.view(batch_size, s, 1, -1)  # [B, s, k, D]
+    grouped_features_norm = grouped_features - new_features.view(
+        batch_size, s, 1, -1
+    )  # [B, s, k, D]
 
     # Concat
-    aggregated_features = torch.cat([grouped_features_norm, new_features.view(batch_size, s, 1, -1).repeat(1, 1, k, 1)], dim=-1)  # [B, s, k, 2D]
+    aggregated_features = torch.cat(
+        [
+            grouped_features_norm,
+            new_features.view(batch_size, s, 1, -1).repeat(1, 1, k, 1),
+        ],
+        dim=-1,
+    )  # [B, s, k, 2D]
 
     return aggregated_features  # [B, s, k, 2D]
 
 
-def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rng=4,
-        drop_rate=0.5):
+def defcls_input(
+    X, norm_curv=None, lookup=None, device="cuda:0", NREGIONS=3, rng=4, drop_rate=0.5
+):
     """
     Deform a region in the point cloud.
     Input:
@@ -1058,38 +1207,43 @@ def defcls_input(X, norm_curv=None, lookup=None, device='cuda:0', NREGIONS=3, rn
     # get points' regions
     n = NREGIONS
     regions = assign_region_to_point(X, device, NREGIONS, rng=rng)  # [B, N]
-    drop_prob = X.new_zeros((regions.shape[0], n*n*n))
+    drop_prob = X.new_zeros((regions.shape[0], n * n * n))
     drop_prob.scatter_add_(1, regions.long(), torch.ones_like(regions))
 
     drop_region = torch.bernoulli(
-            (drop_prob > 10).bool().float() * drop_rate,
-            #drop_rate*X.new_ones((regions.shape[0], NREGIONS*NREGIONS*NREGIONS)),
-            ).bool() # [B, NREGIONS*NREGIONS*NREGIONS]  1=drop 0=keep
-    while torch.any(((drop_prob > 10).float() * (~drop_region).float()).sum(dim=1) == 0):
+        (drop_prob > 10).bool().float() * drop_rate,
+        # drop_rate*X.new_ones((regions.shape[0], NREGIONS*NREGIONS*NREGIONS)),
+    ).bool()  # [B, NREGIONS*NREGIONS*NREGIONS]  1=drop 0=keep
+    while torch.any(
+        ((drop_prob > 10).float() * (~drop_region).float()).sum(dim=1) == 0
+    ):
         drop_region = torch.bernoulli(
-                (drop_prob > 0).bool().float() * drop_rate,
-                #drop_rate*X.new_ones((regions.shape[0], NREGIONS*NREGIONS*NREGIONS)),
-                ).bool() # [B, NREGIONS*NREGIONS*NREGIONS]  1=drop 0=keep
+            (drop_prob > 0).bool().float() * drop_rate,
+            # drop_rate*X.new_ones((regions.shape[0], NREGIONS*NREGIONS*NREGIONS)),
+        ).bool()  # [B, NREGIONS*NREGIONS*NREGIONS]  1=drop 0=keep
 
-    region = torch.arange(n*n*n).unsqueeze(0).expand_as(drop_region).to(device)
+    region = torch.arange(n * n * n).unsqueeze(0).expand_as(drop_region).to(device)
     region[~drop_region] = -1
-    dropped = (regions.unsqueeze(2) == region.unsqueeze(1)).float().sum(-1) > 0 # [B, N, nxn] -> [B, N]
-    mask = (~dropped).float().unsqueeze(2) # B x N x 1
-    mask_bool = (~dropped).unsqueeze(2) # B x N x 1
+    dropped = (regions.unsqueeze(2) == region.unsqueeze(1)).float().sum(
+        -1
+    ) > 0  # [B, N, nxn] -> [B, N]
+    mask = (~dropped).float().unsqueeze(2)  # B x N x 1
+    mask_bool = (~dropped).unsqueeze(2)  # B x N x 1
     assert torch.all(mask.sum(dim=1) > 10)
 
-    sum = (X * mask).sum(dim=1, keepdim=True) # B x 1 x 3
-    num = mask.sum(dim=1, keepdim=True) # B x 1 x 1
-    mean = sum / num # B x 1 x 3
+    sum = (X * mask).sum(dim=1, keepdim=True)  # B x 1 x 3
+    num = mask.sum(dim=1, keepdim=True)  # B x 1 x 1
+    mean = sum / num  # B x 1 x 3
     X = (X - mean) * mask
     # unit_std
-    std = (X.pow(2).sum(dim=2, keepdim=True).sum(dim=1,
-            keepdim=True) / (num * 3)).sqrt() # B x 1 x 1
-    X = X / std #* mask #(~dropped).float().unsqueeze(2)
+    std = (
+        X.pow(2).sum(dim=2, keepdim=True).sum(dim=1, keepdim=True) / (num * 3)
+    ).sqrt()  # B x 1 x 1
+    X = X / std  # * mask #(~dropped).float().unsqueeze(2)
 
     while torch.any(mask == 0):
         sorted_mask, order = torch.sort(mask.squeeze(-1), dim=1, descending=True)
-        empty = (1-sorted_mask).sum(dim=1)
+        empty = (1 - sorted_mask).sum(dim=1)
 
     return X, mask, drop_region, mean, std
 
@@ -1100,11 +1254,11 @@ def random_radius_drop(X, radius):
 
 def create_folders(args):
     try:
-        os.makedirs('outputs')
+        os.makedirs("outputs")
     except OSError:
         pass
     try:
-        os.makedirs('outputs/' + args.exp_name)
+        os.makedirs("outputs/" + args.exp_name)
     except OSError:
         pass
 
@@ -1114,13 +1268,13 @@ def save_model(model, path):
 
 
 def load_model(model, path):
-    model.load_state_dict(torch.load(path), map_location='cpu')
+    model.load_state_dict(torch.load(path), map_location="cpu")
     model.eval()
     return model
 
 
-#Gradient clipping
-class Queue():
+# Gradient clipping
+class Queue:
     def __init__(self, max_len=50):
         self.items = []
         self.max_len = max_len
@@ -1146,7 +1300,8 @@ def gradient_clipping(flow, gradnorm_queue):
 
     # Clips gradient and returns the norm
     grad_norm = torch.nn.utils.clip_grad_norm_(
-        flow.parameters(), max_norm=max_grad_norm, norm_type=2.0)
+        flow.parameters(), max_norm=max_grad_norm, norm_type=2.0
+    )
 
     if float(grad_norm) > max_grad_norm:
         gradnorm_queue.add(float(max_grad_norm))
@@ -1154,8 +1309,10 @@ def gradient_clipping(flow, gradnorm_queue):
         gradnorm_queue.add(float(grad_norm))
 
     if float(grad_norm) > max_grad_norm:
-        print(f'Clipped gradient with value {grad_norm:.1f} '
-              f'while allowed {max_grad_norm:.1f}')
+        print(
+            f"Clipped gradient with value {grad_norm:.1f} "
+            f"while allowed {max_grad_norm:.1f}"
+        )
     return grad_norm
 
 
@@ -1195,7 +1352,7 @@ def random_rotation(x):
         sin = torch.sin(theta)
         Rx[:, 1:2, 1:2] = cos
         Rx[:, 1:2, 2:3] = sin
-        Rx[:, 2:3, 1:2] = - sin
+        Rx[:, 2:3, 1:2] = -sin
         Rx[:, 2:3, 2:3] = cos
 
         # Build Ry
@@ -1220,11 +1377,11 @@ def random_rotation(x):
 
         x = x.transpose(1, 2)
         x = torch.matmul(Rx, x)
-        #x = torch.matmul(Rx.transpose(1, 2), x)
+        # x = torch.matmul(Rx.transpose(1, 2), x)
         x = torch.matmul(Ry, x)
-        #x = torch.matmul(Ry.transpose(1, 2), x)
+        # x = torch.matmul(Ry.transpose(1, 2), x)
         x = torch.matmul(Rz, x)
-        #x = torch.matmul(Rz.transpose(1, 2), x)
+        # x = torch.matmul(Rz.transpose(1, 2), x)
         x = x.transpose(1, 2)
     else:
         raise Exception("Not implemented Error")
@@ -1233,48 +1390,56 @@ def random_rotation(x):
 
 def normalize_vector(v):
     batch = v.shape[0]
-    v_mag = torch.sqrt(v.pow(2).sum(1))# batch
+    v_mag = torch.sqrt(v.pow(2).sum(1))  # batch
     gpu = v_mag.get_device()
     if gpu < 0:
-        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(torch.device('cpu'))
+        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(torch.device("cpu"))
     else:
-        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(torch.device('cuda:%d' % gpu))
+        eps = torch.autograd.Variable(torch.FloatTensor([1e-8])).to(
+            torch.device("cuda:%d" % gpu)
+        )
     v_mag = torch.max(v_mag, eps)
-    v_mag = v_mag.view(batch,1).expand(batch,v.shape[1])
-    v = v/v_mag
+    v_mag = v_mag.view(batch, 1).expand(batch, v.shape[1])
+    v = v / v_mag
     return v
 
 
 def cross_product(u, v):
     batch = u.shape[0]
- 
-    i = u[:,1]*v[:,2] - u[:,2]*v[:,1]
-    j = u[:,2]*v[:,0] - u[:,0]*v[:,2]
-    k = u[:,0]*v[:,1] - u[:,1]*v[:,0]
-    out = torch.cat((i.view(batch,1), j.view(batch,1), k.view(batch,1)),1) #batch*3
+
+    i = u[:, 1] * v[:, 2] - u[:, 2] * v[:, 1]
+    j = u[:, 2] * v[:, 0] - u[:, 0] * v[:, 2]
+    k = u[:, 0] * v[:, 1] - u[:, 1] * v[:, 0]
+    out = torch.cat(
+        (i.view(batch, 1), j.view(batch, 1), k.view(batch, 1)), 1
+    )  # batch*3
     return out
 
 
 def compute_rotation_matrix_from_ortho6d(poses):
-    x_raw = poses[:,0:3] #batch*3
-    y_raw = poses[:,3:6] #batch*3
+    x_raw = poses[:, 0:3]  # batch*3
+    y_raw = poses[:, 3:6]  # batch*3
 
-    x = normalize_vector(x_raw) #batch*3
-    z = cross_product(x,y_raw) #batch*3
-    z = normalize_vector(z) #batch*3
-    y = cross_product(z,x) #batch*3
+    x = normalize_vector(x_raw)  # batch*3
+    z = cross_product(x, y_raw)  # batch*3
+    z = normalize_vector(z)  # batch*3
+    y = cross_product(z, x)  # batch*3
 
-    x = x.view(-1,3,1)
-    y = y.view(-1,3,1)
-    z = z.view(-1,3,1)
-    matrix = torch.cat((x,y,z), 2) #batch*3*3
+    x = x.view(-1, 3, 1)
+    y = y.view(-1, 3, 1)
+    z = z.view(-1, 3, 1)
+    matrix = torch.cat((x, y, z), 2)  # batch*3*3
     return matrix
 
 
 def softmax(x):
-    max = np.max(x,axis=-1,keepdims=True) #returns max of each row and keeps same dims
-    e_x = np.exp(x - max) #subtracts each row with its max value
-    sum = np.sum(e_x,axis=-1,keepdims=True) #returns sum of each row and keeps same dims
+    max = np.max(
+        x, axis=-1, keepdims=True
+    )  # returns max of each row and keeps same dims
+    e_x = np.exp(x - max)  # subtracts each row with its max value
+    sum = np.sum(
+        e_x, axis=-1, keepdims=True
+    )  # returns sum of each row and keeps same dims
     f_x = e_x / sum
     return f_x
 
@@ -1283,42 +1448,51 @@ def softmax(x):
 def low_pass_filtering(x, method, scale):
     if not method or scale == 1:
         return x
-    elif method == 'fps':
-        return farthest_point_sample(x.swapaxes(1, 2), npoint=int(x.shape[1] / scale), device=x.device)[-1].swapaxes(1, 2)
-    elif method == 'mean':
+    elif method == "fps":
+        return farthest_point_sample(
+            x.swapaxes(1, 2), npoint=int(x.shape[1] / scale), device=x.device
+        )[-1].swapaxes(1, 2)
+    elif method == "mean":
         return x
-    elif method == 'median':
+    elif method == "median":
         return x
 
 
-def get_color(coords, corners=np.array([
-                                    [-1, -1, -1],
-                                    [-1, 1, -1],
-                                    [-1, -1, 1],
-                                    [1, -1, -1],
-                                    [1, 1, -1],
-                                    [-1, 1, 1],
-                                    [1, -1, 1],
-                                    [1, 1, 1]
-                                ]) * 3,
-            mask=None,
-    ): # Visualization
-    coords = np.array(coords) # batch x n_points x 3
-    corners = np.array(corners) # n_corners x 3
-    colors = np.array([
-        [255, 0, 0],
-        [255, 127, 0],
-        [255, 255, 0],
-        [0, 255, 0],
-        [0, 255, 255],
-        [0, 0, 255],
-        [75, 0, 130],
-        [143, 0, 255],
-    ])
+def get_color(
+    coords,
+    corners=np.array(
+        [
+            [-1, -1, -1],
+            [-1, 1, -1],
+            [-1, -1, 1],
+            [1, -1, -1],
+            [1, 1, -1],
+            [-1, 1, 1],
+            [1, -1, 1],
+            [1, 1, 1],
+        ]
+    )
+    * 3,
+    mask=None,
+):  # Visualization
+    coords = np.array(coords)  # batch x n_points x 3
+    corners = np.array(corners)  # n_corners x 3
+    colors = np.array(
+        [
+            [255, 0, 0],
+            [255, 127, 0],
+            [255, 255, 0],
+            [0, 255, 0],
+            [0, 255, 255],
+            [0, 0, 255],
+            [75, 0, 130],
+            [143, 0, 255],
+        ]
+    )
 
     dist = np.linalg.norm(coords[:, :, None, :] - corners[None, None, :, :], axis=-1)
-    weight = softmax(-dist)[:, :, :, None] #batch x NUM_POINTS x n_corners x 1
-    rgb = (weight * colors).sum(2).astype(int) # NUM_POINTS x 3
+    weight = softmax(-dist)[:, :, :, None]  # batch x NUM_POINTS x n_corners x 1
+    rgb = (weight * colors).sum(2).astype(int)  # NUM_POINTS x 3
     if mask is not None:
         # mask : B x N
         # rgb : B x N x 3 (RGB)
@@ -1326,7 +1500,7 @@ def get_color(coords, corners=np.array([
     return rgb
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     lookup = region_mean(3)
     print(lookup.shape)
     x = np.random.rand(2, 3, 6)  # [B, C, N]
@@ -1334,8 +1508,15 @@ if __name__ == '__main__':
     x = scale_to_unit_cube(x)
     x = torch.from_numpy(x)
     print(x)
-    #dropout_points(x, 2)
+    # dropout_points(x, 2)
     y = pc2image_B(x, "x", RESOLUTION=6)
     print(y.shape)
-    x = torch.stack((pc2image_B(x, "x", RESOLUTION=6), pc2image_B(x, "y", RESOLUTION=6), pc2image_B(x, "z", RESOLUTION=6)), dim=3)
+    x = torch.stack(
+        (
+            pc2image_B(x, "x", RESOLUTION=6),
+            pc2image_B(x, "y", RESOLUTION=6),
+            pc2image_B(x, "z", RESOLUTION=6),
+        ),
+        dim=3,
+    )
     print(x)

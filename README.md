@@ -26,6 +26,11 @@ bash scripts/set_env.sh
 ```
 ```
 
+## Pre-trained Checkpoints
+```
+
+```
+
 
 ## Run
 ### Train Classifiers
@@ -42,6 +47,13 @@ bash scripts/train_dm.sh
 ```
 bash scripts/run_cloudfixer.sh
 ```
+
+
+
+## Credicts
+- 
+- 
+- 
 
 
 

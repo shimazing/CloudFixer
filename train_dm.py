@@ -9,7 +9,12 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
-from datasets.dataloader import ModelNet40C, PointDA10, GraspNet10, ImbalancedDatasetSampler
+from datasets.dataloader import (
+    ModelNet40C,
+    PointDA10,
+    GraspNet10,
+    ImbalancedDatasetSampler,
+)
 from diffusion import diffusion, utils as flow_utils
 from diffusion.build_model import get_model, get_optim
 from utils import losses, utils, visualizer as vis
@@ -17,7 +22,8 @@ from utils import losses, utils, visualizer as vis
 
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Diffusion for PC")
-    parser.add_argument("--exp_name", type=str, default="debug_10")
+    parser.add_argument("--exp_name", type=str, default="outputs")
+    parser.add_argument("--output_dir", type=str, default="debug_10")
     parser.add_argument("--dataset", type=str, default="modelnet40")
     parser.add_argument("--dataset_dir", type=str)
     parser.add_argument(

@@ -55,7 +55,7 @@ bash scripts/train_dm.sh
 
 
 
-## Credicts
+## Credits
 - ModelNet40-C: https://github.com/jiachens/ModelNet40-C
 - PointDA-10: https://github.com/canqin001/PointDAN
 - PointNeXt: https://github.com/guochengqian/PointNeXt

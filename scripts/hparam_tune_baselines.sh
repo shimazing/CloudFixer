@@ -309,7 +309,7 @@ hparam_tune_tent() {
             --subsample ${subsample} \
             --weighted_reg ${weighted_reg} \
             --wandb_usr ${wandb_usr} \
-            2>&1 &
+            2>&1
         wait_n
         i=$((i + 1))
     done

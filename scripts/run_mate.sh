@@ -12,14 +12,14 @@ scenario=normal
 imb_ratio=1
 
 # classifier
-classifier=point2vec
-classifier_dir=${CHECKPOINT_DIR}/point2vec_modelnet40.ckpt
+classifier=pointMAE
+classifier_dir=${CHECKPOINT_DIR}/pointMAE_modelnet40.pth
 
 # diffusion model
 diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_modelnet40.npy
 
 #################### placeholders ####################
-# placeholders
+# common
 episodic=False
 test_optim=AdamW
 params_to_adapt="LN BN GN"
@@ -44,7 +44,7 @@ bn_stats_prior=0
 # shot
 shot_pl_loss_weight=0.3
 # dda
-dda_steps=50
+dda_steps=100
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
@@ -70,8 +70,8 @@ run_baselines() {
         episodic=False
         test_optim=AdamW
         params_to_adapt="LN BN GN"
-        test_lr=1e-4
-        num_steps=10
+        test_lr=1e-4 # 1e-4 1e-3 1e-2
+        num_steps=10 # 1 3 5 10
     elif [ "$method" == "lame" ]; then
         episodic=False             # placeholder
         test_optim=AdamW           # placeholder
@@ -89,7 +89,6 @@ run_baselines() {
         num_steps=3                # 1 3 5 10
         sar_ent_threshold=0.2      # 0.4, 0.2, 0.6, 0.8
         sar_eps_threshold=0.1      # 0.01, 0.05, 0.1
-
     elif [ "$method" == "pl" ]; then
         episodic=False
         test_optim=AdamW
@@ -111,8 +110,9 @@ run_baselines() {
         params_to_adapt="LN BN GN" # placeholder
         dua_mom_pre=0.1
         dua_min_mom=0.005
-        num_steps=5
-        dua_decay_factor=0.9
+        # ### hyperparameters to tune for dua
+        num_steps=5          # 1, 3, 5, 10
+        dua_decay_factor=0.9 # 0.9, 0.94, 0.99
     elif [ "$method" == "shot" ]; then
         episodic=False
         test_optim=AdamW
@@ -131,6 +131,12 @@ run_baselines() {
         dda_lpf_method=fps
         dda_guidance_weight=6
         dda_lpf_scale=4
+    elif [ "$method" == "mate" ]; then
+        episodic=False
+        test_optim=AdamW
+        test_lr=5e-5
+        params_to_adapt="all"
+        num_steps=1
     elif [ "$method" == "cloudfixer" ]; then
         episodic=False
         test_optim=AdamW      # placeholder
@@ -225,28 +231,55 @@ run_baselines() {
     wait_n
 }
 
-run_method_all() {
-    # classifier
-    classifier=point2vec
-    classifier_dir=${CHECKPOINT_DIR}/point2vec_modelnet40.ckpt
-    SEED_LIST="2"
+run_mate() {
+    mode=eval
 
-    BATCH_SIZE_LIST="64"
+    SEED_LIST="2"
+    BATCH_SIZE_LIST="1"
     CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
     SEVERITY_LIST="5"
-    METHOD_LIST="pl tent shot sar dua lame memo dda"
-
-    # placeholders
-    episodic=False
-    test_optim=AdamW
-    params_to_adapt="LN BN GN"
-    test_lr=1e-4
-    num_steps=10
+    METHOD_LIST="mate"
 
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for corruption in ${CORRUPTION_LIST}; do
-                for severity in ${SEVERITY_LIST}; do
+                for severity in ${SEVERITY_LIST}; do # "3 5"
+                    dataset=modelnet40c_${corruption}_${severity}
+                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+                    for method in ${METHOD_LIST}; do
+                        # mate-standard
+                        episodic=True
+                        test_optim=AdamW
+                        test_lr=5e-5
+                        params_to_adapt="all"
+                        num_steps=20
+
+                        out_path=${OUTPUT_DIR}
+                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_episodic_seed_${random_seed}_batch_size_${batch_size}
+                        run_baselines
+
+                        # mate-online
+                        episodic=False
+                        test_optim=AdamW
+                        test_lr=5e-5
+                        params_to_adapt="all"
+                        num_steps=1
+
+                        out_path=${OUTPUT_DIR}
+                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_online_seed_${random_seed}_batch_size_${batch_size}
+                        run_baselines
+                    done
+                done
+            done
+        done
+    done
+    python utils/send_email.py --message "finish mate"
+
+    METHOD_LIST="pl tent shot sar dua lame memo mate"
+    for random_seed in ${SEED_LIST}; do
+        for batch_size in ${BATCH_SIZE_LIST}; do
+            for corruption in ${CORRUPTION_LIST}; do
+                for severity in ${SEVERITY_LIST}; do # "3 5"
                     dataset=modelnet40c_${corruption}_${severity}
                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                     for method in ${METHOD_LIST}; do
@@ -255,18 +288,18 @@ run_method_all() {
                         else
                             batch_size=64
                         fi
+
                         out_path=${OUTPUT_DIR}
                         exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                        mode=eval
                         run_baselines
                     done
                 done
             done
         done
     done
+    python utils/send_email.py --message "finish mate for all baselines"
 
-    BATCH_SIZE_LIST="64"
-    scenario=temporally_correlated
+    METHOD_LIST="dda"
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do
             for corruption in ${CORRUPTION_LIST}; do
@@ -274,64 +307,35 @@ run_method_all() {
                     dataset=modelnet40c_${corruption}_${severity}
                     dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                     for method in ${METHOD_LIST}; do
-                        if [[ "$method" == "memo" ]]; then
-                            batch_size=1
-                        else
+                        if [[ "$corruption" == "upsampling" ]]; then
                             batch_size=64
+                        else
+                            batch_size=128
                         fi
-                        out_path=${OUTPUT_DIR}
-                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}
-                        mode=eval
-                        scenario=${scenario}
-                        run_baselines
-                    done
-                done
-            done
-        done
-    done
 
-    scenario=label_distribution_shift
-    imb_ratio=100
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for corruption in ${CORRUPTION_LIST}; do
-                for severity in ${SEVERITY_LIST}; do # "3 5"
-                    dataset=modelnet40c_${corruption}_${severity}
-                    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                    for method in ${METHOD_LIST}; do
-                        if [[ "$method" == "memo" ]]; then
-                            batch_size=1
-                        else
-                            batch_size=64
-                        fi
                         out_path=${OUTPUT_DIR}
-                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}_scenario_${scenario}_imb_ratio_${imb_ratio}
-                        mode=eval
-                        scenario=${scenario}
+                        exp_name=eval_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
                         run_baselines
                     done
                 done
             done
         done
     done
+    python utils/send_email.py --message "finish dda"
 }
 
-##############################################
 wait_n() {
+    # limit the max number of jobs as NUM_MAX_JOB and wait
     background=($(jobs -p))
-    echo ${num_max_jobs}
     if ((${#background[@]} >= num_max_jobs)); then
         wait -n
     fi
 }
 
-GPUS=(0 1 2 3 4 5 6 7)
+GPUS=(0 1 2 3)
 NUM_GPUS=${#GPUS[@]}
 i=0
-
 ##############################################
-WHOLE_DEVICES="0,1,2,3,4,5,6,7"
-multi_gpu="false"
-num_max_jobs=4
-run_method_all
-python utils/send_email.py --message "finish modelnet40_c_all"
+num_max_jobs=1
+WHOLE_DEVICES="0,1,2,3"
+run_mate

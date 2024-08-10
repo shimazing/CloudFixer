@@ -1,22 +1,21 @@
+import random
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import timm
 from timm.models.layers import DropPath, trunc_normal_
-import numpy as np
+
+from knn_cuda import KNN
 from utils import misc
+from utils import registry
+from utils.logger import *
 from utils.checkpoint import (
     get_missing_parameters_message,
     get_unexpected_parameters_message,
 )
-from utils.logger import *
-import random
-from knn_cuda import KNN
-from extensions.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
-
-from utils import registry
 from utils.pc_utils import scale_to_unit_cube_torch, rotate_shape_tensor
-
+from utils.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
 
 MODELS = registry.Registry("models")
 

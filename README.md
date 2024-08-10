@@ -17,44 +17,52 @@ European Conference on Computer Vision (**ECCV**), 2024
 
 
 ## Requirements
+Please refer to ``scripts/set_env.sh``.
 ```
+conda create -y -n cloudfixer python=3.10.14
+conda activate cloudfixer
 bash scripts/set_env.sh
 ```
 
 
 
 ## Datasets
-```
-```
+- [ModelNet40-C](https://zenodo.org/records/6017834#.YgNeKu7MK3J)
+  - You can get modelnet40_c.zip using the link above.
+- [ModelNet40](https://shapenet.cs.stanford.edu/media/modelnet40_ply_hdf5_2048.zip)
+  - You can get modelnet40_ply_hdf5_2048.zip using the link above.
+- [PointDA-10](https://drive.google.com/file/d/1-LfJWL5geF9h0Z2QpdTL0n4lShy8wy2J/view)
+  - You can get PointDA_data.zip using the link above.
 
 
 
-## Pre-trained Models
-All checkpoints for pre-trained classifiers and diffusion models can be accessed via [this Google Drive link](https://drive.google.com/drive/folders/1nkoyupwKIxUOkoI8qmrqFb03EpjPmB6e?usp=sharing).
+## Pre-trained models
+To ensure reproducibility, we are releasing all model checkpoints used in our experiments. You can access the checkpoints for both pre-trained classifiers and diffusion models via [this Google Drive link](https://drive.google.com/drive/folders/1nkoyupwKIxUOkoI8qmrqFb03EpjPmB6e?usp=sharing).
 
 
 
 ## Run
-### Train Classifiers
+### Run CloudFixer and other baselines
 ```
-bash scripts/train_classifier.sh
+bash scripts/run_cloudfixer.sh
+bash scripts/run_baselines.sh
 ```
 
-### Train Diffusion Models
+### Train diffusion models
 ```
 bash scripts/train_dm.sh
-```
-
-### Adapt
-```
-bash scripts/run_baselines.sh
-bash scripts/run_cloudfixer.sh
 ```
 
 
 
 ## Credicts
-- 
+- ModelNet40-C: https://github.com/jiachens/ModelNet40-C
+- PointDA-10: https://github.com/canqin001/PointDAN
+- PointNeXt: https://github.com/guochengqian/PointNeXt
+- Point2Vec: https://github.com/kabouzeid/point2vec
+- PointMLP: https://github.com/ma-xu/pointMLP-pytorch
+- Point-E: https://github.com/openai/point-e
+- MATE: https://github.com/jmiemirza/MATE
 
 
 

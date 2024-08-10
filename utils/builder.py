@@ -1,4 +1,4 @@
-import os, sys
+import os
 import torch
 import torch.optim as optim
 from datasets import build_dataset_from_cfg

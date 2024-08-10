@@ -137,9 +137,6 @@ class ModelNet40C(Dataset):
             f.close()
             all_data.append(data)
             all_label.append(label)
-        print(f"{data_path=}")
-        print(f"{len(all_data)=}")
-        print(f"{len(all_label)=}")
         all_data = np.concatenate(all_data, axis=0)
         all_label = np.concatenate(all_label, axis=0).squeeze(-1)
         return all_data, all_label

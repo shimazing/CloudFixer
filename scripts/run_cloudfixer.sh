@@ -67,7 +67,7 @@ run_baselines() {
     test_lr=0.01               # TODO for tent 1e-4 # placeholder
     params_to_adapt="LN GN BN" # placeholder
 
-    python3 adapt.py \
+    python adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
         --warmup ${warmup} \
@@ -126,8 +126,8 @@ run_baselines() {
         --optim_end_factor ${optim_end_factor} \
         --subsample ${subsample} \
         --weighted_reg ${weighted_reg} \
-        --wandb_usr ${wandb_usr} \
         --vote ${vote} \
+        --no_wandb \
         2>&1
 }
 

@@ -22,14 +22,16 @@ bash scripts/set_env.sh
 ```
 
 
+
 ## Datasets
 ```
 ```
 
-## Pre-trained Checkpoints
-```
 
-```
+
+## Pre-trained Models
+All checkpoints for pre-trained classifiers and diffusion models can be accessed via [this Google Drive link](https://drive.google.com/drive/folders/1nkoyupwKIxUOkoI8qmrqFb03EpjPmB6e?usp=sharing).
+
 
 
 ## Run
@@ -45,14 +47,13 @@ bash scripts/train_dm.sh
 
 ### Adapt
 ```
+bash scripts/run_baselines.sh
 bash scripts/run_cloudfixer.sh
 ```
 
 
 
 ## Credicts
-- 
-- 
 - 
 
 
@@ -66,6 +67,7 @@ If you have any questions or comments, feel free to contact us via shimazing@kai
 ```
 This work was supported by the Institute for Information & Communications Technology Planning & Evaluation (IITP) grant funded by the Korea government (MSIP) (No.2019-0-00075, Artificial Intelligence Graduate School Program (KAIST)).
 ```
+
 
 
 ## Citation

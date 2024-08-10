@@ -137,6 +137,9 @@ class ModelNet40C(Dataset):
             f.close()
             all_data.append(data)
             all_label.append(label)
+        print(f"{data_path=}")
+        print(f"{len(all_data)=}")
+        print(f"{len(all_label)=}")
         all_data = np.concatenate(all_data, axis=0)
         all_label = np.concatenate(all_label, axis=0).squeeze(-1)
         return all_data, all_label
@@ -327,7 +330,6 @@ class ModelNet40C(Dataset):
             mask_[valid[centroids]] = 1  # reg줄  subsample 된 것! 나머지는
             assert np.all(mask[mask_ == 1] == 1)
             mask = mask_
-            # if self.subsample <= NUM_POINTS: # or
             if self.corruption == "original":
                 pointcloud = pointcloud[mask.squeeze(-1).astype(bool)]
                 mask = mask[mask.squeeze(-1).astype(bool)]

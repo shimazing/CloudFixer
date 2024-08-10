@@ -240,8 +240,8 @@ run_method_all() {
     episodic=False
     test_optim=AdamW
     params_to_adapt="LN BN GN"
-    test_lr=1e-4 # 1e-4 1e-3 1e-2
-    num_steps=10 # 1 3 5 10
+    test_lr=1e-4
+    num_steps=10
 
     for random_seed in ${SEED_LIST}; do
         for batch_size in ${BATCH_SIZE_LIST}; do

@@ -149,15 +149,6 @@ run_cloudfixer_all_experiments() {
                         dataset=modelnet40c_${corruption}_${severity}
                         dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
                         for method in ${METHOD_LIST}; do
-                            subsample=2048
-                            rotation=0.02
-                            if [[ "$corruption" == "occlusion" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "cutout" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "rotation" ]]; then
-                                rotation=0.05
-                            fi
                             mode=eval
                             batch_size=128
                             method="cloudfixer"

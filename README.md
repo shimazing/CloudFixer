@@ -80,7 +80,7 @@ This work was supported by the Institute for Information & Communications Techno
 
 ## Citation
 ```
-@inproceedings{cloudfixer,
+@inproceedings{shim2024cloudfixer,
   title={{CloudFixer: Test-Time Adaptation for 3D Point Clouds via Diffusion-Guided Geometric Transformation}},
   author={Shim, Hajin and Kim, Changhun and Yang, Eunho},
   booktitle={European Conference on Computer Vision (ECCV)},

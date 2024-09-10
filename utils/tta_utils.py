@@ -130,37 +130,73 @@ def configure_model(args, model):
         for n, p in model.module.named_parameters():
             if "class_head" in n:
                 p.requires_grad_(False)
+
+    if 'cloudfixer_o' in args.method:
+        model.eval()
+        model.requires_grad_(True)
+        for n, p in model.module.named_parameters():
+            if 'cls_head' in n:
+                p.requires_grad_(False)
+            if 'class_head' in n:
+                p.requires_grad_(False)
+            if 'classifier' in n:
+                p.requires_grad_(False)
+            if 'prediction' in n:
+                p.requires_grad_(False)
+        for n, p in model.named_parameters():
+            if 'cls_head' in n:
+                p.requires_grad_(False)
+            if 'class_head' in n:
+                p.requires_grad_(False)
+            if 'classifier' in n:
+                p.requires_grad_(False)
+            if 'prediction' in n:
+                p.requires_grad_(False)
     return model
 
 
 def collect_params(args, model, train_params):
     params, names = [], []
     for nm, m in model.named_modules():
-        if "all" in train_params:
+        if 'all' in train_params:
             for np, p in m.named_parameters():
-                p.requires_grad = True  # for SHOT
-                if not f"{nm}.{np}" in names:
-                    params.append(p)
-                    names.append(f"{nm}.{np}")
-        if "LN" in train_params:
+                if ('mate' in args.method and ('class_head' in np or 'class_head' in nm)):
+                    p.requires_grad = False
+                elif ('cloudfixer_o' in args.method and ('cls_head' in np or 'cls_head' in nm)):
+                    p.requires_grad = False
+                elif ('cloudfixer_o' in args.method and ('class_head' in np or 'class_head' in nm)):
+                    p.requires_grad = False
+                elif ('cloudfixer_o' in args.method and ('classifier' in np or 'classifier' in nm)):
+                    p.requires_grad = False
+                elif ('cloudfixer_o' in args.method and ('prediction' in np or 'prediction' in nm)):
+                    p.requires_grad = False
+                else:
+                    p.requires_grad = True # for SHOT
+                    if not f"{nm}.{np}" in names:
+                        params.append(p)
+                        names.append(f"{nm}.{np}")
+
+        if 'LN' in train_params:
             if isinstance(m, nn.LayerNorm):
                 for np, p in m.named_parameters():
-                    if np in ["weight", "bias"]:
+                    if np in ['weight', 'bias']:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-        if "BN" in train_params:
+        if 'BN' in train_params:
             if isinstance(m, nn.modules.batchnorm._BatchNorm):
                 for np, p in m.named_parameters():
-                    if np in ["weight", "bias"]:
+                    if np in ['weight', 'bias']:
                         params.append(p)
                         names.append(f"{nm}.{np}")
-        if "GN" in train_params:
+        if 'GN' in train_params:
             if isinstance(m, nn.GroupNorm):
                 for np, p in m.named_parameters():
-                    if np in ["weight", "bias"]:
+                    if np in ['weight', 'bias']:
                         params.append(p)
                         names.append(f"{nm}.{np}")
+    print(f"parameters to adapt: {names}")
     return params, names
+
 
 
 def safe_log(x, ver):

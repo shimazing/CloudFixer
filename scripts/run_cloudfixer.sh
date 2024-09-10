@@ -2,7 +2,7 @@
 wandb_usr=unknown
 
 # dataset
-DATASET_ROOT_DIR=../datasets
+DATASET_ROOT_DIR=../../datasets
 CHECKPOINT_DIR=checkpoints
 OUTPUT_DIR=outputs
 
@@ -23,25 +23,32 @@ diffusion_dir=${CHECKPOINT_DIR}/diffusion_model_transformer_modelnet40.npy
 lame_affinity=rbf
 lame_knn=3
 lame_max_steps=1
+
 # sar
 sar_ent_threshold=0.4
 sar_eps_threshold=0.05
+
 # memo
 memo_num_augs=64
 memo_bn_momentum=1/17
+
 # dua
 dua_mom_pre=0.1
 dua_min_mom=0.005
 dua_decay_factor=0.94
+
 # bn_stats
 bn_stats_prior=0
+
 # shot
 shot_pl_loss_weight=0.3
+
 # dda
 dda_steps=50
 dda_guidance_weight=6
 dda_lpf_method=fps
 dda_lpf_scale=4
+
 # cloudfixer
 t_min=0.02
 t_len=0.1
@@ -58,15 +65,16 @@ subsample=2048
 weighted_reg=True
 rotation=0.02
 vote=1
+
+# cloudfixer-o
+num_steps=1 # 0 TODO for tent # placeholder
+episodic=True # placeholder
+test_optim=AdamW # placeholder
+test_lr=1e-4 #
+params_to_adapt="LN GN BN" # placeholder
 ######################################################
 
 run_baselines() {
-    num_steps=0                # 0 TODO for tent # placeholder
-    episodic=False             # placeholder
-    test_optim=AdamW           # placeholder
-    test_lr=0.01               # TODO for tent 1e-4 # placeholder
-    params_to_adapt="LN GN BN" # placeholder
-
     python adapt.py \
         --t_min ${t_min} \
         --t_len ${t_len} \
@@ -131,44 +139,45 @@ run_baselines() {
         2>&1
 }
 
-run_cloudfixer_all_experiments() {
-    CLASSIFIER_LIST=(${classifier})
-    SEED_LIST="2"
-    BATCH_SIZE_LIST="128"
-    METHOD_LIST="cloudfixer"
+run_cloudfixer() {
+    mode=eval
+    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    out_path=${OUTPUT_DIR}
+    random_seed=2
+    batch_size=128
+
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    severity=5
     scenario=normal
     imb_ratio=1
-    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
-    SEVERITY_LIST="5"
 
-    for random_seed in ${SEED_LIST}; do
-        for batch_size in ${BATCH_SIZE_LIST}; do
-            for classifier in ${CLASSIFIER_LIST}; do
-                for corruption in ${CORRUPTION_LIST}; do
-                    for severity in ${SEVERITY_LIST}; do # "3 5"
-                        dataset=modelnet40c_${corruption}_${severity}
-                        dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
-                        for method in ${METHOD_LIST}; do
-                            subsample=2048
-                            rotation=0.02
-                            if [[ "$corruption" == "occlusion" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "cutout" ]]; then
-                                subsample=500
-                            elif [[ "$corruption" == "rotation" ]]; then
-                                rotation=0.05
-                            fi
-                            mode=eval
-                            batch_size=128
-                            method="cloudfixer"
-                            out_path=${OUTPUT_DIR}
-                            exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method}_seed_${random_seed}_batch_size_${batch_size}
-                            run_baselines
-                        done
-                    done
-                done
-            done
-        done
+    method=cloudfixer
+    vote=1
+    for corruption in ${CORRUPTION_LIST}; do
+        dataset=modelnet40c_${corruption}_${severity}
+        exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method}_vote_${vote}_seed_${random_seed}_batch_size_${batch_size}
+        run_baselines
+    done
+}
+
+run_cloudfixer_o() {
+    mode=eval
+    dataset_dir=${DATASET_ROOT_DIR}/modelnet40_c
+    out_path=${OUTPUT_DIR}
+    random_seed=2
+    batch_size=128
+
+    CORRUPTION_LIST="background cutout density density_inc distortion distortion_rbf distortion_rbf_inv gaussian impulse lidar occlusion rotation shear uniform upsampling"
+    severity=5
+    scenario=normal
+    imb_ratio=1
+
+    method=cloudfixer_o
+    vote=3
+    for corruption in ${CORRUPTION_LIST}; do
+        dataset=modelnet40c_${corruption}_${severity}
+        exp_name=eval_${scenario}_imb${imb_ratio}_classifier_${classifier}_dataset_${dataset}_method_${method}_vote_${vote}_seed_${random_seed}_batch_size_${batch_size}
+        run_baselines
     done
 }
 
@@ -182,9 +191,10 @@ wait_n() {
     fi
 }
 num_max_jobs=2
-GPUS=(0 1 2 3 4 5 6 7)
+GPUS=(0 1 2 3)
 NUM_GPUS=${#GPUS[@]}
-CUDA_VISIBLE_DEVICES="0,1,2,3,4,5,6,7"
+CUDA_VISIBLE_DEVICES="0,1,2,3"
 ##############################################
 
-run_cloudfixer_all_experiments
+run_cloudfixer
+run_cloudfixer_o

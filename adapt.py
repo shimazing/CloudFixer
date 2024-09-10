@@ -1,7 +1,5 @@
-import argparse
 from copy import deepcopy
 from tqdm import tqdm
-import wandb
 import yaml
 
 import numpy as np
@@ -11,7 +9,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, recall_score
 from chamfer_distance import ChamferDistance as chamfer_dist
-
 chamfer_dist_fn = chamfer_dist()
 
 from cfgs.cfgs_adapt import parse_arguments
@@ -191,19 +188,36 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
     global EMA, mom_pre, adaptation_time
 
     import time
-
     start = time.time()
 
     # input adaptation
     if "dda" in args.method:
         x_ori = x.clone()
         x = dda(args, diffusion_model, x, mask, ind)
+
     if "cloudfixer" in args.method:
         x_list = [
             cloudfixer(args, diffusion_model, x, mask, ind).detach().clone()
             for v in range(args.vote)
         ]
-        x = x_list[0]  # cloudfixer(args, diffusion_model, x, mask, ind)
+        x = x_list[0]
+
+    if "cloudfixer_o" in args.method:
+        x_ori = x.clone().detach()
+        x_list = (
+            cloudfixer(
+                args,
+                diffusion_model,
+                x.clone().detach().repeat(args.vote, 1, 1),
+                mask.repeat(args.vote, 1, 1),
+                ind.repeat(args.vote, 1),
+                verbose=args.verbose,
+            )
+            .detach()
+            .clone()
+            .chunk(args.vote)
+        )
+        x = x_list[0]
 
     # model adaptation
     for _ in range(1, args.num_steps + 1):
@@ -220,9 +234,18 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             _ = classifier(x)
         if "bn_stats" in args.method:
             _ = classifier(x)
+
         # model parameter adaptation
-        if set(["tent", "sar", "pl", "memo", "shot", "mate"]).intersection(args.method):
+        if set(["tent", "sar", "pl", "memo", "shot", "mate", "cloudfixer_o"]).intersection(args.method):
             optimizer.zero_grad()
+
+        if "cloudfixer_o" in args.method:
+            kl_loss = torch.nn.KLDivLoss(reduction="batchmean", log_target=True)
+            logits = classifier(torch.cat(x_list, dim=0))
+            logprobs = F.log_softmax(logits, dim=-1)
+            logprobs2 = F.log_softmax(classifier(torch.cat(x_list[1:] + x_list[:1], dim=0)), dim=-1)
+            loss = kl_loss(logprobs2, logprobs)
+            loss.backward()
         if "tent" in args.method:
             logits = classifier(x)
             loss = softmax_entropy(logits).mean()
@@ -307,7 +330,8 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
             loss_recon, _, _ = classifier(pts=points, classification_only=False)
             loss = loss_recon.mean()
             loss.backward()
-        if set(["tent", "sar", "pl", "memo", "shot", "mate"]).intersection(args.method):
+
+        if set(["tent", "sar", "pl", "memo", "shot", "mate", "cloudfixer_o"]).intersection(args.method):
             optimizer.step()
 
     end = time.time()
@@ -326,20 +350,21 @@ def forward_and_adapt(args, classifier, optimizer, diffusion_model, x, mask, ind
         ).log()
     elif "mate" in args.method:
         logits_after = classifier(pts=x.cuda(), classifiation_only=True)
-    elif "cloudfixer" in args.method:
-        probs = 0
-        for x_ in x_list:
-            probs = probs + classifier(x_).softmax(dim=-1)
-        probs /= args.vote
-        print("voting", args.vote)
-        logits_after = probs.log()
-    elif "mate" in args.method:
-        logits_after = classifier(pts=x.cuda(), classifiation_only=True)
     else:
         logits_after = classifier(x)
+    if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+        with torch.no_grad():
+            probs = 0
+            for x_ in x_list:
+                probs = probs + classifier(x_).softmax(dim=-1).detach()
+            probs /= args.vote
+            logits_after_vote = probs.log()
 
     if is_training:
         classifier.train()
+
+    if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+        return logits_after, logits_after_vote
     return logits_after
 
 
@@ -387,12 +412,7 @@ def main(args):
         )
 
     ########## load diffusion model ##########
-    if (
-        "pre_trans" in args.method
-        or "dda" in args.method
-        or "ours" in args.method
-        or "cloudfixer" in args.method
-    ):
+    if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
         model = get_model(args, device)
         if args.diffusion_dir is not None:
             model.load_state_dict(torch.load(args.diffusion_dir, map_location="cpu"))
@@ -400,6 +420,7 @@ def main(args):
         model = model.to(device).eval()
     else:
         model = None
+    print(f"{model=}")
 
     ########## load classifier ##########
     if args.classifier == "point2vec":
@@ -420,7 +441,7 @@ def main(args):
         ckpt = torch.load(args.classifier_dir, map_location="cpu")
         if "model_state" in ckpt:
             ckpt = ckpt["model_state"]
-        classifier.load_state_dict(ckpt)    
+        classifier.load_state_dict(ckpt)
     elif args.classifier == "pointNeXt":
         from classifier.openpoints.utils import EasyConfig, load_checkpoint
         from classifier.openpoints.models import build_model_from_cfg
@@ -443,13 +464,14 @@ def main(args):
     elif args.classifier == "pointMAE":
         from utils.config import cfg_from_yaml_file
         from utils import builder
+
         config = cfg_from_yaml_file("cfgs/cfgs_mate/tta/tta_modelnet.yaml")
         classifier = builder.model_builder(config.model)
         classifier.load_model_from_ckpt(args.classifier_dir, False)
         classifier.rotate = args.rotate
     else:
         raise ValueError("UNDEFINED CLASSIFIER")
-    
+
     if "pointMLP" not in args.classifier:
         classifier = nn.DataParallel(classifier)
     classifier = classifier.to(device).eval()
@@ -462,12 +484,13 @@ def main(args):
     original_classifier.eval().requires_grad_(False)
     classifier = configure_model(args, classifier)
     params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
+
     optimizer = setup_optimizer(args, params)
     original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(
         classifier, optimizer, None
     )
 
-    all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
+    all_gt_list, all_pred_before_list, all_pred_after_list, all_pred_after_vote_list = [], [], [], []
     for iter_idx, data in tqdm(enumerate(test_loader)):
         x = data[0].to(device)
         labels = data[1].to(device).flatten()
@@ -500,28 +523,40 @@ def main(args):
                 None,
             )
 
-        logits_before = original_classifier(x).detach()
-        logits_after = forward_and_adapt(
-            args, classifier, optimizer, model, x, mask=mask, ind=ind
-        ).detach()
+        with torch.no_grad():
+            logits_before = original_classifier(x).detach()
+        logits_after = forward_and_adapt(args, classifier, optimizer, model, x, mask=mask, ind=ind)
+        torch.cuda.empty_cache()
 
+        if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+            logits_after, logits_after_vote = logits_after
+            all_pred_after_vote_list.extend(logits_after_vote.argmax(dim=-1).cpu().tolist())
         all_pred_before_list.extend(logits_before.argmax(dim=-1).cpu().tolist())
         all_pred_after_list.extend(logits_after.argmax(dim=-1).cpu().tolist())
 
         io.cprint(f"batch idx: {iter_idx + 1}/{len(test_loader)}\n")
         io.cprint(f"cumulative metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
         io.cprint(f"cumulative metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+        if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+            io.cprint(f"cumulative metrics after adaptation vote | acc: {accuracy_score(all_gt_list, all_pred_after_vote_list):.4f}")
 
     io.cprint(f"final metrics before adaptation | acc: {accuracy_score(all_gt_list, all_pred_before_list):.4f}")
     io.cprint(f"final metrics after adaptation | acc: {accuracy_score(all_gt_list, all_pred_after_list):.4f}")
+    if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+        io.cprint(f"final metrics after adaptation vote | acc: {accuracy_score(all_gt_list, all_pred_after_vote_list):.4f}")
+    
     io.cprint(f"final metrics before adaptation | macro recall: {recall_score(all_gt_list, all_pred_before_list, average='macro'):.4f}")
     io.cprint(f"final metrics after adaptation | macro recall: {recall_score(all_gt_list, all_pred_after_list, average='macro'):.4f}")
+    if set(["cloudfixer", "cloudfixer_o"]).intersection(args.method):
+        io.cprint(f"final metrics after adaptation vote | macro recall: {recall_score(all_gt_list, all_pred_after_vote_list, average='macro'):.4f}")
+    
     io.cprint(f"total adaptation time: {adaptation_time}")
     return accuracy_score(all_gt_list, all_pred_after_list)
 
 
 def tune_tta_hparams(args):
     import itertools, random
+
     yaml_parent_dir = os.path.join(args.hparam_save_dir, args.classifier, args.dataset)
     yaml_dir = os.path.join(yaml_parent_dir, f"{'_'.join(args.method)}.yaml")
 
@@ -617,269 +652,9 @@ def tune_tta_hparams(args):
     io.cprint(f"best result hparam, test_acc: {best_hparam}, {best_acc}")
 
 
-@torch.no_grad()
-def vis(args):
-    device = torch.device("cuda" if args.cuda else "cpu")
-    set_seed(args.random_seed)  # set seed
-
-    ########## logging ##########
-    io = logging.IOStream(args)
-    io.cprint(args)
-    create_folders(args)
-    if args.no_wandb:
-        mode = "disabled"
-    else:
-        mode = "online" if args.online else "offline"
-    kwargs = {
-        "entity": args.wandb_usr,
-        "name": args.exp_name + "_vis",
-        "project": "adapt",
-        "config": args,
-        "settings": wandb.Settings(_disable_stats=True),
-        "reinit": True,
-        "mode": mode,
-    }
-    wandb.init(**kwargs)
-    wandb.save("*.txt")
-
-    ########## load dataset ##########
-    if args.dataset.startswith("modelnet40c"):
-        test_dataset = ModelNet40C(args, partition="test")
-    elif args.dataset in ["modelnet", "shapnet", "scannet"]:
-        test_dataset = PointDA10(args=args, partition="test")
-    else:
-        raise ValueError("UNDEFINED DATASET")
-    test_loader_vis = DataLoader(
-        test_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        drop_last=False,
-        sampler=ImbalancedDatasetSampler(test_dataset),
-    )
-
-    ########## load diffusion model ##########
-    if (
-        "pre_trans" in args.method
-        or "dda" in args.method
-        or "ours" in args.method
-        or "cloudfixer" in args.method
-    ):
-        model = get_model(args, device)
-        if args.diffusion_dir is not None:
-            model.load_state_dict(
-                torch.load(args.diffusion_dir, map_location="cpu")
-            )
-        model = nn.DataParallel(model)
-        model = model.to(device).eval()
-    else:
-        model = None
-
-    ########## load classifier ##########
-    # TODO: add model architectures
-    if args.classifier == "point2vec":
-        from classifier.point2vec.models import Point2VecClassification
-        from classifier.point2vec.utils.checkpoint import extract_model_checkpoint
-
-        classifier = Point2VecClassification()
-        classifier.cuda()
-        classifier.setup()
-        checkpoint = extract_model_checkpoint(
-            args.classifier_dir
-        )
-        missing_keys, unexpected_keys = classifier.load_state_dict(checkpoint, strict=False)  # type: ignore
-        print(f"Missing keys: {missing_keys}")
-        print(f"Unexpected keys: {unexpected_keys}")
-    elif args.classifier == "DGCNN":
-        classifier = models.DGCNNWrapper(
-            args.dataset, output_channels=len(np.unique(test_dataset.label_list))
-        )
-        classifier.load_state_dict(torch.load(args.classifier_dir, map_location="cpu"))
-    elif args.classifier == "pointNeXt":
-        from classifier.openpoints.utils import EasyConfig, load_checkpoint
-        from classifier.openpoints.models import build_model_from_cfg
-
-        cfg = EasyConfig()
-        cfg.load("cfgs/modelnet40_pointnext.yaml")
-        classifier = build_model_from_cfg(cfg.model)  # .to(cfg.rank)
-        load_checkpoint(
-            classifier,
-            pretrained_path=args.classifier_dir,
-        )
-    elif args.classifier == "pointMLP":
-        from classifier.pointMLP.models import pointMLP
-
-        classifier = pointMLP()
-        classifier = torch.nn.DataParallel(classifier)
-        classifier.load_state_dict(
-            torch.load(
-                args.classifier_dir,
-                map_location="cpu",
-            )["net"]
-        )
-    else:
-        raise ValueError("UNDEFINED CLASSIFIER")
-    if "pointMLP" not in args.classifier:
-        classifier = nn.DataParallel(classifier)
-    classifier = classifier.to(device).eval()
-
-    global EMA, mom_pre
-    EMA = None
-    mom_pre = args.dua_mom_pre
-
-    original_classifier = deepcopy(classifier)
-    original_classifier.eval().requires_grad_(False)
-    classifier = configure_model(args, classifier)
-    params, _ = collect_params(args, classifier, train_params=args.params_to_adapt)
-    optimizer = setup_optimizer(args, params)
-    original_classifier_state, original_optimizer_state, _ = copy_model_and_optimizer(
-        classifier, optimizer, None
-    )
-
-    all_gt_list, all_pred_before_list, all_pred_after_list = [], [], []
-    for batch_idx, data in tqdm(enumerate(test_loader_vis)):
-        x = data[0].to(device)
-        labels = data[1].to(device).flatten()
-        mask = data[2].to(device)
-        ind = data[3].to(device)  # original indices for duplicated point
-        io.cprint(f"ground truth labels: {labels}")
-
-        if args.adv_attack:
-            x = projected_gradient_descent(
-                args,
-                classifier,
-                x,
-                labels,
-                F.cross_entropy,
-                num_steps=10,
-                step_size=4e-3,
-                step_norm="inf",
-                eps=0.16,
-                eps_norm="inf",
-            )
-        all_gt_list.extend(labels.cpu().tolist())
-
-        rgbs_wMask = get_color(
-            x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy()
-        )
-        x_ori = x.detach()
-        rgbs_ori = get_color(x_ori.cpu().numpy())
-        # x_ori = ours(args, model, x, mask, ind, classifier)
-        if "cloudfixer" in args.method:
-            x = cloudfixer(args, model, x, mask, ind, verbose=True)
-        # rgbs = get_color(x.cpu().numpy())
-        rgbs = get_color(x.cpu().numpy(), mask=mask.bool().squeeze(-1).cpu().numpy())
-
-        for b in range(len(x_ori)):
-            obj3d = wandb.Object3D(
-                {
-                    "type": "lidar/beta",
-                    "points": np.concatenate(
-                        (x_ori[b].cpu().numpy().reshape(-1, 3), rgbs_ori[b]), axis=1
-                    ),
-                    "boxes": np.array(
-                        [
-                            {
-                                "corners": (
-                                    np.array(
-                                        [
-                                            [-1, -1, -1],
-                                            [-1, 1, -1],
-                                            [-1, -1, 1],
-                                            [1, -1, -1],
-                                            [1, 1, -1],
-                                            [-1, 1, 1],
-                                            [1, -1, 1],
-                                            [1, 1, 1],
-                                        ]
-                                    )
-                                    * 3
-                                ).tolist(),
-                                # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
-                                # "label": f'{labels[b]} {preds_label[b]}',
-                                "color": [123, 321, 111],  # ???
-                            }
-                        ]
-                    ),
-                }
-            )
-            wandb.log({f"pc": obj3d}, step=b, commit=False)
-
-            obj3d = wandb.Object3D(
-                {
-                    "type": "lidar/beta",
-                    "points": np.concatenate(
-                        (x[b].cpu().numpy().reshape(-1, 3), rgbs[b]), axis=1
-                    ),
-                    "boxes": np.array(
-                        [
-                            {
-                                "corners": (
-                                    np.array(
-                                        [
-                                            [-1, -1, -1],
-                                            [-1, 1, -1],
-                                            [-1, -1, 1],
-                                            [1, -1, -1],
-                                            [1, 1, -1],
-                                            [-1, 1, 1],
-                                            [1, -1, 1],
-                                            [1, 1, 1],
-                                        ]
-                                    )
-                                    * 3
-                                ).tolist(),
-                                # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
-                                # "label": f'{labels[b]} {preds_label[b]}',
-                                "color": [123, 321, 111],  # ???
-                            }
-                        ]
-                    ),
-                }
-            )
-            wandb.log({f"adapted": obj3d}, step=b, commit=False)
-
-            obj3d = wandb.Object3D(
-                {
-                    "type": "lidar/beta",
-                    "points": np.concatenate(
-                        (x_ori[b].cpu().numpy().reshape(-1, 3), rgbs_wMask[b]), axis=1
-                    ),
-                    "boxes": np.array(
-                        [
-                            {
-                                "corners": (
-                                    np.array(
-                                        [
-                                            [-1, -1, -1],
-                                            [-1, 1, -1],
-                                            [-1, -1, 1],
-                                            [1, -1, -1],
-                                            [1, 1, -1],
-                                            [-1, 1, 1],
-                                            [1, -1, 1],
-                                            [1, 1, 1],
-                                        ]
-                                    )
-                                    * 3
-                                ).tolist(),
-                                # "label": f'{labels[b]} {preds_label[b]} {preds_val[b]:.2f}',
-                                # "label": f'{labels[b]} {preds_label[b]}',
-                                "color": [123, 321, 111],
-                            }
-                        ]
-                    ),
-                }
-            )
-            wandb.log({f"masked pc": obj3d}, step=b, commit=False)
-        break
-    io.cprint("Visualization Done")
-
-
 if __name__ == "__main__":
     args = parse_arguments()
     if "eval" in args.mode:
         main(args)
-    if "vis" in args.mode:
-        vis(args)
     if "hparam_tune" in args.mode:
         tune_tta_hparams(args)

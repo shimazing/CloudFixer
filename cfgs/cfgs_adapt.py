@@ -109,6 +109,7 @@ def parse_arguments():
     parser.add_argument("--t", type=float, default=0.4)
 
     # cloudfixer hyperparameters
+    parser.add_argument('--verbose', type=eval, default=False)
     parser.add_argument("--input_lr", type=float, default=1e-2)
     parser.add_argument("--n_update", default=30, type=int)
     parser.add_argument("--rotation", default=0.1, type=float)

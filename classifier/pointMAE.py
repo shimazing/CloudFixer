@@ -19,7 +19,6 @@ from utils.chamfer_dist import ChamferDistanceL1, ChamferDistanceL2
 
 MODELS = registry.Registry("models")
 
-
 def build_model_from_cfg(cfg, **kwargs):
     """
     Build a dataset, defined by `dataset_name`.

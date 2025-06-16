@@ -1,5 +1,6 @@
 # CloudFixer: Test-Time Adaptation for 3D Point Clouds via Diffusion-Guided Geometric Transformation (ECCV 2024)
 [![arXiv](https://img.shields.io/badge/arXiv-2212.02802-b31b1b.svg)](https://arxiv.org/abs/2407.16193)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15671202.svg)](https://doi.org/10.5281/zenodo.15671202)
 
 
 
